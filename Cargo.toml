@@ -1,0 +1,45 @@
+[package]
+name = "embarch-study-designer"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Shared no_std data types (and the tools to work with them) for EmbArch hardware-in-the-loop studies, spanning embarch-api, embarch-core, and embarch-dev-bench firmware."
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+# Plain `rlib` for local dev/test and for embarch-core/embarch-api's Cargo
+# dependency use. Producing the actual staticlib dev-bench firmware links
+# (design.md §3 decision 7) needs a real cross-compilation target/panic
+# handler that don't exist yet (§7) — that build adds `--crate-type staticlib`
+# (or a `[lib] crate-type` override) once the toolchain is set up; requesting
+# it unconditionally here breaks a plain host `cargo build`, which has no
+# panic_handler to resolve for a final staticlib artifact.
+
+[dependencies]
+serde = { version = "1.0.228", default-features = false, features = ["derive"] }
+heapless = { version = "0.8", features = ["serde"] }
+postcard = { version = "1.1", default-features = false }
+crc = "3.3"
+
+[features]
+default = []
+# Enables std, only so `core-validation` can use floating-point/statistics helpers
+# from the standard library. embarch-api and dev-bench firmware never enable this.
+std = []
+# Gates the SignalCheck evaluation logic (design.md §3 decision 19) behind an
+# explicit feature only embarch-core's build turns on — embarch-api and dev-bench
+# firmware link the crate without it, so they see/serialize every SignalCheck
+# variant but never compile the code that evaluates one against real samples.
+core-validation = ["std"]
+# Exposes the extern "C" surface dev-bench firmware links against (design.md
+# §3 decisions 7, 23). Off by default so embarch-core/embarch-api (plain
+# Cargo dependents) don't carry unused #[no_mangle] symbols.
+ffi = []
+
+# design.md §3 decision 23: this crate is the build root when cross-compiled as
+# dev-bench firmware's FFI staticlib, so this profile setting is what actually
+# takes effect for that build (a dependency crate's own [profile.*] is otherwise
+# ignored by Cargo). panic=abort is also the correct default for a no_std target
+# with no unwinding runtime to begin with (§3 decision 5).
+[profile.release]
+panic = "abort"
