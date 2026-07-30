@@ -9,4 +9,7 @@
 /// Bump this alongside any change to a type in [`crate::study`],
 /// [`crate::result`], [`crate::validation`], [`crate::sample`], or
 /// [`crate::protocol`] that changes its wire representation.
-pub const STUDY_DESIGNER_SCHEMA_VERSION: u32 = 1;
+///
+/// v2 (embarch-dev-bench/design.md §3 decisions 7/18): added
+/// `DevBenchMessage::LogLine` and `HelloAck.firmware_version`.
+pub const STUDY_DESIGNER_SCHEMA_VERSION: u32 = 2;

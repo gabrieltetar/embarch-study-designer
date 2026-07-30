@@ -6,8 +6,10 @@
 //! by appending variants only, never reordering or removing one, so
 //! postcard's varint enum discriminant stays wire-compatible across additions.
 
+use heapless::String;
 use serde::{Deserialize, Serialize};
 
+use crate::limits::{MAX_FIRMWARE_VERSION_LEN, MAX_LOG_LINE_LEN};
 use crate::sample::Sample;
 
 /// Every message dev-bench sends or receives. Append-only (design.md §3
@@ -32,6 +34,10 @@ pub enum DevBenchMessage {
     HelloAck {
         schema_version: u32,
         compatible: bool,
+        /// Identifies which dev-bench firmware build replied (embarch-dev-bench/design.md
+        /// §3 decision 18) — e.g. `git describe` output, a board ID, a build timestamp, or
+        /// some combination; the exact contents are dev-bench build-tooling's own concern.
+        firmware_version: String<MAX_FIRMWARE_VERSION_LEN>,
     },
     /// Opens a continuous capture channel for a step. More than one channel
     /// can be open on the same step concurrently.
@@ -47,6 +53,10 @@ pub enum DevBenchMessage {
         step_index: u32,
         channel: StreamChannel,
     },
+    /// Dev-bench's own log output (embarch-dev-bench/design.md §3 decision 7) — travels as
+    /// a properly-framed message like everything else on this link rather than as raw
+    /// interleaved bytes on the shared serial line, which would corrupt COBS framing.
+    LogLine { text: String<MAX_LOG_LINE_LEN> },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

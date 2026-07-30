@@ -31,3 +31,12 @@ pub const MAX_VALIDATIONS_PER_STUDY: usize = 64;
 /// comfortably fit `rx_utc_ms` (up to 20 ASCII digits for a `u64`), a
 /// `MAX_NAME_LEN`-bounded step name, a formatted `value`, and separators.
 pub const MAX_CSV_ROW_LEN: usize = 96;
+/// `DevBenchMessage::LogLine.text` (embarch-dev-bench/design.md §3 decision
+/// 7); one free-text log line dev-bench sends to Core instead of raw
+/// interleaved bytes on the shared serial line.
+pub const MAX_LOG_LINE_LEN: usize = 128;
+/// `DevBenchMessage::HelloAck.firmware_version`
+/// (embarch-dev-bench/design.md §3 decision 18); a single free-form
+/// identifier (e.g. `git describe` output) for whichever dev-bench build
+/// replied to `Hello`.
+pub const MAX_FIRMWARE_VERSION_LEN: usize = 32;

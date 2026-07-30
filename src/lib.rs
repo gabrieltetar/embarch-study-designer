@@ -121,6 +121,20 @@ mod tests {
         let encoded = postcard::to_slice(&chunk, &mut buf).unwrap();
         let decoded: DevBenchMessage = postcard::from_bytes(encoded).unwrap();
         assert_eq!(chunk, decoded);
+
+        let hello_ack = DevBenchMessage::HelloAck {
+            schema_version: STUDY_DESIGNER_SCHEMA_VERSION,
+            compatible: true,
+            firmware_version: heapless::String::try_from("nrf54l15dk-g1a2b3c").unwrap(),
+        };
+        let encoded = postcard::to_slice(&hello_ack, &mut buf).unwrap();
+        let decoded: DevBenchMessage = postcard::from_bytes(encoded).unwrap();
+        assert_eq!(hello_ack, decoded);
+
+        let log_line = DevBenchMessage::LogLine { text: heapless::String::try_from("ble: connected").unwrap() };
+        let encoded = postcard::to_slice(&log_line, &mut buf).unwrap();
+        let decoded: DevBenchMessage = postcard::from_bytes(encoded).unwrap();
+        assert_eq!(log_line, decoded);
     }
 
     #[test]
