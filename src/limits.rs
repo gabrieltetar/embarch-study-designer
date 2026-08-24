@@ -40,3 +40,20 @@ pub const MAX_LOG_LINE_LEN: usize = 128;
 /// identifier (e.g. `git describe` output) for whichever dev-bench build
 /// replied to `Hello`.
 pub const MAX_FIRMWARE_VERSION_LEN: usize = 32;
+/// `DevBenchMessage::StreamChunkBatch.values` (design.md §3 decision 25);
+/// placeholder, chosen without real dev-bench UART throughput/framing
+/// numbers to size against (same caveat as this module's other constants).
+pub const MAX_BATCH_SAMPLES: usize = 32;
+/// `GattServiceInfo` entries per `StepResult.gatt_services` (design.md §3
+/// decisions 31/32, §4.3a); sized against real DUT firmware observed so far
+/// (`reference-dut-fw`'s `lib/ble/ble_def.h`/`ble.c` declares 2
+/// services today), with headroom for a DUT this crate hasn't seen yet.
+pub const MAX_DISCOVERED_SERVICES: usize = 8;
+/// `GattServiceInfo.characteristics` (design.md §4.3a); the same DUT's
+/// larger service (Sensor Data Service) declares up to 7 characteristics
+/// today (6 unconditional, 1 gated behind `CONFIG_AIR_TEMP_ENABLE`).
+pub const MAX_CHARS_PER_SERVICE: usize = 16;
+/// `StepResult.gatt_activity` (design.md §3 decision 32); provisional, same
+/// placeholder-but-concrete posture as every other constant in this module —
+/// design.md §7 carries the stack-safety risk this size implies for dev-bench.
+pub const MAX_GATT_ACTIVITY_RECORDS: usize = 32;

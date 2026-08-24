@@ -12,4 +12,14 @@
 ///
 /// v2 (embarch-dev-bench/design.md §3 decisions 7/18): added
 /// `DevBenchMessage::LogLine` and `HelloAck.firmware_version`.
-pub const STUDY_DESIGNER_SCHEMA_VERSION: u32 = 2;
+///
+/// v3 (decisions 24/25/27): `Hello` loses `steps_crc` (moved to
+/// `StudyStart`); added `DevBenchMessage::StudyStart`/`StepResult`/
+/// `StudyDone`/`StreamChunkBatch`; `Sample` gained `unit`/`channel_id`.
+///
+/// v4 (decisions 31/32): added `Action::GattDiscover`/`GattMonitorAll` and
+/// the matching `StepResult.gatt_services`/`gatt_activity` fields (§4.3a).
+/// One bump covering both new `Action` variants and both new `StepResult`
+/// fields together, same one-bump-per-pass discipline v2's
+/// `LogLine`+`firmware_version` pairing already established.
+pub const STUDY_DESIGNER_SCHEMA_VERSION: u32 = 4;

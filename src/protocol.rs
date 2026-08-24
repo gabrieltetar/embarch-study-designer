@@ -6,11 +6,15 @@
 //! by appending variants only, never reordering or removing one, so
 //! postcard's varint enum discriminant stays wire-compatible across additions.
 
-use heapless::String;
+use heapless::{String, Vec};
 use serde::{Deserialize, Serialize};
 
-use crate::limits::{MAX_FIRMWARE_VERSION_LEN, MAX_LOG_LINE_LEN};
-use crate::sample::Sample;
+use crate::limits::{
+    MAX_BATCH_SAMPLES, MAX_FIRMWARE_VERSION_LEN, MAX_LOG_LINE_LEN, MAX_STEPS_PER_STUDY,
+};
+use crate::result::StepResult;
+use crate::sample::{Sample, Unit};
+use crate::study::Step;
 
 /// Every message dev-bench sends or receives. Append-only (design.md §3
 /// decision 10) — do not reorder or remove variants once this ships.
@@ -27,9 +31,6 @@ pub enum DevBenchMessage {
         /// offset from this on every `Hello` (design.md §3 decision 12),
         /// which is what makes `Sample::rx_utc_ms` meaningful.
         host_utc_ms: u64,
-        /// design.md §3 decision 17's integrity seal, folded into this
-        /// handshake rather than a separate message.
-        steps_crc: u32,
     },
     HelloAck {
         schema_version: u32,
@@ -57,6 +58,43 @@ pub enum DevBenchMessage {
     /// a properly-framed message like everything else on this link rather than as raw
     /// interleaved bytes on the shared serial line, which would corrupt COBS framing.
     LogLine { text: String<MAX_LOG_LINE_LEN> },
+    /// Sent by Core exactly once, immediately after the `Hello`/`HelloAck`
+    /// handshake completes — the whole `Study.steps` vector transferred in
+    /// one postcard-encoded message rather than streamed step-by-step
+    /// (design.md §3 decision 24). `steps_crc` travels here rather than on
+    /// `Hello` (design.md §3 decision 17's integrity seal), since `Hello`
+    /// itself precedes any `Study` being submitted.
+    StudyStart {
+        steps: Vec<Step, MAX_STEPS_PER_STUDY>,
+        steps_crc: u32,
+    },
+    /// Sent by dev-bench as each step completes, streaming results back
+    /// incrementally rather than batched at the end (design.md §3 decision
+    /// 24). `step_index` correlates back to `StudyStart.steps`' array
+    /// position (design.md §3 decision 14).
+    StepResult {
+        step_index: u32,
+        result: StepResult,
+    },
+    /// Sent by dev-bench exactly once, after the last step it actually ran
+    /// (design.md §3 decision 24) — `completed` distinguishes a `Study` that
+    /// ran to its natural end from one aborted early by a failing step with
+    /// `continue_on_fail: false`.
+    StudyDone { completed: bool },
+    /// A batched sibling of `StreamChunk` (design.md §3 decision 25):
+    /// several evenly-spaced samples from the same channel in one message,
+    /// reducing per-sample framing/encoding overhead on a UART link.
+    /// `base_utc_ms` + `sample_interval_ms` reconstruct each sample's own
+    /// `rx_utc_ms` (`base_utc_ms + i * sample_interval_ms`); `unit` and
+    /// `channel_id` disambiguate the samples the same way `Sample::unit`/
+    /// `Sample::channel_id` do (design.md §3 decision 27).
+    StreamChunkBatch {
+        base_utc_ms: u64,
+        sample_interval_ms: u32,
+        unit: Unit,
+        channel_id: u8,
+        values: Vec<f32, MAX_BATCH_SAMPLES>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

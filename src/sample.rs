@@ -20,17 +20,50 @@ use crate::limits::MAX_CSV_ROW_LEN;
 /// `value`'s real-world shape (a single scalar vs. multiple hardware-specific
 /// fields, e.g. separate current/voltage) is still open per design.md §7;
 /// appending fields later is a version-bumped wire change like any other.
+///
+/// `unit`/`channel_id` (design.md §3 decision 27) disambiguate `value`: which
+/// physical quantity it is, and which of possibly several concurrent
+/// hardware channels it came from (e.g. more than one power rail sampled at
+/// once).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Sample {
     pub rx_utc_ms: u64,
     pub value: f32,
+    pub unit: Unit,
+    pub channel_id: u8,
+}
+
+/// The physical quantity `Sample::value` is measured in (design.md §3
+/// decision 27). Append-only, same wire-compatibility rule as
+/// `DevBenchMessage` (design.md §3 decision 10).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Unit {
+    Milliamps,
+    Volts,
+    Milliwatts,
+    Raw,
+}
+
+impl Unit {
+    /// This `Unit`'s CSV cell rendering: its variant name, lowercased, with
+    /// no quoting (design.md §4.7 leaves the exact formatting to this crate;
+    /// lowercasing the variant name is the simplest choice consistent with
+    /// how `to_csv_row` renders every other field verbatim).
+    const fn as_csv_str(self) -> &'static str {
+        match self {
+            Unit::Milliamps => "milliamps",
+            Unit::Volts => "volts",
+            Unit::Milliwatts => "milliwatts",
+            Unit::Raw => "raw",
+        }
+    }
 }
 
 impl Sample {
     /// Header row for `data.csv`/`waveform.csv` (design.md §5.2), written
     /// once per file.
     pub const fn csv_header() -> &'static str {
-        "rx_utc_ms,step_name,value"
+        "rx_utc_ms,step_name,value,unit,channel_id"
     }
 
     /// Renders this sample as one CSV row, given the step name Core already
@@ -46,7 +79,16 @@ impl Sample {
     /// truncated CSV row is worse than a dropped one.
     pub fn to_csv_row(&self, step_name: &str) -> Option<String<MAX_CSV_ROW_LEN>> {
         let mut row = String::new();
-        write!(row, "{},{},{}", self.rx_utc_ms, step_name, self.value).ok()?;
+        write!(
+            row,
+            "{},{},{},{},{}",
+            self.rx_utc_ms,
+            step_name,
+            self.value,
+            self.unit.as_csv_str(),
+            self.channel_id
+        )
+        .ok()?;
         Some(row)
     }
 }

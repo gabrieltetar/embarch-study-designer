@@ -23,6 +23,9 @@
 pub mod crc;
 #[cfg(feature = "ffi")]
 pub mod ffi;
+pub mod gatt;
+#[cfg(feature = "gatt-extract")]
+pub mod gatt_extract;
 pub mod ids;
 pub mod limits;
 pub mod protocol;
@@ -35,10 +38,13 @@ pub mod study;
 pub mod validation;
 
 pub use crc::{steps_crc, StepTooLargeError};
+pub use gatt::{GattActivityRecord, GattCharacteristicInfo, GattServiceInfo};
+#[cfg(feature = "gatt-extract")]
+pub use gatt_extract::{ZephyrBleDefExtractor, ExtractError, GattConfigExtractor};
 pub use ids::{BleAddress, BleAddressKind, Uuid};
 pub use protocol::{DevBenchMessage, StreamChannel};
 pub use result::{Outcome, StepResult, StudyResult};
-pub use sample::Sample;
+pub use sample::{Sample, Unit};
 pub use schema_version::STUDY_DESIGNER_SCHEMA_VERSION;
 pub use study::{Action, BleRole, GattOperation, PowerSampleWindow, Step, Study};
 pub use validation::{
@@ -110,14 +116,15 @@ mod tests {
         let hello = DevBenchMessage::Hello {
             schema_version: STUDY_DESIGNER_SCHEMA_VERSION,
             host_utc_ms: 1_753_000_000_000,
-            steps_crc: 0xDEAD_BEEF,
         };
         let mut buf = [0u8; 64];
         let encoded = postcard::to_slice(&hello, &mut buf).unwrap();
         let decoded: DevBenchMessage = postcard::from_bytes(encoded).unwrap();
         assert_eq!(hello, decoded);
 
-        let chunk = DevBenchMessage::StreamChunk { sample: Sample { rx_utc_ms: 42, value: 3.3 } };
+        let chunk = DevBenchMessage::StreamChunk {
+            sample: Sample { rx_utc_ms: 42, value: 3.3, unit: Unit::Milliamps, channel_id: 0 },
+        };
         let encoded = postcard::to_slice(&chunk, &mut buf).unwrap();
         let decoded: DevBenchMessage = postcard::from_bytes(encoded).unwrap();
         assert_eq!(chunk, decoded);
@@ -135,14 +142,62 @@ mod tests {
         let encoded = postcard::to_slice(&log_line, &mut buf).unwrap();
         let decoded: DevBenchMessage = postcard::from_bytes(encoded).unwrap();
         assert_eq!(log_line, decoded);
+
+        let study = sample_study();
+        let mut big_buf = [0u8; 2048];
+        let study_start =
+            DevBenchMessage::StudyStart { steps: study.steps.clone(), steps_crc: study.steps_crc };
+        let encoded = postcard::to_slice(&study_start, &mut big_buf).unwrap();
+        let decoded: DevBenchMessage = postcard::from_bytes(encoded).unwrap();
+        assert_eq!(study_start, decoded);
+
+        let step_result = DevBenchMessage::StepResult {
+            step_index: 0,
+            result: StepResult {
+                step_name: heapless::String::try_from("connect").unwrap(),
+                outcome: Outcome::Pass,
+                captured_data: None,
+                power_samples_ref: None,
+                waveform_ref: None,
+                gatt_services: None,
+                gatt_activity: None,
+            },
+        };
+        let encoded = postcard::to_slice(&step_result, &mut buf).unwrap();
+        let decoded: DevBenchMessage = postcard::from_bytes(encoded).unwrap();
+        assert_eq!(step_result, decoded);
+
+        let study_done = DevBenchMessage::StudyDone { completed: true };
+        let encoded = postcard::to_slice(&study_done, &mut buf).unwrap();
+        let decoded: DevBenchMessage = postcard::from_bytes(encoded).unwrap();
+        assert_eq!(study_done, decoded);
+
+        let mut values: HVec<f32, { limits::MAX_BATCH_SAMPLES }> = HVec::new();
+        values.push(1.0).unwrap();
+        values.push(2.0).unwrap();
+        let chunk_batch = DevBenchMessage::StreamChunkBatch {
+            base_utc_ms: 1_753_000_000_000,
+            sample_interval_ms: 10,
+            unit: Unit::Volts,
+            channel_id: 1,
+            values,
+        };
+        let encoded = postcard::to_slice(&chunk_batch, &mut buf).unwrap();
+        let decoded: DevBenchMessage = postcard::from_bytes(encoded).unwrap();
+        assert_eq!(chunk_batch, decoded);
     }
 
     #[test]
     fn sample_csv_row_matches_header_shape() {
-        let sample = Sample { rx_utc_ms: 1_753_000_000_123, value: 3.301 };
+        let sample = Sample {
+            rx_utc_ms: 1_753_000_000_123,
+            value: 3.301,
+            unit: Unit::Milliamps,
+            channel_id: 2,
+        };
         let row = sample.to_csv_row("advertise").unwrap();
-        assert_eq!(row.as_str(), "1753000000123,advertise,3.301");
-        assert_eq!(Sample::csv_header(), "rx_utc_ms,step_name,value");
+        assert_eq!(row.as_str(), "1753000000123,advertise,3.301,milliamps,2");
+        assert_eq!(Sample::csv_header(), "rx_utc_ms,step_name,value,unit,channel_id");
     }
 
     #[test]
@@ -150,5 +205,128 @@ mod tests {
         let buf = [b'x'; limits::MAX_NAME_LEN + 1];
         let too_long = core::str::from_utf8(&buf).unwrap();
         assert!(heapless::String::<{ limits::MAX_NAME_LEN }>::try_from(too_long).is_err());
+    }
+
+    // design.md §3 decisions 31/32/33, embarch-study-designer/milestone-9.md
+    // §3.1-3.4: the GATT-discovery types, the two new `Action` variants, and
+    // `StepResult`'s two new fields all round-trip through both postcard
+    // (the Core<->dev-bench wire format) and serde_json (the
+    // embarch-api/events.json path, §3 decision 3's format-agnostic stance).
+
+    fn sample_gatt_services() -> HVec<crate::gatt::GattServiceInfo, { limits::MAX_DISCOVERED_SERVICES }> {
+        let mut chars: HVec<crate::gatt::GattCharacteristicInfo, { limits::MAX_CHARS_PER_SERVICE }> =
+            HVec::new();
+        chars
+            .push(crate::gatt::GattCharacteristicInfo { uuid: Uuid([1u8; 16]), properties: 0x12 })
+            .unwrap();
+        chars
+            .push(crate::gatt::GattCharacteristicInfo { uuid: Uuid([2u8; 16]), properties: 0x0a })
+            .unwrap();
+
+        let mut services: HVec<crate::gatt::GattServiceInfo, { limits::MAX_DISCOVERED_SERVICES }> =
+            HVec::new();
+        services
+            .push(crate::gatt::GattServiceInfo { uuid: Uuid([0u8; 16]), characteristics: chars })
+            .unwrap();
+        services
+    }
+
+    #[test]
+    fn gatt_service_info_round_trips_through_postcard_and_json() {
+        let services = sample_gatt_services();
+
+        let mut buf = [0u8; 512];
+        let encoded = postcard::to_slice(&services, &mut buf).unwrap();
+        let decoded: HVec<crate::gatt::GattServiceInfo, { limits::MAX_DISCOVERED_SERVICES }> =
+            postcard::from_bytes(encoded).unwrap();
+        assert_eq!(services, decoded);
+
+        let json = serde_json::to_string(&services).unwrap();
+        let decoded: HVec<crate::gatt::GattServiceInfo, { limits::MAX_DISCOVERED_SERVICES }> =
+            serde_json::from_str(&json).unwrap();
+        assert_eq!(services, decoded);
+    }
+
+    #[test]
+    fn gatt_activity_record_round_trips_through_postcard_and_json() {
+        let mut payload: HVec<u8, { limits::MAX_PAYLOAD_LEN }> = HVec::new();
+        payload.extend_from_slice(&[0xAB, 0xCD, 0xEF]).unwrap();
+        let record = crate::gatt::GattActivityRecord {
+            rx_utc_ms: 1_753_000_000_500,
+            characteristic_index: 3,
+            payload,
+        };
+
+        let mut buf = [0u8; 512];
+        let encoded = postcard::to_slice(&record, &mut buf).unwrap();
+        let decoded: crate::gatt::GattActivityRecord = postcard::from_bytes(encoded).unwrap();
+        assert_eq!(record, decoded);
+
+        let json = serde_json::to_string(&record).unwrap();
+        let decoded: crate::gatt::GattActivityRecord = serde_json::from_str(&json).unwrap();
+        assert_eq!(record, decoded);
+    }
+
+    #[test]
+    fn gatt_discover_and_monitor_all_actions_round_trip() {
+        for action in [Action::GattDiscover {}, Action::GattMonitorAll {}] {
+            let mut buf = [0u8; 64];
+            let encoded = postcard::to_slice(&action, &mut buf).unwrap();
+            let decoded: Action = postcard::from_bytes(encoded).unwrap();
+            assert_eq!(action, decoded);
+
+            let json = serde_json::to_string(&action).unwrap();
+            let decoded: Action = serde_json::from_str(&json).unwrap();
+            assert_eq!(action, decoded);
+        }
+    }
+
+    #[test]
+    fn step_result_gatt_fields_round_trip_and_default_on_missing_json() {
+        let result = StepResult {
+            step_name: heapless::String::try_from("discover").unwrap(),
+            outcome: Outcome::Pass,
+            captured_data: None,
+            power_samples_ref: None,
+            waveform_ref: None,
+            gatt_services: Some(sample_gatt_services()),
+            gatt_activity: None,
+        };
+
+        let mut buf = [0u8; 1024];
+        let encoded = postcard::to_slice(&result, &mut buf).unwrap();
+        let decoded: StepResult = postcard::from_bytes(encoded).unwrap();
+        assert_eq!(result, decoded);
+
+        let json = serde_json::to_string(&result).unwrap();
+        let decoded: StepResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(result, decoded);
+
+        // A `StepResult` JSON predating decision 31/32 (no `gatt_services`/
+        // `gatt_activity` keys at all) still deserializes, per `#[serde(default)]`
+        // — this is the specific claim milestone-9.md §2's scope note makes.
+        let legacy_json = r#"{
+            "step_name": "connect",
+            "outcome": "Pass",
+            "captured_data": null,
+            "power_samples_ref": null,
+            "waveform_ref": null
+        }"#;
+        let decoded: StepResult = serde_json::from_str(legacy_json).unwrap();
+        assert_eq!(decoded.gatt_services, None);
+        assert_eq!(decoded.gatt_activity, None);
+    }
+
+    #[test]
+    fn data_channel_gatt_activity_round_trips() {
+        let channel = DataChannel::GattActivity;
+        let mut buf = [0u8; 16];
+        let encoded = postcard::to_slice(&channel, &mut buf).unwrap();
+        let decoded: DataChannel = postcard::from_bytes(encoded).unwrap();
+        assert_eq!(channel, decoded);
+
+        let json = serde_json::to_string(&channel).unwrap();
+        let decoded: DataChannel = serde_json::from_str(&json).unwrap();
+        assert_eq!(channel, decoded);
     }
 }

@@ -35,6 +35,12 @@ pub enum DataChannel {
     /// A `GattOperation::StreamCapture` step's output, streamed into
     /// `waveform.csv` (design.md §3 decision 21).
     SensorWaveform,
+    /// A `GattMonitorAll` step's `StepResult.gatt_activity` (design.md §3
+    /// decision 32). Added alongside that decision for future use — no
+    /// `PostHocCheck` against it is authored yet (Milestone 3's own
+    /// Definition of Done only requires the data to land in `events.json`,
+    /// not a content assertion against it).
+    GattActivity,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

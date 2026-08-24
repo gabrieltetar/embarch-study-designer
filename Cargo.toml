@@ -20,6 +20,23 @@ serde = { version = "1.0.228", default-features = false, features = ["derive"] }
 heapless = { version = "0.8", features = ["serde"] }
 postcard = { version = "1.1", default-features = false }
 crc = "3.3"
+# Only pulled in by the `gatt-extract` feature's std-only authoring-time tool
+# (design.md §3 decision 33) — never linked by dev-bench firmware or by
+# embarch-core/embarch-api's plain Cargo-dependency use.
+regex = { version = "1", optional = true }
+serde_json = { version = "1", optional = true }
+
+[dev-dependencies]
+# Used by this crate's own round-trip tests to confirm every wire type also
+# serializes/deserializes through the embarch-api/events.json JSON path
+# (design.md §3 decision 3's format-agnostic stance), independent of the
+# `gatt-extract` feature.
+serde_json = "1"
+
+[[bin]]
+name = "extract-gatt-config"
+path = "tools/extract_gatt_config.rs"
+required-features = ["gatt-extract"]
 
 [features]
 default = []
@@ -35,6 +52,12 @@ core-validation = ["std"]
 # §3 decisions 7, 23). Off by default so embarch-core/embarch-api (plain
 # Cargo dependents) don't carry unused #[no_mangle] symbols.
 ffi = []
+# The static GATT-config extraction tool (design.md §3 decision 33): the
+# `GattConfigExtractor` trait, `ZephyrBleDefExtractor`, and the
+# `extract-gatt-config` CLI binary. std-only (filesystem access) — off by
+# default so dev-bench firmware and embarch-core/embarch-api's plain
+# Cargo-dependency use never carry `regex`/`serde_json`/std.
+gatt-extract = ["std", "dep:regex", "dep:serde_json"]
 
 # design.md §3 decision 23: this crate is the build root when cross-compiled as
 # dev-bench firmware's FFI staticlib, so this profile setting is what actually

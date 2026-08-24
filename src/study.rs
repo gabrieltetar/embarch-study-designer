@@ -64,6 +64,20 @@ pub enum Action {
         characteristic_uuid: Uuid,
         operation: GattOperation,
     },
+    /// Walks the connected DUT's entire GATT table via wildcard discovery
+    /// (every primary service, every characteristic, each characteristic's
+    /// raw ATT properties byte) rather than requiring a caller to already
+    /// know a `service_uuid`/`characteristic_uuid` pair. Reports its result
+    /// in `StepResult.gatt_services` (§4.3a); doesn't subscribe or capture
+    /// anything itself. design.md §3 decision 31.
+    GattDiscover {},
+    /// Runs the same discovery as `GattDiscover` internally, then subscribes
+    /// to every characteristic whose discovered properties include Notify or
+    /// Indicate, then captures every notification/indication that arrives
+    /// until the step's `timeout_ms` expires. Reports both `gatt_services`
+    /// and `gatt_activity` (§4.3a) — self-sufficient, doesn't depend on a
+    /// preceding `GattDiscover` step's result. design.md §3 decision 32.
+    GattMonitorAll {},
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
