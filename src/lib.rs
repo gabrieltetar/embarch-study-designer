@@ -28,7 +28,11 @@ pub mod gatt;
 pub mod gatt_extract;
 pub mod ids;
 pub mod limits;
+#[cfg(feature = "study-ui")]
+pub mod merged_actions;
 pub mod protocol;
+#[cfg(feature = "study-ui")]
+pub mod registry;
 pub mod result;
 pub mod sample;
 pub mod schema_version;
@@ -42,7 +46,14 @@ pub use gatt::{GattActivityRecord, GattCharacteristicInfo, GattServiceInfo};
 #[cfg(feature = "gatt-extract")]
 pub use gatt_extract::{ZephyrBleDefExtractor, ExtractError, GattConfigExtractor};
 pub use ids::{BleAddress, BleAddressKind, Uuid};
+#[cfg(feature = "study-ui")]
+pub use merged_actions::{merge_actions, BuiltInAction, DiscoverySources, MergedAction};
 pub use protocol::{DevBenchMessage, StreamChannel};
+#[cfg(feature = "study-ui")]
+pub use registry::{
+    ActionField, ActionFieldValue, ActionRegistry, RegisteredAction, RegisteredOperation,
+    RegistryError,
+};
 pub use result::{Outcome, StepResult, StudyResult};
 pub use sample::{Sample, Unit};
 pub use schema_version::STUDY_DESIGNER_SCHEMA_VERSION;

@@ -25,6 +25,11 @@ crc = "3.3"
 # embarch-core/embarch-api's plain Cargo-dependency use.
 regex = { version = "1", optional = true }
 serde_json = { version = "1", optional = true }
+# Only pulled in by the `study-ui` feature (design.md §3 decisions 34/35,
+# milestone-11.md) -- the custom-action registry's on-disk format, and never
+# linked by dev-bench firmware or embarch-core/embarch-api's plain
+# Cargo-dependency use, same posture as `gatt-extract`'s own dependencies.
+toml = { version = "0.8", optional = true }
 
 [dev-dependencies]
 # Used by this crate's own round-trip tests to confirm every wire type also
@@ -58,6 +63,11 @@ ffi = []
 # default so dev-bench firmware and embarch-core/embarch-api's plain
 # Cargo-dependency use never carry `regex`/`serde_json`/std.
 gatt-extract = ["std", "dep:regex", "dep:serde_json"]
+# The Study Designer UI's own registry + merged-action-list logic (design.md
+# §3 decisions 34/35, milestone-11.md §3.1/§3.2). `std`-only (file I/O) --
+# off by default, same reasoning as `gatt-extract`. The UI binary itself
+# (milestone-11.md §3.3 onward) is added once that step lands.
+study-ui = ["std", "dep:toml"]
 
 # design.md §3 decision 23: this crate is the build root when cross-compiled as
 # dev-bench firmware's FFI staticlib, so this profile setting is what actually
