@@ -39,6 +39,8 @@ pub mod schema_version;
 #[cfg(feature = "core-validation")]
 pub mod signal;
 pub mod study;
+#[cfg(feature = "study-ui")]
+pub mod study_builder;
 pub mod validation;
 
 pub use crc::{steps_crc, StepTooLargeError};
@@ -58,6 +60,8 @@ pub use result::{Outcome, StepResult, StudyResult};
 pub use sample::{Sample, Unit};
 pub use schema_version::STUDY_DESIGNER_SCHEMA_VERSION;
 pub use study::{Action, BleRole, GattOperation, PowerSampleWindow, Step, Study};
+#[cfg(feature = "study-ui")]
+pub use study_builder::{build_study, BuildStudyError, BuiltInActionKind, RoleChoice, RowAction, TableRow};
 pub use validation::{
     ContentValidity, DataChannel, ExpectedValue, PostHocCheck, PostHocValidation, SignalCheck,
     ValidationResult, ValidationSource,

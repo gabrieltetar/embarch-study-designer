@@ -54,8 +54,12 @@ pub enum MergedAction {
     /// A characteristic some discovery source found, but nobody has
     /// registered an action against yet — the UI's own prompt to route the
     /// engineer to the registration form (milestone-11.md §3.4), not
-    /// something a Study row can be built from directly.
-    Unregistered { uuid: Uuid, properties: u8, sources: DiscoverySources },
+    /// something a Study row can be built from directly. `service_uuid` is
+    /// carried alongside `uuid` since registering an action against this
+    /// characteristic needs both (`Action::DataExchange` requires a
+    /// `service_uuid` and a `characteristic_uuid`, not the characteristic
+    /// alone).
+    Unregistered { service_uuid: Uuid, uuid: Uuid, properties: u8, sources: DiscoverySources },
 }
 
 /// Merges built-in actions, live discovery, static extraction, and the
@@ -68,7 +72,7 @@ pub fn merge_actions(
     static_extraction: Option<&[GattServiceInfo]>,
     registry: &ActionRegistry,
 ) -> Vec<MergedAction> {
-    let mut sources_by_uuid: HashMap<Uuid, (u8, DiscoverySources)> = HashMap::new();
+    let mut sources_by_uuid: HashMap<Uuid, (Uuid, u8, DiscoverySources)> = HashMap::new();
     let mut order: Vec<Uuid> = Vec::new();
 
     let mut record = |services: &[GattServiceInfo], mark: fn(&mut DiscoverySources)| {
@@ -76,9 +80,9 @@ pub fn merge_actions(
             for chrc in &service.characteristics {
                 let entry = sources_by_uuid.entry(chrc.uuid).or_insert_with(|| {
                     order.push(chrc.uuid);
-                    (chrc.properties, DiscoverySources::default())
+                    (service.uuid, chrc.properties, DiscoverySources::default())
                 });
-                mark(&mut entry.1);
+                mark(&mut entry.2);
             }
         }
     };
@@ -106,8 +110,8 @@ pub fn merge_actions(
             // detected too.
             continue;
         }
-        let (properties, sources) = sources_by_uuid[&uuid];
-        result.push(MergedAction::Unregistered { uuid, properties, sources });
+        let (service_uuid, properties, sources) = sources_by_uuid[&uuid];
+        result.push(MergedAction::Unregistered { service_uuid, uuid, properties, sources });
     }
 
     result
@@ -148,14 +152,15 @@ mod tests {
         let unregistered: Vec<_> = merged
             .iter()
             .filter_map(|a| match a {
-                MergedAction::Unregistered { uuid, properties, sources } => {
-                    Some((*uuid, *properties, *sources))
+                MergedAction::Unregistered { service_uuid, uuid, properties, sources } => {
+                    Some((*service_uuid, *uuid, *properties, *sources))
                 }
                 _ => None,
             })
             .collect();
         assert_eq!(unregistered.len(), 1);
-        let (found_uuid, properties, sources) = unregistered[0];
+        let (found_service_uuid, found_uuid, properties, sources) = unregistered[0];
+        assert_eq!(found_service_uuid, uuid(1));
         assert_eq!(found_uuid, uuid(2));
         assert_eq!(properties, 0x02);
         assert!(sources.live);
@@ -168,6 +173,7 @@ mod tests {
         let registry = ActionRegistry {
             actions: vec![RegisteredAction {
                 name: "do_the_thing".to_string(),
+                service_uuid: uuid(1),
                 uuid: uuid(2),
                 operation: RegisteredOperation::Write,
                 fields: vec![],
@@ -193,6 +199,7 @@ mod tests {
         let registry = ActionRegistry {
             actions: vec![RegisteredAction {
                 name: "known_from_before".to_string(),
+                service_uuid: uuid(8),
                 uuid: uuid(9),
                 operation: RegisteredOperation::Read,
                 fields: vec![],

@@ -72,6 +72,10 @@ pub struct ActionField {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RegisteredAction {
     pub name: String,
+    /// The primary service this characteristic belongs to — `Action::DataExchange`
+    /// (the `Action` variant every registered action ultimately becomes,
+    /// `src/study_builder.rs`) needs both, not `uuid` alone.
+    pub service_uuid: Uuid,
     pub uuid: Uuid,
     pub operation: RegisteredOperation,
     #[serde(default)]
@@ -195,6 +199,7 @@ mod tests {
         ActionRegistry {
             actions: vec![RegisteredAction {
                 name: "example_write".to_string(),
+                service_uuid: Uuid([0xAA; 16]),
                 uuid: Uuid([0xAB; 16]),
                 operation: RegisteredOperation::Write,
                 fields: vec![ActionField {
