@@ -11,6 +11,8 @@
 
 use std::collections::HashMap;
 
+use serde::Serialize;
+
 use crate::gatt::GattServiceInfo;
 use crate::ids::Uuid;
 use crate::registry::{ActionRegistry, RegisteredAction};
@@ -21,7 +23,8 @@ use crate::registry::{ActionRegistry, RegisteredAction};
 /// knowing a raw UUID + payload, exactly what decisions 34/35 exist to
 /// avoid requiring; it's still a real `Action` variant (`study::Action`),
 /// just not surfaced as a one-click row choice by this list.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum BuiltInAction {
     BleConnect,
     GattDiscover,
@@ -37,14 +40,18 @@ impl BuiltInAction {
 /// characteristic — shown in the UI so an engineer can tell "found live and
 /// in source" from "only ever seen one way" before deciding whether to
 /// register an action against it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
 pub struct DiscoverySources {
     pub live: bool,
     pub static_extraction: bool,
 }
 
 /// One entry in the merged list a Study Designer table row picks from.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Externally tagged over the wire (serde's default) — `{"BuiltIn":
+/// "ble_connect"}`, `{"Registered": {...}}`, `{"Unregistered": {...}}` —
+/// since `BuiltIn`'s own inner type serializes as a bare string, which
+/// can't participate in an internally-tagged representation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum MergedAction {
     BuiltIn(BuiltInAction),
     /// A characteristic with at least one engineer-registered action
