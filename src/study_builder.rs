@@ -272,7 +272,6 @@ pub fn build_study(
             name: heapless_string::<MAX_NAME_LEN>(&row.name, "step name")?,
             action,
             timeout_ms: row.timeout_ms,
-            power_sample: None,
             continue_on_fail: row.continue_on_fail,
             delay_before_ms: row.delay_before_ms,
         };
@@ -294,6 +293,13 @@ pub fn build_study(
         validations: HVec::new(),
         streams: HVec::new(),
         steps_crc: 0,
+        // Both seals are left at 0 here, and both are overwritten by
+        // whoever submits (`embarch-api/design.md` §3 decision 26). For
+        // `streams_crc` that zero happens to already be correct — this
+        // builder authors no taps, and 0 is the real CRC of an empty tap
+        // list (`crate::crc::streams_crc`) — but it is not written *as* a
+        // correct value, for the same reason `steps_crc` isn't.
+        streams_crc: 0,
     })
 }
 

@@ -8,7 +8,7 @@
 use heapless::Vec;
 use serde::{Deserialize, Serialize};
 
-use crate::limits::{MAX_FAIL_REASON_LEN, MAX_PAYLOAD_LEN};
+use crate::limits::{MAX_FAIL_REASON_LEN, MAX_PAYLOAD_LEN, MAX_STREAM_NAME_LEN};
 
 /// One entry per post-hoc check an author wants run.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -17,39 +17,53 @@ pub struct PostHocValidation {
     pub check: PostHocCheck,
 }
 
-/// Which step's data to check, and which of that step's data channels. No
-/// ordering constraint on `step_index` (design.md §3 decision 14) —
-/// evaluation only ever happens after the whole study has finished.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ValidationSource {
-    pub step_index: u32,
-    pub channel: DataChannel,
+/// What a post-hoc check reads — design.md §4.6, reshaped 2026-08-25 by §3
+/// decision 19's amendment.
+///
+/// Two shapes, because there are two genuinely different things to address:
+/// data that belongs to one step and lands inline in `events.json`, and data
+/// that belongs to a declared [`StreamTap`](crate::streams::StreamTap) whose
+/// `scope` may outlive any step.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ValidationSource {
+    /// One step's own inline result data. No ordering constraint on
+    /// `step_index` (design.md §3 decision 14) — evaluation only ever
+    /// happens after the whole study has finished.
+    Step { step_index: u32, channel: DataChannel },
+    /// One declared tap's captured stream, named by
+    /// [`StreamTap::name`](crate::streams::StreamTap) — which is literally
+    /// what §4.8 already meant by a tap's name being "the post-hoc
+    /// validation source".
+    ///
+    /// **Carries no `step_index`, deliberately.** When a tap is open is a
+    /// property of its declared
+    /// [`StreamScope`](crate::streams::StreamScope), not of a step — the
+    /// same thing the wire already says by carrying no `step_index` on
+    /// `StreamOpen`/`StreamClose`. This also gives `Raw`/`Text`/
+    /// `OutpostTrace` taps a validation target, which no [`DataChannel`]
+    /// variant ever had.
+    Tap { name: heapless::String<MAX_STREAM_NAME_LEN> },
 }
 
+/// The per-step data channels — the two that really are per-step and land
+/// inline in `events.json`.
+///
+/// **`PowerSamples`, `SensorWaveform`, and `GattTranscript` were here** and
+/// are retired by §3 decision 19's 2026-08-25 amendment. Each named one of
+/// the three fixed CSV files Phase B replaces with `streams/<tap name>`
+/// (`embarch-core/design.md` §3 decision 30), so leaving them would have
+/// left three variants pointing at files nothing writes. They become tap
+/// names — [`ValidationSource::Tap`] above.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DataChannel {
     /// A `DataExchange` step's `StepResult.captured_data`.
     CapturedData,
-    /// A step's `PowerSampleWindow` output, streamed into `data.csv`.
-    PowerSamples,
-    /// A sensor-waveform capture, streamed into `waveform.csv` (design.md
-    /// §3 decision 21). As of decision 39 that capture is a declared
-    /// `StreamSource::GattNotify` + `StreamEncoding::Samples` tap rather
-    /// than a `GattOperation::StreamCapture` step; the channel name and the
-    /// CSV row shape behind it are unchanged.
-    SensorWaveform,
     /// A `GattMonitorAll` step's `StepResult.gatt_activity` (design.md §3
     /// decision 32). Added alongside that decision for future use — no
     /// `PostHocCheck` against it is authored yet (Milestone 3's own
     /// Definition of Done only requires the data to land in `events.json`,
     /// not a content assertion against it).
     GattActivity,
-    /// The whole study's streamed GATT transcript (`gatt.csv`, design.md §3
-    /// decision 36, §4.3b) — the uncapped, cross-step record, as opposed to
-    /// `GattActivity`'s per-step inline summary. Added alongside decision 36
-    /// for the same forward-looking reason `GattActivity` was: the channel
-    /// needs a name before a `PostHocCheck` can ever reference it.
-    GattTranscript,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -89,9 +103,14 @@ pub enum ContentValidity {
 }
 
 /// One per `Study.validations` entry, landing in `StudyResult.validations`.
+///
+/// Carries the whole [`ValidationSource`] rather than a flattened
+/// `step_index`/`channel` pair (which is what §4.6 described before decision
+/// 19's 2026-08-25 amendment): a tap-sourced check has no `step_index` to
+/// report, and inventing one for the result of a check that didn't have one
+/// is exactly the mislabelling the amendment removed from the source side.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ValidationResult {
-    pub step_index: u32,
-    pub channel: DataChannel,
+    pub source: ValidationSource,
     pub result: ContentValidity,
 }

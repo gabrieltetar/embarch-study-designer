@@ -45,7 +45,7 @@ pub mod study_builder;
 pub mod validation;
 pub mod vendor;
 
-pub use crc::{steps_crc, StepTooLargeError};
+pub use crc::{steps_crc, streams_crc, StepTooLargeError, StreamTapTooLargeError};
 pub use gatt::{
     GattActivityRecord, GattCharacteristicInfo, GattDirection, GattEventKind,
     GattServiceInfo, GattTranscriptEntry,
@@ -63,14 +63,14 @@ pub use registry::{
 };
 pub use result::{Outcome, Provenance, StepResult, StudyResult, VersionSource};
 pub use sample::{Sample, Unit};
-pub use schema_version::STUDY_DESIGNER_SCHEMA_VERSION;
+pub use schema_version::{DEV_BENCH_WIRE_SCHEMA_VERSION, HOST_TYPE_SCHEMA_VERSION};
 pub use streams::{
     samples_in, validate_taps, SampleLayout, StreamEncoding, StreamRecord, StreamRef, StreamScope,
     StreamSource, StreamTap, StreamTapError, RESERVED_DEV_BENCH_STREAM_NAME,
 };
 pub use study::{
-    requirement_satisfied, Action, BleRole, GattOperation, PowerSampleWindow, Requirements,
-    RequirementsError, Step, Study, REQUIREMENT_ANY,
+    requirement_satisfied, Action, BleRole, GattOperation, Requirements, RequirementsError, Step,
+    Study, REQUIREMENT_ANY,
 };
 #[cfg(feature = "study-ui")]
 pub use study_builder::{build_study, BuildStudyError, BuiltInActionKind, RoleChoice, RowAction, TableRow};
@@ -92,7 +92,6 @@ mod tests {
                 name: heapless::String::try_from("connect").unwrap(),
                 action: Action::BleConnect { role: BleRole::Central, target_address: None , target_name: None },
                 timeout_ms: 5_000,
-                power_sample: None,
                 continue_on_fail: false,
                 delay_before_ms: 0,
             })
@@ -106,21 +105,23 @@ mod tests {
                     operation: GattOperation::Read,
                 },
                 timeout_ms: 2_000,
-                power_sample: Some(PowerSampleWindow { sample_rate_hz: 1_000 }),
                 continue_on_fail: true,
                 delay_before_ms: 0,
             })
             .unwrap();
 
         let steps_crc = crc::steps_crc(&steps).unwrap();
+        let streams: HVec<StreamTap, { limits::MAX_STREAMS_PER_STUDY }> = HVec::new();
+        let streams_crc = crc::streams_crc(&streams).unwrap();
 
         Study {
             name: heapless::String::try_from("smoke-test").unwrap(),
             requires: Requirements::any(),
             steps,
             validations: HVec::new(),
-            streams: HVec::new(),
+            streams,
             steps_crc,
+            streams_crc,
         }
     }
 
@@ -141,6 +142,7 @@ mod tests {
         let decoded: Study = postcard::from_bytes(encoded).unwrap();
 
         assert_eq!(crc::steps_crc(&decoded.steps).unwrap(), decoded.steps_crc);
+        assert_eq!(crc::streams_crc(&decoded.streams).unwrap(), decoded.streams_crc);
     }
 
     /// Encode/decode one message and assert it survives, in a callee frame
@@ -162,11 +164,11 @@ mod tests {
     #[test]
     fn handshake_messages_round_trip() {
         assert_round_trips(&DevBenchMessage::Hello {
-            schema_version: STUDY_DESIGNER_SCHEMA_VERSION,
+            schema_version: DEV_BENCH_WIRE_SCHEMA_VERSION,
             host_utc_ms: 1_753_000_000_000,
         });
         assert_round_trips(&DevBenchMessage::HelloAck {
-            schema_version: STUDY_DESIGNER_SCHEMA_VERSION,
+            schema_version: DEV_BENCH_WIRE_SCHEMA_VERSION,
             compatible: true,
             firmware_version: heapless::String::try_from("nrf54l15dk-g1a2b3c").unwrap(),
         });
@@ -189,6 +191,7 @@ mod tests {
             steps: study.steps.clone(),
             steps_crc: study.steps_crc,
             streams: study.streams.clone(),
+            streams_crc: study.streams_crc,
         });
         assert_round_trips(&DevBenchMessage::StepResult {
             step_index: 0,
@@ -227,6 +230,7 @@ mod tests {
                 steps: study.steps.clone(),
                 steps_crc: study.steps_crc,
                 streams: study.streams.clone(),
+                streams_crc: study.streams_crc,
             };
             postcard::to_slice(&msg, into).unwrap().len()
         }
@@ -583,6 +587,33 @@ mod tests {
         0x6f, 0x6b, 0x0d, 0x0a, // "ok\r\n"
     ];
 
+    /// `StepResult { step_index: 1, result: { step_name: "advertise",
+    /// outcome: Pass, captured_data: Some([DE AD BE EF]), gatt_services:
+    /// None, gatt_activity: None } }` (schema v9).
+    ///
+    /// **Pinned only at v9, and that is the point.** `StepResult` predates
+    /// decision 36's both-languages rule, which applied to *new* records, so
+    /// this — the message dev-bench sends most — was never pinned. In the
+    /// gap, dev-bench's C encoder kept writing two `Option` bytes for
+    /// `power_samples_ref`/`waveform_ref` for a whole schema version after
+    /// decision 39 retired both fields, and both sides' own round-trip
+    /// suites stayed green because each agreed with itself.
+    const WIRE_STEP_RESULT: &[u8] = &[
+        0x07, // tag: StepResult (DevBenchMessage variant 7)
+        0x01, // step_index: 1, varint
+        0x09, // step_name: 9 bytes
+        0x61, 0x64, 0x76, 0x65, 0x72, 0x74, 0x69, 0x73, 0x65, // "advertise"
+        0x00, // outcome: Pass
+        0x01, // captured_data: Some
+        0x04, // ...4 bytes
+        0xde, 0xad, 0xbe, 0xef,
+        0x00, // gatt_services: None
+        0x00, // gatt_activity: None
+        // Nothing between `captured_data` and `gatt_services`: the two
+        // retired refs are gone from the type and must be gone from the
+        // wire.
+    ];
+
     fn stream_record(rx_utc_ms: u64, bytes: &[u8]) -> StreamRecord {
         StreamRecord { rx_utc_ms, bytes: HVec::from_slice(bytes).unwrap() }
     }
@@ -601,6 +632,39 @@ mod tests {
         assert_eq!(&decoded, expected, "pinned bytes decoded to the wrong value");
 
         let mut buf = [0u8; 256];
+        let re_encoded = postcard::to_slice(expected, &mut buf).unwrap();
+        assert_eq!(re_encoded, wire, "re-encoding drifted from the pinned bytes");
+    }
+
+    #[test]
+    fn step_result_matches_dev_bench_firmwares_own_hand_written_encoding() {
+        let mut captured: HVec<u8, { limits::MAX_PAYLOAD_LEN }> = HVec::new();
+        captured.extend_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]).unwrap();
+        assert_pinned_large(
+            WIRE_STEP_RESULT,
+            &DevBenchMessage::StepResult {
+                step_index: 1,
+                result: StepResult {
+                    step_name: heapless::String::try_from("advertise").unwrap(),
+                    outcome: Outcome::Pass,
+                    captured_data: Some(captured),
+                    gatt_services: None,
+                    gatt_activity: None,
+                },
+            },
+        );
+    }
+
+    /// [`assert_pinned`] with a buffer big enough for a `StepResult`, whose
+    /// `gatt_activity` array makes the message far larger than the 256-byte
+    /// scratch the stream records need. `#[inline(never)]` for the same
+    /// stack reason `assert_round_trips` is.
+    #[inline(never)]
+    fn assert_pinned_large(wire: &[u8], expected: &DevBenchMessage) {
+        let decoded: DevBenchMessage = postcard::from_bytes(wire).unwrap();
+        assert_eq!(&decoded, expected, "pinned bytes decoded to the wrong value");
+
+        let mut buf = [0u8; 4096];
         let re_encoded = postcard::to_slice(expected, &mut buf).unwrap();
         assert_eq!(re_encoded, wire, "re-encoding drifted from the pinned bytes");
     }
@@ -807,17 +871,54 @@ mod tests {
         }
     }
 
+    /// design.md §3 decision 19's 2026-08-25 amendment: a stream-fed check
+    /// names the tap and carries **no** `step_index`, because when a tap is
+    /// open is a property of its declared scope, not of a step.
     #[test]
-    fn data_channel_gatt_transcript_round_trips() {
-        let channel = DataChannel::GattTranscript;
-        let mut buf = [0u8; 16];
-        let encoded = postcard::to_slice(&channel, &mut buf).unwrap();
-        let decoded: DataChannel = postcard::from_bytes(encoded).unwrap();
-        assert_eq!(channel, decoded);
+    fn a_tap_sourced_validation_names_the_tap_and_carries_no_step_index() {
+        let source = ValidationSource::Tap {
+            name: heapless::String::try_from("outpost").unwrap(),
+        };
 
-        let json = serde_json::to_string(&channel).unwrap();
-        let decoded: DataChannel = serde_json::from_str(&json).unwrap();
-        assert_eq!(channel, decoded);
+        let mut buf = [0u8; 64];
+        let encoded = postcard::to_slice(&source, &mut buf).unwrap();
+        let decoded: ValidationSource = postcard::from_bytes(encoded).unwrap();
+        assert_eq!(source, decoded);
+
+        let json = serde_json::to_string(&source).unwrap();
+        // Structural, not a type reading: the serialized form has no
+        // `step_index` key at all for a tap target.
+        assert!(!json.contains("step_index"), "{json}");
+        let decoded: ValidationSource = serde_json::from_str(&json).unwrap();
+        assert_eq!(source, decoded);
+
+        // A per-step target still has one, and still means decision 14's
+        // array position.
+        let per_step = ValidationSource::Step { step_index: 3, channel: DataChannel::CapturedData };
+        let json = serde_json::to_string(&per_step).unwrap();
+        assert!(json.contains("step_index"), "{json}");
+        let decoded: ValidationSource = serde_json::from_str(&json).unwrap();
+        assert_eq!(per_step, decoded);
+    }
+
+    /// A `ValidationResult` reports the source it was produced from whole,
+    /// so a tap-sourced result is not forced to invent a `step_index` it
+    /// never had.
+    #[test]
+    fn a_validation_result_carries_the_whole_source() {
+        let result = ValidationResult {
+            source: ValidationSource::Tap {
+                name: heapless::String::try_from("power").unwrap(),
+            },
+            result: ContentValidity::Invalid {
+                reason: heapless::String::try_from("mean out of range").unwrap(),
+            },
+        };
+
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(!json.contains("step_index"), "{json}");
+        let decoded: ValidationResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(result, decoded);
     }
 
     #[test]

@@ -15,7 +15,7 @@ use core::slice;
 
 use crate::crc::steps_crc;
 use crate::limits::{MAX_LOCAL_NAME_LEN, MAX_NAME_LEN, MAX_STEPS_PER_STUDY, MAX_STUDY_NAME_LEN};
-use crate::schema_version::STUDY_DESIGNER_SCHEMA_VERSION;
+use crate::schema_version::DEV_BENCH_WIRE_SCHEMA_VERSION;
 use crate::study::{Action, Study};
 
 /// `embarch-dev-bench/design.md` §3 decision 8: when this crate is
@@ -90,9 +90,9 @@ impl EssdBleAdvertiseAction {
 
 /// Mirrors `Step` (design.md §4.2), `action` narrowed to
 /// [`EssdBleAdvertiseAction`] -- see `essd_study_decode_full`'s doc comment.
-/// `power_sample` and `delay_before_ms` are not carried into this struct
-/// (neither is needed for `BleAdvertise` dispatch; same accepted-gap posture
-/// as `service_uuids` above). `delay_before_ms` is still *decoded* — postcard
+/// `delay_before_ms` is not carried into this struct (it isn't needed for
+/// `BleAdvertise` dispatch; same accepted-gap posture as `service_uuids`
+/// above). It is still *decoded* — postcard
 /// deserialization happens against the real `Step`, so a v6 study parses
 /// correctly here; the field is simply not projected across this `repr(C)`
 /// boundary, which keeps `study_ffi.h`'s mirror of it unchanged. Nothing is
@@ -157,11 +157,17 @@ fn copy_bytes(src: &[u8], dst: &mut [u8]) -> u8 {
     len as u8
 }
 
-/// This crate's `STUDY_DESIGNER_SCHEMA_VERSION` (design.md §3 decision 12),
-/// for dev-bench firmware to embed in its own `HelloAck`.
+/// This crate's [`DEV_BENCH_WIRE_SCHEMA_VERSION`] (design.md §3 decision 12
+/// and its 2026-08-25 amendment), for dev-bench firmware to embed in its own
+/// `HelloAck`.
+///
+/// The **wire** constant specifically, not the host one: this is the number
+/// compared at `Hello`/`HelloAck`, and a host-side-only reshape must not
+/// move what firmware reports about itself. The host constant has no FFI
+/// surface at all, deliberately — dev-bench is not a party to that hop.
 #[no_mangle]
 pub extern "C" fn essd_schema_version() -> u32 {
-    STUDY_DESIGNER_SCHEMA_VERSION
+    DEV_BENCH_WIRE_SCHEMA_VERSION
 }
 
 /// Decodes a postcard-encoded `Study` from `input[0..input_len]` and
@@ -169,6 +175,17 @@ pub extern "C" fn essd_schema_version() -> u32 {
 /// `Study`'s own `steps_crc` field to `*out_crc_matches` (design.md §3
 /// decision 17). Returns a status code rather than panicking on malformed
 /// input (design.md §3 decision 23).
+///
+/// **`streams_crc` (§3 decision 39's 2026-08-25 amendment) is deliberately
+/// not checked here.** A single `out_crc_matches` bool cannot say *which* of
+/// two seals failed, which is the property having two of them exists for —
+/// so folding both into it would quietly destroy the thing being added.
+/// Widening the C ABI instead would extend a surface that has no caller
+/// anywhere (design.md §7's `BleAdvertise`-scoped FFI decode surface), which
+/// is the same posture `embarch-topology/design.md` §3 decision 18's
+/// amendment takes toward `validate_signal`. The real Core<->dev-bench check
+/// is dev-bench's own C decoder in `serial_protocol.c`, which computes both
+/// seals over the spans it walks.
 ///
 /// # Safety
 /// `input` must point to `input_len` readable bytes, and `out_crc_matches`
@@ -236,6 +253,9 @@ pub unsafe extern "C" fn essd_study_decode_full(
         Ok(crc) => crc,
         Err(_) => return EssdStatus::DecodeError,
     };
+    // `steps_crc` only, for the reason `essd_study_decode_and_verify`'s doc
+    // comment gives: `EssdStatus::CrcMismatch` is one code with nothing to
+    // say about which of a study's two seals failed.
     if recomputed != study.steps_crc {
         return EssdStatus::CrcMismatch;
     }
@@ -300,7 +320,6 @@ mod tests {
                 name: String::try_from("connect").unwrap(),
                 action: Action::BleConnect { role: BleRole::Central, target_address: None , target_name: None },
                 timeout_ms: 1_000,
-                power_sample: None,
                 continue_on_fail: false,
                 delay_before_ms: 0,
             })
@@ -314,6 +333,7 @@ mod tests {
             validations: Vec::new(),
             streams: Vec::new(),
             steps_crc,
+            streams_crc: 0,
         };
         let mut buf = [0u8; 256];
         let encoded = postcard::to_slice(&good, &mut buf).unwrap();
@@ -341,7 +361,6 @@ mod tests {
                     adv_interval_ms: 100,
                 },
                 timeout_ms: 5_000,
-                power_sample: None,
                 continue_on_fail: false,
                 delay_before_ms: 0,
             })
@@ -355,7 +374,6 @@ mod tests {
                     adv_interval_ms: 250,
                 },
                 timeout_ms: 2_000,
-                power_sample: None,
                 continue_on_fail: true,
                 delay_before_ms: 0,
             })
@@ -369,6 +387,7 @@ mod tests {
             validations: Vec::new(),
             streams: Vec::new(),
             steps_crc,
+            streams_crc: 0,
         }
     }
 
@@ -424,7 +443,6 @@ mod tests {
                 name: String::try_from("connect").unwrap(),
                 action: Action::BleConnect { role: BleRole::Central, target_address: None , target_name: None },
                 timeout_ms: 1_000,
-                power_sample: None,
                 continue_on_fail: false,
                 delay_before_ms: 0,
             })
@@ -437,6 +455,7 @@ mod tests {
             validations: Vec::new(),
             streams: Vec::new(),
             steps_crc,
+            streams_crc: 0,
         };
 
         let mut buf = [0u8; 256];

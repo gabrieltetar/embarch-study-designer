@@ -98,11 +98,21 @@ pub enum DevBenchMessage {
         /// `Study.validations` and `Study.requires` still never cross this
         /// hop (design.md §3 decisions 17, 40) — neither is anything
         /// dev-bench could act on. **`steps_crc` still seals `steps`
-        /// alone**, so taps ride outside the integrity seal; see design.md
-        /// §7's open question on that, deliberately left rather than
-        /// silently widening a CRC whose C-side implementation and pinned
-        /// test vectors both assume today's definition.
+        /// alone**; `streams` has its own sibling seal, `streams_crc`
+        /// below.
         streams: Vec<StreamTap, MAX_STREAMS_PER_STUDY>,
+        /// CRC-32 over `streams`, design.md §3 decision 39's 2026-08-25
+        /// amendment — [`crate::crc::streams_crc`], checked here
+        /// independently of `steps_crc` exactly as `steps_crc` is.
+        ///
+        /// Carried *after* `streams` rather than beside `steps_crc` so each
+        /// seal immediately follows the one contiguous span it covers.
+        /// That is the whole reason this is a second CRC rather than a
+        /// widened one: `steps_crc` sits between `steps` and `streams`, so
+        /// widening it would mean digesting two non-contiguous spans in
+        /// dev-bench's hand-written C, or reshuffling this message's field
+        /// order — a reshape where an append will do.
+        streams_crc: u32,
     },
     /// Sent by dev-bench as each step completes, streaming results back
     /// incrementally rather than batched at the end (design.md §3 decision
