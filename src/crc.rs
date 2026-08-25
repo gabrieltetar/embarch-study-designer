@@ -45,10 +45,11 @@ mod tests {
     fn step(name: &str) -> Step {
         Step {
             name: heapless::String::try_from(name).unwrap(),
-            action: Action::BleConnect { role: BleRole::Central, target_address: None },
+            action: Action::BleConnect { role: BleRole::Central, target_address: None , target_name: None },
             timeout_ms: 5_000,
             power_sample: Some(PowerSampleWindow { sample_rate_hz: 1_000 }),
             continue_on_fail: false,
+            delay_before_ms: 0,
         }
     }
 

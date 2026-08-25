@@ -10,10 +10,11 @@ use heapless::{String, Vec};
 use serde::{Deserialize, Serialize};
 
 use crate::limits::{
-    MAX_BATCH_SAMPLES, MAX_FIRMWARE_VERSION_LEN, MAX_LOG_LINE_LEN, MAX_STEPS_PER_STUDY,
+    MAX_FIRMWARE_VERSION_LEN, MAX_LOG_LINE_LEN, MAX_STEPS_PER_STUDY, MAX_STREAMS_PER_STUDY,
+    MAX_STREAM_RECORDS_PER_BATCH,
 };
 use crate::result::StepResult;
-use crate::sample::{Sample, Unit};
+use crate::streams::{StreamRecord, StreamTap};
 use crate::study::Step;
 
 /// Every message dev-bench sends or receives. Append-only (design.md §3
@@ -40,20 +41,37 @@ pub enum DevBenchMessage {
         /// some combination; the exact contents are dev-bench build-tooling's own concern.
         firmware_version: String<MAX_FIRMWARE_VERSION_LEN>,
     },
-    /// Opens a continuous capture channel for a step. More than one channel
-    /// can be open on the same step concurrently.
-    StreamStart {
-        step_index: u32,
-        channel: StreamChannel,
+    /// Opens the tap whose `id` this is — its own index in `Study.streams`
+    /// (design.md §3 decision 39, §4.8). Carries no `step_index`: when a
+    /// tap opens is a property of its declared
+    /// [`StreamScope`](crate::streams::StreamScope), not of the wire.
+    ///
+    /// **Slot reuse, stated rather than buried.** This variant occupies the
+    /// discriminant the retired `StreamStart` had, as `StreamChunkBatch`
+    /// and `StreamClose` below do for `StreamChunk`/`StreamEnd`. Decision
+    /// 10's append-only rule is about additions to a shipped protocol;
+    /// decision 39 retires these three outright, and the `Hello`/`HelloAck`
+    /// schema-version handshake refusing a v7 peer is what makes reusing
+    /// their slots safe. No dev-bench firmware carrying the old shapes has
+    /// ever been flashed, which is what made the reshape cheap at all.
+    StreamOpen { id: u8 },
+    /// A batch of arrival-stamped byte records for one open tap.
+    ///
+    /// **Bytes, never decoded values** — this is the whole of decision 39.
+    /// The old `StreamChunk`/`StreamChunkBatch` pair each carried a `Sample`
+    /// (one `f32` plus a unit), which is why a raw payload, a direction, or
+    /// a pair of UUIDs had nowhere to go and every new capture kind grew its
+    /// own message class. What the bytes mean is declared once, by the tap's
+    /// [`StreamEncoding`](crate::streams::StreamEncoding), and resolved
+    /// host-side.
+    StreamChunkBatch {
+        id: u8,
+        records: Vec<StreamRecord, MAX_STREAM_RECORDS_PER_BATCH>,
     },
-    /// One `Sample`, belonging to whichever channel was most recently opened
-    /// by a `StreamStart` for it — carries no `step_index`/`channel` of its
-    /// own, keeping per-chunk overhead minimal on a UART link.
-    StreamChunk { sample: Sample },
-    StreamEnd {
-        step_index: u32,
-        channel: StreamChannel,
-    },
+    /// Closes the tap whose `id` this is. `dropped` is how many records the
+    /// producer lost — **a stream that lost data says so** rather than
+    /// presenting a shorter, plausible capture as complete.
+    StreamClose { id: u8, dropped: u32 },
     /// Dev-bench's own log output (embarch-dev-bench/design.md §3 decision 7) — travels as
     /// a properly-framed message like everything else on this link rather than as raw
     /// interleaved bytes on the shared serial line, which would corrupt COBS framing.
@@ -67,6 +85,24 @@ pub enum DevBenchMessage {
     StudyStart {
         steps: Vec<Step, MAX_STEPS_PER_STUDY>,
         steps_crc: u32,
+        /// The study's declared taps (design.md §3 decision 39, §4.8).
+        ///
+        /// This is the one part of a `Study` beyond `steps` that dev-bench
+        /// genuinely needs: four of the five
+        /// [`StreamSource`](crate::streams::StreamSource) variants are
+        /// dev-bench-mediated, so dev-bench has to know which taps to open,
+        /// which characteristic to subscribe for a `GattNotify` tap, and
+        /// which `id` each one answers to on `StreamOpen`/
+        /// `StreamChunkBatch`/`StreamClose`.
+        ///
+        /// `Study.validations` and `Study.requires` still never cross this
+        /// hop (design.md §3 decisions 17, 40) — neither is anything
+        /// dev-bench could act on. **`steps_crc` still seals `steps`
+        /// alone**, so taps ride outside the integrity seal; see design.md
+        /// §7's open question on that, deliberately left rather than
+        /// silently widening a CRC whose C-side implementation and pinned
+        /// test vectors both assume today's definition.
+        streams: Vec<StreamTap, MAX_STREAMS_PER_STUDY>,
     },
     /// Sent by dev-bench as each step completes, streaming results back
     /// incrementally rather than batched at the end (design.md §3 decision
@@ -81,24 +117,15 @@ pub enum DevBenchMessage {
     /// ran to its natural end from one aborted early by a failing step with
     /// `continue_on_fail: false`.
     StudyDone { completed: bool },
-    /// A batched sibling of `StreamChunk` (design.md §3 decision 25):
-    /// several evenly-spaced samples from the same channel in one message,
-    /// reducing per-sample framing/encoding overhead on a UART link.
-    /// `base_utc_ms` + `sample_interval_ms` reconstruct each sample's own
-    /// `rx_utc_ms` (`base_utc_ms + i * sample_interval_ms`); `unit` and
-    /// `channel_id` disambiguate the samples the same way `Sample::unit`/
-    /// `Sample::channel_id` do (design.md §3 decision 27).
-    StreamChunkBatch {
-        base_utc_ms: u64,
-        sample_interval_ms: u32,
-        unit: Unit,
-        channel_id: u8,
-        values: Vec<f32, MAX_BATCH_SAMPLES>,
-    },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum StreamChannel {
-    Power,
-    SensorWaveform,
+    // The old batched `StreamChunkBatch` (design.md §3 decision 25) and
+    // `GattTranscriptRecord` (decision 36) were the last two variants here
+    // and are both **retired** by decision 39. `StreamChunk` and
+    // `StreamChunkBatch` had been live simultaneously, handled by Core in
+    // two separate match arms — a duplication decision 25 was believed to
+    // have removed — and are now genuinely one message. The GATT transcript
+    // keeps every part of itself that mattered (its record type, its
+    // both-directions coverage, its uncapped streaming, its `gatt.csv`
+    // columns) as `StreamSource::GattTranscript` +
+    // `StreamEncoding::GattTranscript`; only its dedicated message class is
+    // gone.
 }

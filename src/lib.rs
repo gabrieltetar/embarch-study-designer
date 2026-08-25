@@ -38,34 +38,47 @@ pub mod sample;
 pub mod schema_version;
 #[cfg(feature = "core-validation")]
 pub mod signal;
+pub mod streams;
 pub mod study;
 #[cfg(feature = "study-ui")]
 pub mod study_builder;
 pub mod validation;
+pub mod vendor;
 
 pub use crc::{steps_crc, StepTooLargeError};
-pub use gatt::{GattActivityRecord, GattCharacteristicInfo, GattServiceInfo};
+pub use gatt::{
+    GattActivityRecord, GattCharacteristicInfo, GattDirection, GattEventKind,
+    GattServiceInfo, GattTranscriptEntry,
+};
 #[cfg(feature = "gatt-extract")]
 pub use gatt_extract::{ZephyrBleDefExtractor, ExtractError, GattConfigExtractor};
 pub use ids::{BleAddress, BleAddressKind, Uuid};
 #[cfg(feature = "study-ui")]
 pub use merged_actions::{merge_actions, BuiltInAction, DiscoverySources, MergedAction};
-pub use protocol::{DevBenchMessage, StreamChannel};
+pub use protocol::DevBenchMessage;
 #[cfg(feature = "study-ui")]
 pub use registry::{
     ActionField, ActionFieldValue, ActionRegistry, RegisteredAction, RegisteredOperation,
     RegistryError,
 };
-pub use result::{Outcome, StepResult, StudyResult};
+pub use result::{Outcome, Provenance, StepResult, StudyResult, VersionSource};
 pub use sample::{Sample, Unit};
 pub use schema_version::STUDY_DESIGNER_SCHEMA_VERSION;
-pub use study::{Action, BleRole, GattOperation, PowerSampleWindow, Step, Study};
+pub use streams::{
+    samples_in, validate_taps, SampleLayout, StreamEncoding, StreamRecord, StreamRef, StreamScope,
+    StreamSource, StreamTap, StreamTapError, RESERVED_DEV_BENCH_STREAM_NAME,
+};
+pub use study::{
+    requirement_satisfied, Action, BleRole, GattOperation, PowerSampleWindow, Requirements,
+    RequirementsError, Step, Study, REQUIREMENT_ANY,
+};
 #[cfg(feature = "study-ui")]
 pub use study_builder::{build_study, BuildStudyError, BuiltInActionKind, RoleChoice, RowAction, TableRow};
 pub use validation::{
     ContentValidity, DataChannel, ExpectedValue, PostHocCheck, PostHocValidation, SignalCheck,
     ValidationResult, ValidationSource,
 };
+pub use vendor::{VendorCharacteristic, VendorService, NORDIC_UART_SERVICE};
 
 #[cfg(test)]
 mod tests {
@@ -77,10 +90,11 @@ mod tests {
         steps
             .push(Step {
                 name: heapless::String::try_from("connect").unwrap(),
-                action: Action::BleConnect { role: BleRole::Central, target_address: None },
+                action: Action::BleConnect { role: BleRole::Central, target_address: None , target_name: None },
                 timeout_ms: 5_000,
                 power_sample: None,
                 continue_on_fail: false,
+                delay_before_ms: 0,
             })
             .unwrap();
         steps
@@ -94,6 +108,7 @@ mod tests {
                 timeout_ms: 2_000,
                 power_sample: Some(PowerSampleWindow { sample_rate_hz: 1_000 }),
                 continue_on_fail: true,
+                delay_before_ms: 0,
             })
             .unwrap();
 
@@ -101,8 +116,10 @@ mod tests {
 
         Study {
             name: heapless::String::try_from("smoke-test").unwrap(),
+            requires: Requirements::any(),
             steps,
             validations: HVec::new(),
+            streams: HVec::new(),
             steps_crc,
         }
     }
@@ -126,80 +143,192 @@ mod tests {
         assert_eq!(crc::steps_crc(&decoded.steps).unwrap(), decoded.steps_crc);
     }
 
+    /// Encode/decode one message and assert it survives, in a callee frame
+    /// so the caller never holds more than one at a time.
+    ///
+    /// `size_of::<DevBenchMessage>()` is ~40 KiB — `StudyStart`'s
+    /// `Vec<Step, MAX_STEPS_PER_STUDY>` is a 64-slot inline array whatever a
+    /// message actually carries — so a test that binds a dozen of them in
+    /// one frame genuinely overflows libtest's stack (design.md §7's open
+    /// item, which this does **not** fix, only stops tripping over).
+    #[inline(never)]
+    fn assert_round_trips(msg: &DevBenchMessage) {
+        let mut buf = [0u8; 4096];
+        let encoded = postcard::to_slice(msg, &mut buf).unwrap();
+        let decoded: DevBenchMessage = postcard::from_bytes(encoded).unwrap();
+        assert_eq!(msg, &decoded);
+    }
+
     #[test]
-    fn dev_bench_message_round_trips() {
-        let hello = DevBenchMessage::Hello {
+    fn handshake_messages_round_trip() {
+        assert_round_trips(&DevBenchMessage::Hello {
             schema_version: STUDY_DESIGNER_SCHEMA_VERSION,
             host_utc_ms: 1_753_000_000_000,
-        };
-        let mut buf = [0u8; 64];
-        let encoded = postcard::to_slice(&hello, &mut buf).unwrap();
-        let decoded: DevBenchMessage = postcard::from_bytes(encoded).unwrap();
-        assert_eq!(hello, decoded);
-
-        let chunk = DevBenchMessage::StreamChunk {
-            sample: Sample { rx_utc_ms: 42, value: 3.3, unit: Unit::Milliamps, channel_id: 0 },
-        };
-        let encoded = postcard::to_slice(&chunk, &mut buf).unwrap();
-        let decoded: DevBenchMessage = postcard::from_bytes(encoded).unwrap();
-        assert_eq!(chunk, decoded);
-
-        let hello_ack = DevBenchMessage::HelloAck {
+        });
+        assert_round_trips(&DevBenchMessage::HelloAck {
             schema_version: STUDY_DESIGNER_SCHEMA_VERSION,
             compatible: true,
             firmware_version: heapless::String::try_from("nrf54l15dk-g1a2b3c").unwrap(),
-        };
-        let encoded = postcard::to_slice(&hello_ack, &mut buf).unwrap();
-        let decoded: DevBenchMessage = postcard::from_bytes(encoded).unwrap();
-        assert_eq!(hello_ack, decoded);
+        });
+        assert_round_trips(&DevBenchMessage::LogLine {
+            text: heapless::String::try_from("ble: connected").unwrap(),
+        });
+    }
 
-        let log_line = DevBenchMessage::LogLine { text: heapless::String::try_from("ble: connected").unwrap() };
-        let encoded = postcard::to_slice(&log_line, &mut buf).unwrap();
-        let decoded: DevBenchMessage = postcard::from_bytes(encoded).unwrap();
-        assert_eq!(log_line, decoded);
+    #[test]
+    fn stream_messages_round_trip() {
+        assert_round_trips(&DevBenchMessage::StreamOpen { id: 0 });
+        assert_round_trips(&one_record_batch(0, stream_record(1_753_000_000_000, &[0xDE, 0xAD])));
+        assert_round_trips(&DevBenchMessage::StreamClose { id: 0, dropped: 7 });
+    }
 
+    #[test]
+    fn study_lifecycle_messages_round_trip() {
         let study = sample_study();
-        let mut big_buf = [0u8; 2048];
-        let study_start =
-            DevBenchMessage::StudyStart { steps: study.steps.clone(), steps_crc: study.steps_crc };
-        let encoded = postcard::to_slice(&study_start, &mut big_buf).unwrap();
-        let decoded: DevBenchMessage = postcard::from_bytes(encoded).unwrap();
-        assert_eq!(study_start, decoded);
-
-        let step_result = DevBenchMessage::StepResult {
+        assert_round_trips(&DevBenchMessage::StudyStart {
+            steps: study.steps.clone(),
+            steps_crc: study.steps_crc,
+            streams: study.streams.clone(),
+        });
+        assert_round_trips(&DevBenchMessage::StepResult {
             step_index: 0,
             result: StepResult {
                 step_name: heapless::String::try_from("connect").unwrap(),
                 outcome: Outcome::Pass,
                 captured_data: None,
-                power_samples_ref: None,
-                waveform_ref: None,
                 gatt_services: None,
                 gatt_activity: None,
             },
-        };
-        let encoded = postcard::to_slice(&step_result, &mut buf).unwrap();
-        let decoded: DevBenchMessage = postcard::from_bytes(encoded).unwrap();
-        assert_eq!(step_result, decoded);
+        });
+        assert_round_trips(&DevBenchMessage::StudyDone { completed: true });
+    }
 
-        let study_done = DevBenchMessage::StudyDone { completed: true };
-        let encoded = postcard::to_slice(&study_done, &mut buf).unwrap();
-        let decoded: DevBenchMessage = postcard::from_bytes(encoded).unwrap();
-        assert_eq!(study_done, decoded);
-
-        let mut values: HVec<f32, { limits::MAX_BATCH_SAMPLES }> = HVec::new();
-        values.push(1.0).unwrap();
-        values.push(2.0).unwrap();
-        let chunk_batch = DevBenchMessage::StreamChunkBatch {
-            base_utc_ms: 1_753_000_000_000,
-            sample_interval_ms: 10,
-            unit: Unit::Volts,
-            channel_id: 1,
-            values,
+    #[test]
+    fn requires_never_crosses_the_wire_to_dev_bench() {
+        // design.md §3 decision 40: `requires` is host-side only, exactly as
+        // `validations` is (§3 decision 17). dev-bench has no use for a
+        // requirement it cannot check about itself, and `steps_crc` seals
+        // what dev-bench actually executes, which is unchanged.
+        //
+        // Asserted structurally rather than by reading the type: two studies
+        // that differ *only* in `requires` must produce byte-identical
+        // `StudyStart` messages, and the same `steps_crc`.
+        let plain = sample_study();
+        let mut demanding = sample_study();
+        demanding.requires = Requirements {
+            dev_bench_version: heapless::String::try_from("g-dev-bench-9f9f9f9f").unwrap(),
+            firmware_version: heapless::String::try_from("g-dut-1a1a1a1a-dirty").unwrap(),
         };
-        let encoded = postcard::to_slice(&chunk_batch, &mut buf).unwrap();
-        let decoded: DevBenchMessage = postcard::from_bytes(encoded).unwrap();
-        assert_eq!(chunk_batch, decoded);
+        assert_ne!(plain.requires, demanding.requires, "the two studies must actually differ");
+        assert_eq!(plain.steps_crc, demanding.steps_crc);
+
+        fn encoded_study_start(study: &Study, into: &mut [u8]) -> usize {
+            let msg = DevBenchMessage::StudyStart {
+                steps: study.steps.clone(),
+                steps_crc: study.steps_crc,
+                streams: study.streams.clone(),
+            };
+            postcard::to_slice(&msg, into).unwrap().len()
+        }
+
+        let mut a = [0u8; 4096];
+        let mut b = [0u8; 4096];
+        let len_a = encoded_study_start(&plain, &mut a);
+        let len_b = encoded_study_start(&demanding, &mut b);
+        assert_eq!(&a[..len_a], &b[..len_b], "requires leaked into StudyStart");
+    }
+
+    #[test]
+    fn a_declared_version_is_never_reported_as_a_verified_one() {
+        // design.md §3 decision 40's load-bearing asymmetry: dev-bench
+        // self-reports over HelloAck and is genuinely checked; the DUT
+        // reports nothing at all, so an unflashed run's DUT version is an
+        // assertion nobody verified. A result that rendered the two
+        // identically would be the same defect in a new place.
+        let provenance = Provenance {
+            dev_bench_version: heapless::String::try_from("g-dev-bench-9f9f9f9f").unwrap(),
+            firmware_version: heapless::String::try_from("g-dut-1a1a1a1a").unwrap(),
+            dev_bench_source: VersionSource::ReportedByDevBench,
+            firmware_source: VersionSource::Declared,
+        };
+        assert!(provenance.dev_bench_source.is_verified());
+        assert!(!provenance.firmware_source.is_verified());
+        for verified in [
+            VersionSource::ReportedByDevBench,
+            VersionSource::ReportedByOutpost,
+            VersionSource::FlashedThisRun,
+        ] {
+            assert!(verified.is_verified(), "{verified:?}");
+        }
+
+        let mut buf = [0u8; 256];
+        let encoded = postcard::to_slice(&provenance, &mut buf).unwrap();
+        let decoded: Provenance = postcard::from_bytes(encoded).unwrap();
+        assert_eq!(provenance, decoded);
+
+        let json = serde_json::to_string(&provenance).unwrap();
+        let decoded: Provenance = serde_json::from_str(&json).unwrap();
+        assert_eq!(provenance, decoded);
+    }
+
+    #[test]
+    fn a_stream_ref_says_when_a_capture_is_short() {
+        let full = StreamRef {
+            name: heapless::String::try_from("outpost").unwrap(),
+            bytes_written: 4_096,
+            truncated: false,
+        };
+        let short = StreamRef { truncated: true, ..full.clone() };
+        assert_ne!(full, short);
+
+        let mut buf = [0u8; 128];
+        let encoded = postcard::to_slice(&short, &mut buf).unwrap();
+        let decoded: StreamRef = postcard::from_bytes(encoded).unwrap();
+        assert_eq!(short, decoded);
+
+        let json = serde_json::to_string(&short).unwrap();
+        let decoded: StreamRef = serde_json::from_str(&json).unwrap();
+        assert_eq!(short, decoded);
+    }
+
+    #[test]
+    fn a_stream_tap_round_trips_through_postcard_and_json() {
+        let tap = StreamTap {
+            id: 0,
+            name: heapless::String::try_from("outpost").unwrap(),
+            source: StreamSource::Signal {
+                name: heapless::String::try_from("outpost").unwrap(),
+            },
+            encoding: StreamEncoding::OutpostTrace { manifest_crc: 0xDEAD_BEEF },
+            scope: StreamScope::WholeStudy,
+        };
+
+        let mut buf = [0u8; 256];
+        let encoded = postcard::to_slice(&tap, &mut buf).unwrap();
+        let decoded: StreamTap = postcard::from_bytes(encoded).unwrap();
+        assert_eq!(tap, decoded);
+
+        let json = serde_json::to_string(&tap).unwrap();
+        let decoded: StreamTap = serde_json::from_str(&json).unwrap();
+        assert_eq!(tap, decoded);
+
+        let waveform = StreamTap {
+            id: 1,
+            name: heapless::String::try_from("waveform").unwrap(),
+            source: StreamSource::GattNotify {
+                service_uuid: Uuid([1u8; 16]),
+                characteristic_uuid: Uuid([2u8; 16]),
+            },
+            encoding: StreamEncoding::Samples {
+                layout: SampleLayout::F32Le,
+                unit: Unit::Raw,
+                channel_id: 0,
+            },
+            scope: StreamScope::Steps { from: 1, to: 2 },
+        };
+        let encoded = postcard::to_slice(&waveform, &mut buf).unwrap();
+        let decoded: StreamTap = postcard::from_bytes(encoded).unwrap();
+        assert_eq!(waveform, decoded);
     }
 
     #[test]
@@ -302,8 +431,6 @@ mod tests {
             step_name: heapless::String::try_from("discover").unwrap(),
             outcome: Outcome::Pass,
             captured_data: None,
-            power_samples_ref: None,
-            waveform_ref: None,
             gatt_services: Some(sample_gatt_services()),
             gatt_activity: None,
         };
@@ -323,13 +450,374 @@ mod tests {
         let legacy_json = r#"{
             "step_name": "connect",
             "outcome": "Pass",
-            "captured_data": null,
-            "power_samples_ref": null,
-            "waveform_ref": null
+            "captured_data": null
         }"#;
         let decoded: StepResult = serde_json::from_str(legacy_json).unwrap();
         assert_eq!(decoded.gatt_services, None);
         assert_eq!(decoded.gatt_activity, None);
+    }
+
+    // design.md §3 decision 36, §4.3b: the streamed GATT transcript — its
+    // record type, its own wire variant, the two window actions, and the
+    // `gatt.csv` rendering whose column knowledge lives only in this crate.
+
+    fn sample_transcript_entry() -> crate::gatt::GattTranscriptEntry {
+        let mut payload: HVec<u8, { limits::MAX_PAYLOAD_LEN }> = HVec::new();
+        payload.extend_from_slice(b"ok\r\n").unwrap();
+        crate::gatt::GattTranscriptEntry {
+            rx_utc_ms: 1_753_000_000_777,
+            direction: crate::gatt::GattDirection::In,
+            kind: crate::gatt::GattEventKind::Notification,
+            service_uuid: Uuid::parse("6e400001-b5a3-f393-e0a9-e50e24dcca9e"),
+            characteristic_uuid: Uuid::parse("6e400003-b5a3-f393-e0a9-e50e24dcca9e"),
+            att_status: 0,
+            payload,
+        }
+    }
+
+    #[test]
+    fn uuid_parses_every_form_an_engineer_types() {
+        let full = Uuid::parse("6e400001-b5a3-f393-e0a9-e50e24dcca9e").unwrap();
+        assert_eq!(full.to_hyphenated().as_str(), "6e400001-b5a3-f393-e0a9-e50e24dcca9e");
+        // Same value with the hyphens stripped.
+        assert_eq!(Uuid::parse("6e400001b5a3f393e0a9e50e24dcca9e").unwrap(), full);
+        // Case-insensitive.
+        assert_eq!(Uuid::parse("6E400001-B5A3-F393-E0A9-E50E24DCCA9E").unwrap(), full);
+
+        // 16-bit shorthand expands against the Bluetooth SIG Base UUID, in
+        // every spelling — a Core Spec fact, not a DUT-specific inference.
+        let battery = Uuid::parse("180f").unwrap();
+        assert_eq!(battery.to_hyphenated().as_str(), "0000180f-0000-1000-8000-00805f9b34fb");
+        assert_eq!(Uuid::parse("0x180F").unwrap(), battery);
+        assert_eq!(Uuid::parse("0000180f").unwrap(), battery);
+        assert_eq!(Uuid::parse("0000180f-0000-1000-8000-00805f9b34fb").unwrap(), battery);
+
+        for bad in ["", "zzzz", "6e400001-b5a3-f393-e0a9-e50e24dcca9e00", "not a uuid"] {
+            assert!(Uuid::parse(bad).is_none(), "{bad} should not parse");
+        }
+    }
+
+    #[test]
+    fn gatt_transcript_entry_round_trips_through_postcard_and_json() {
+        let entry = sample_transcript_entry();
+
+        let mut buf = [0u8; 1024];
+        let encoded = postcard::to_slice(&entry, &mut buf).unwrap();
+        let decoded: crate::gatt::GattTranscriptEntry = postcard::from_bytes(encoded).unwrap();
+        assert_eq!(entry, decoded);
+
+        let json = serde_json::to_string(&entry).unwrap();
+        let decoded: crate::gatt::GattTranscriptEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(entry, decoded);
+    }
+
+    #[test]
+    fn a_gatt_transcript_entry_rides_a_generic_stream_record() {
+        // Decision 39 retired `DevBenchMessage::GattTranscriptRecord` as a
+        // variant while keeping the entry type and its `gatt.csv` columns
+        // exactly as decision 36 shipped them: the entry is now the payload
+        // of a generic `StreamRecord` on a tap declared
+        // `StreamEncoding::GattTranscript`.
+        let entry = sample_transcript_entry();
+        let mut entry_buf = [0u8; 512];
+        let entry_bytes = postcard::to_slice(&entry, &mut entry_buf).unwrap();
+
+        let mut records: HVec<StreamRecord, { limits::MAX_STREAM_RECORDS_PER_BATCH }> =
+            HVec::new();
+        records
+            .push(StreamRecord {
+                rx_utc_ms: entry.rx_utc_ms,
+                bytes: HVec::from_slice(entry_bytes).unwrap(),
+            })
+            .unwrap();
+        let msg = DevBenchMessage::StreamChunkBatch { id: 2, records };
+
+        let mut buf = [0u8; 1024];
+        let encoded = postcard::to_slice(&msg, &mut buf).unwrap();
+        let decoded: DevBenchMessage = postcard::from_bytes(encoded).unwrap();
+        assert_eq!(msg, decoded);
+
+        let DevBenchMessage::StreamChunkBatch { records, .. } = decoded else {
+            panic!("not a StreamChunkBatch");
+        };
+        let round_tripped: crate::gatt::GattTranscriptEntry =
+            postcard::from_bytes(&records[0].bytes).unwrap();
+        assert_eq!(round_tripped, entry);
+    }
+
+    // ---- Cross-language wire contract (design.md §3 decisions 36, 39) ----
+    //
+    // dev-bench firmware hand-writes its postcard encoding in C
+    // (`serial_protocol.c`), and nothing in either side's own test suite
+    // would notice the two drifting -- a reordered field or a u8 written as
+    // a varint decodes into plausible-looking garbage, not an error. So the
+    // exact bytes for every wire record are pinned twice: as a literal COBS
+    // frame in dev-bench's ztest suite
+    // (`app/tests/serial_protocol/src/main.c`), and as the identical
+    // pre-COBS body here. Changing a shape must break both, in both
+    // languages. This pairing found a real discrepancy the first time it ran
+    // (decision 36), which is the argument for it.
+
+    /// `StreamOpen { id: 2 }` (schema v8, decision 39).
+    const WIRE_STREAM_OPEN: &[u8] = &[
+        0x02, // tag: StreamOpen (DevBenchMessage variant 2)
+        0x02, // id: 2, a raw u8 rather than a varint
+    ];
+
+    /// `StreamClose { id: 2, dropped: 5 }` (schema v8, decision 39).
+    const WIRE_STREAM_CLOSE: &[u8] = &[
+        0x04, // tag: StreamClose (DevBenchMessage variant 4)
+        0x02, // id: 2, a raw u8
+        0x05, // dropped: 5, varint
+    ];
+
+    /// `StreamChunkBatch { id: 2, records: [{ rx_utc_ms: 777, bytes: "ok\r\n" }] }`
+    /// (schema v8, decision 39) — the shape that replaced both `StreamChunk`
+    /// and the old `Sample`-carrying `StreamChunkBatch`.
+    const WIRE_STREAM_CHUNK_BATCH: &[u8] = &[
+        0x03, // tag: StreamChunkBatch (DevBenchMessage variant 3)
+        0x02, // id: 2, a raw u8
+        0x01, // records: 1 entry
+        0x89, 0x06, // records[0].rx_utc_ms: 777, varint
+        0x04, // records[0].bytes: 4 bytes
+        0x6f, 0x6b, 0x0d, 0x0a, // "ok\r\n"
+    ];
+
+    fn stream_record(rx_utc_ms: u64, bytes: &[u8]) -> StreamRecord {
+        StreamRecord { rx_utc_ms, bytes: HVec::from_slice(bytes).unwrap() }
+    }
+
+    fn one_record_batch(id: u8, record: StreamRecord) -> DevBenchMessage {
+        let mut records: HVec<StreamRecord, { limits::MAX_STREAM_RECORDS_PER_BATCH }> =
+            HVec::new();
+        records.push(record).unwrap();
+        DevBenchMessage::StreamChunkBatch { id, records }
+    }
+
+    /// Decodes to the expected value *and* re-encodes to exactly the same
+    /// bytes — so drift in either direction breaks this, not just one.
+    fn assert_pinned(wire: &[u8], expected: &DevBenchMessage) {
+        let decoded: DevBenchMessage = postcard::from_bytes(wire).unwrap();
+        assert_eq!(&decoded, expected, "pinned bytes decoded to the wrong value");
+
+        let mut buf = [0u8; 256];
+        let re_encoded = postcard::to_slice(expected, &mut buf).unwrap();
+        assert_eq!(re_encoded, wire, "re-encoding drifted from the pinned bytes");
+    }
+
+    #[test]
+    fn stream_open_matches_dev_bench_firmwares_own_hand_written_encoding() {
+        assert_pinned(WIRE_STREAM_OPEN, &DevBenchMessage::StreamOpen { id: 2 });
+    }
+
+    #[test]
+    fn stream_close_matches_dev_bench_firmwares_own_hand_written_encoding() {
+        assert_pinned(WIRE_STREAM_CLOSE, &DevBenchMessage::StreamClose { id: 2, dropped: 5 });
+    }
+
+    #[test]
+    fn stream_chunk_batch_matches_dev_bench_firmwares_own_hand_written_encoding() {
+        assert_pinned(
+            WIRE_STREAM_CHUNK_BATCH,
+            &one_record_batch(2, stream_record(777, b"ok\r\n")),
+        );
+    }
+
+    #[test]
+    fn a_stream_close_with_zero_fields_still_round_trips() {
+        // Every byte of this body is 0x00 except the tag, which is what
+        // makes it the interesting case for dev-bench's COBS encoder --
+        // three consecutive zeros become three overhead bytes and no
+        // literal data at all. Pinned as a frame on the C side; pinned as
+        // the body here.
+        assert_pinned(&[0x04, 0x00, 0x00], &DevBenchMessage::StreamClose { id: 0, dropped: 0 });
+    }
+
+    /// One postcard-encoded `GattTranscriptEntry` — no longer a message of
+    /// its own (decision 39 retired `DevBenchMessage::GattTranscriptRecord`),
+    /// now the payload of a `StreamRecord` on a tap declared
+    /// `StreamEncoding::GattTranscript`. Byte-for-byte the entry half of the
+    /// frame decision 36 originally pinned; the entry's own shape did not
+    /// change, only what carries it.
+    const WIRE_GATT_TRANSCRIPT_ENTRY: &[u8] = &[
+        0x89, 0x06, // rx_utc_ms: 777, varint
+        0x01, // direction: In
+        0x0b, // kind: Notification
+        0x01, // service_uuid: Some
+        0x6e, 0x40, 0x00, 0x01, 0xb5, 0xa3, 0xf3, 0x93, 0xe0, 0xa9, 0xe5, 0x0e, 0x24, 0xdc,
+        0xca, 0x9e, //
+        0x01, // characteristic_uuid: Some
+        0x6e, 0x40, 0x00, 0x03, 0xb5, 0xa3, 0xf3, 0x93, 0xe0, 0xa9, 0xe5, 0x0e, 0x24, 0xdc,
+        0xca, 0x9e, //
+        0x00, // att_status: 0, a raw u8 rather than a varint
+        0x04, // payload: 4 bytes
+        0x6f, 0x6b, 0x0d, 0x0a, // "ok\r\n"
+    ];
+
+    #[test]
+    fn gatt_transcript_entry_matches_dev_bench_firmwares_own_hand_written_encoding() {
+        // Same shape as `sample_transcript_entry`, with a small `rx_utc_ms`
+        // so the pinned literal stays a readable two-byte varint rather than
+        // a five-byte epoch timestamp.
+        let expected =
+            crate::gatt::GattTranscriptEntry { rx_utc_ms: 777, ..sample_transcript_entry() };
+
+        let decoded: crate::gatt::GattTranscriptEntry =
+            postcard::from_bytes(WIRE_GATT_TRANSCRIPT_ENTRY).unwrap();
+        assert_eq!(decoded, expected);
+
+        let mut buf = [0u8; 128];
+        let re_encoded = postcard::to_slice(&expected, &mut buf).unwrap();
+        assert_eq!(re_encoded, WIRE_GATT_TRANSCRIPT_ENTRY);
+    }
+
+    #[test]
+    fn a_transcript_entry_carried_as_a_stream_record_matches_the_pinned_frame() {
+        // The whole message dev-bench now sends for one transcript line:
+        // the pinned entry above, verbatim, inside a generic record.
+        let mut wire: HVec<u8, 128> = HVec::new();
+        wire.extend_from_slice(&[
+            0x03, // tag: StreamChunkBatch
+            0x02, // id: 2
+            0x01, // records: 1 entry
+            0x89, 0x06, // records[0].rx_utc_ms: 777 -- the entry's own stamp
+            0x2c, // records[0].bytes: 44 bytes, the entry below
+        ])
+        .unwrap();
+        wire.extend_from_slice(WIRE_GATT_TRANSCRIPT_ENTRY).unwrap();
+
+        let expected = one_record_batch(2, stream_record(777, WIRE_GATT_TRANSCRIPT_ENTRY));
+        let decoded: DevBenchMessage = postcard::from_bytes(&wire).unwrap();
+        assert_eq!(decoded, expected);
+
+        let mut buf = [0u8; 256];
+        let re_encoded = postcard::to_slice(&expected, &mut buf).unwrap();
+        assert_eq!(re_encoded, wire.as_slice());
+    }
+
+    #[test]
+    fn dev_bench_message_discriminants_are_pinned() {
+        // postcard encodes an enum as a varint discriminant. Decision 39
+        // reuses the three slots the retired stream variants held, so which
+        // tag means what is now load-bearing in a way it wasn't when the
+        // rule was purely append-only -- pin all nine.
+        let cases: [(DevBenchMessage, u8); 4] = [
+            (
+                DevBenchMessage::Hello { schema_version: 8, host_utc_ms: 0 },
+                0,
+            ),
+            (DevBenchMessage::StreamOpen { id: 0 }, 2),
+            (DevBenchMessage::StreamClose { id: 0, dropped: 0 }, 4),
+            (DevBenchMessage::StudyDone { completed: true }, 8),
+        ];
+        for (msg, expected) in cases {
+            let mut buf = [0u8; 64];
+            let encoded = postcard::to_slice(&msg, &mut buf).unwrap();
+            assert_eq!(encoded[0], expected, "{msg:?} moved discriminant");
+        }
+    }
+
+    // `GattTranscriptEntry`'s CSV renderer is itself `std`-gated (gatt.rs).
+    #[cfg(feature = "std")]
+    #[test]
+    fn gatt_transcript_csv_row_matches_header_shape() {
+        let entry = sample_transcript_entry();
+        let row = entry.to_csv_row(4, "nus-write").unwrap();
+
+        assert_eq!(
+            row.as_str(),
+            "1753000000777,4,nus-write,in,notification,\
+             6e400001-b5a3-f393-e0a9-e50e24dcca9e,\
+             6e400003-b5a3-f393-e0a9-e50e24dcca9e,0,4,6f6b0d0a,ok.."
+        );
+        // Header and row must agree on column count, or every consumer of
+        // gatt.csv silently misreads every column past the mismatch.
+        let header_cols =
+            crate::gatt::GattTranscriptEntry::csv_header().split(',').count();
+        assert_eq!(row.split(',').count(), header_cols);
+    }
+
+    // `GattTranscriptEntry`'s CSV renderer is itself `std`-gated (gatt.rs).
+    #[cfg(feature = "std")]
+    #[test]
+    fn gatt_transcript_csv_row_renders_absent_uuids_as_empty_columns() {
+        let entry = crate::gatt::GattTranscriptEntry {
+            rx_utc_ms: 10,
+            direction: crate::gatt::GattDirection::Local,
+            kind: crate::gatt::GattEventKind::DiscoveryStarted,
+            service_uuid: None,
+            characteristic_uuid: None,
+            att_status: 0,
+            payload: HVec::new(),
+        };
+        let row = entry.to_csv_row(0, "discover").unwrap();
+        assert_eq!(row.as_str(), "10,0,discover,local,discovery_started,,,0,0,,");
+        assert_eq!(
+            row.split(',').count(),
+            crate::gatt::GattTranscriptEntry::csv_header().split(',').count()
+        );
+    }
+
+    // `GattTranscriptEntry`'s CSV renderer is itself `std`-gated (gatt.rs).
+    #[cfg(feature = "std")]
+    #[test]
+    fn gatt_transcript_csv_row_refuses_a_step_name_that_would_break_the_shape() {
+        let entry = sample_transcript_entry();
+        // Dropped, never truncated or silently quoted — same posture
+        // `Sample::to_csv_row` takes when a row doesn't fit.
+        assert!(entry.to_csv_row(0, "bad,name").is_none());
+        assert!(entry.to_csv_row(0, "bad\"name").is_none());
+    }
+
+    #[test]
+    fn gatt_monitor_window_actions_round_trip() {
+        for action in [Action::GattMonitorStart {}, Action::GattMonitorStop {}] {
+            let mut buf = [0u8; 64];
+            let encoded = postcard::to_slice(&action, &mut buf).unwrap();
+            let decoded: Action = postcard::from_bytes(encoded).unwrap();
+            assert_eq!(action, decoded);
+
+            let json = serde_json::to_string(&action).unwrap();
+            let decoded: Action = serde_json::from_str(&json).unwrap();
+            assert_eq!(action, decoded);
+        }
+    }
+
+    #[test]
+    fn action_discriminants_stayed_append_only() {
+        // postcard encodes an enum as a varint discriminant, so appending is
+        // only safe if every pre-existing variant keeps its index. This
+        // pins all seven rather than trusting the declaration order to be
+        // left alone (design.md §3 decision 10's append-only rule, applied
+        // to `Action` as well as `DevBenchMessage`).
+        let cases: [(Action, u8); 5] = [
+            (
+                Action::BleConnect { role: BleRole::Central, target_address: None , target_name: None },
+                1,
+            ),
+            (Action::GattDiscover {}, 3),
+            (Action::GattMonitorAll {}, 4),
+            (Action::GattMonitorStart {}, 5),
+            (Action::GattMonitorStop {}, 6),
+        ];
+        for (action, expected) in cases {
+            let mut buf = [0u8; 64];
+            let encoded = postcard::to_slice(&action, &mut buf).unwrap();
+            assert_eq!(encoded[0], expected, "{action:?} moved discriminant");
+        }
+    }
+
+    #[test]
+    fn data_channel_gatt_transcript_round_trips() {
+        let channel = DataChannel::GattTranscript;
+        let mut buf = [0u8; 16];
+        let encoded = postcard::to_slice(&channel, &mut buf).unwrap();
+        let decoded: DataChannel = postcard::from_bytes(encoded).unwrap();
+        assert_eq!(channel, decoded);
+
+        let json = serde_json::to_string(&channel).unwrap();
+        let decoded: DataChannel = serde_json::from_str(&json).unwrap();
+        assert_eq!(channel, decoded);
     }
 
     #[test]
