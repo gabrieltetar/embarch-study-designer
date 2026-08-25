@@ -90,9 +90,15 @@ impl EssdBleAdvertiseAction {
 
 /// Mirrors `Step` (design.md §4.2), `action` narrowed to
 /// [`EssdBleAdvertiseAction`] -- see `essd_study_decode_full`'s doc comment.
-/// `power_sample` is not carried into this struct (not needed for
-/// `BleAdvertise` dispatch; same accepted-gap posture as `service_uuids`
-/// above).
+/// `power_sample` and `delay_before_ms` are not carried into this struct
+/// (neither is needed for `BleAdvertise` dispatch; same accepted-gap posture
+/// as `service_uuids` above). `delay_before_ms` is still *decoded* — postcard
+/// deserialization happens against the real `Step`, so a v6 study parses
+/// correctly here; the field is simply not projected across this `repr(C)`
+/// boundary, which keeps `study_ffi.h`'s mirror of it unchanged. Nothing is
+/// lost in practice: the study-execution path that honours the delay is
+/// dev-bench's own C decoder in `serial_protocol.c`, not this narrowed
+/// BleAdvertise-only view.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct EssdStep {
@@ -292,18 +298,21 @@ mod tests {
         steps
             .push(crate::study::Step {
                 name: String::try_from("connect").unwrap(),
-                action: Action::BleConnect { role: BleRole::Central, target_address: None },
+                action: Action::BleConnect { role: BleRole::Central, target_address: None , target_name: None },
                 timeout_ms: 1_000,
                 power_sample: None,
                 continue_on_fail: false,
+                delay_before_ms: 0,
             })
             .unwrap();
         let steps_crc = crate::crc::steps_crc(&steps).unwrap();
 
         let good = Study {
             name: String::try_from("t").unwrap(),
+            requires: crate::study::Requirements::any(),
             steps: steps.clone(),
             validations: Vec::new(),
+            streams: Vec::new(),
             steps_crc,
         };
         let mut buf = [0u8; 256];
@@ -334,6 +343,7 @@ mod tests {
                 timeout_ms: 5_000,
                 power_sample: None,
                 continue_on_fail: false,
+                delay_before_ms: 0,
             })
             .unwrap();
         steps
@@ -347,11 +357,19 @@ mod tests {
                 timeout_ms: 2_000,
                 power_sample: None,
                 continue_on_fail: true,
+                delay_before_ms: 0,
             })
             .unwrap();
         let steps_crc = crate::crc::steps_crc(&steps).unwrap();
 
-        Study { name: String::try_from("ble-advertise-study").unwrap(), steps, validations: Vec::new(), steps_crc }
+        Study {
+            name: String::try_from("ble-advertise-study").unwrap(),
+            requires: crate::study::Requirements::any(),
+            steps,
+            validations: Vec::new(),
+            streams: Vec::new(),
+            steps_crc,
+        }
     }
 
     #[test]
@@ -404,14 +422,22 @@ mod tests {
         steps
             .push(crate::study::Step {
                 name: String::try_from("connect").unwrap(),
-                action: Action::BleConnect { role: BleRole::Central, target_address: None },
+                action: Action::BleConnect { role: BleRole::Central, target_address: None , target_name: None },
                 timeout_ms: 1_000,
                 power_sample: None,
                 continue_on_fail: false,
+                delay_before_ms: 0,
             })
             .unwrap();
         let steps_crc = crate::crc::steps_crc(&steps).unwrap();
-        let study = Study { name: String::try_from("t").unwrap(), steps, validations: Vec::new(), steps_crc };
+        let study = Study {
+            name: String::try_from("t").unwrap(),
+            requires: crate::study::Requirements::any(),
+            steps,
+            validations: Vec::new(),
+            streams: Vec::new(),
+            steps_crc,
+        };
 
         let mut buf = [0u8; 256];
         let encoded = postcard::to_slice(&study, &mut buf).unwrap();

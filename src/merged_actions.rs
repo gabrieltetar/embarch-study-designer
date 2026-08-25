@@ -29,11 +29,22 @@ pub enum BuiltInAction {
     BleConnect,
     GattDiscover,
     GattMonitorAll,
+    /// design.md §3 decision 36 — opens a capture window that stays armed
+    /// across the steps that follow it.
+    GattMonitorStart,
+    /// design.md §3 decision 36 — closes the window `GattMonitorStart`
+    /// opened.
+    GattMonitorStop,
 }
 
 impl BuiltInAction {
-    pub const ALL: [BuiltInAction; 3] =
-        [BuiltInAction::BleConnect, BuiltInAction::GattDiscover, BuiltInAction::GattMonitorAll];
+    pub const ALL: [BuiltInAction; 5] = [
+        BuiltInAction::BleConnect,
+        BuiltInAction::GattDiscover,
+        BuiltInAction::GattMonitorAll,
+        BuiltInAction::GattMonitorStart,
+        BuiltInAction::GattMonitorStop,
+    ];
 }
 
 /// Which discovery source(s) reported a given, not-yet-registered
@@ -67,6 +78,33 @@ pub enum MergedAction {
     /// `service_uuid` and a `characteristic_uuid`, not the characteristic
     /// alone).
     Unregistered { service_uuid: Uuid, uuid: Uuid, properties: u8, sources: DiscoverySources },
+    /// A characteristic of a **vendor-defined** service from
+    /// [`crate::vendor`] — design.md §3 decision 41.
+    ///
+    /// Always listed, whether or not any discovery source saw it, because
+    /// the table is a compile-time fact rather than an observation;
+    /// `sources` says whether this bench actually found it, so the UI can
+    /// distinguish "Nordic defines this" from "your DUT has this". Never
+    /// routed to the registration form: transcribing a UUID Zephyr itself
+    /// publishes into a per-repo registry is exactly the busywork decision
+    /// 39 removes.
+    Vendor {
+        service_id: &'static str,
+        service_name: &'static str,
+        characteristic_id: &'static str,
+        characteristic_name: &'static str,
+        service_uuid: Uuid,
+        uuid: Uuid,
+        /// The vendor's declared properties byte. When a discovery source
+        /// also saw this characteristic and reported different properties,
+        /// `discovered_properties` carries what the hardware said and this
+        /// stays the vendor's claim — the two disagreeing is a real finding
+        /// (a modified service build), not something to paper over by
+        /// picking one.
+        properties: u8,
+        discovered_properties: Option<u8>,
+        sources: DiscoverySources,
+    },
 }
 
 /// Merges built-in actions, live discovery, static extraction, and the
@@ -107,6 +145,28 @@ pub fn merge_actions(
     let mut result: Vec<MergedAction> =
         BuiltInAction::ALL.iter().copied().map(MergedAction::BuiltIn).collect();
 
+    // Vendor-defined services, before the registry: they're the entries an
+    // engineer is least likely to want to author by hand, so they come
+    // first among the UUID-bearing choices.
+    let mut vendor_uuids: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
+    for service in crate::vendor::ALL {
+        for chrc in service.characteristics {
+            vendor_uuids.insert(chrc.uuid);
+            let seen = sources_by_uuid.get(&chrc.uuid);
+            result.push(MergedAction::Vendor {
+                service_id: service.id,
+                service_name: service.name,
+                characteristic_id: chrc.id,
+                characteristic_name: chrc.name,
+                service_uuid: service.uuid,
+                uuid: chrc.uuid,
+                properties: chrc.properties,
+                discovered_properties: seen.map(|(_, properties, _)| *properties),
+                sources: seen.map(|(_, _, sources)| *sources).unwrap_or_default(),
+            });
+        }
+    }
+
     result.extend(registry.actions.iter().cloned().map(MergedAction::Registered));
 
     for uuid in order {
@@ -115,6 +175,13 @@ pub fn merge_actions(
             // registered characteristic doesn't also show up as an
             // unregistered prompt, even though it was independently
             // detected too.
+            continue;
+        }
+        if vendor_uuids.contains(&uuid) {
+            // Same rule, for the vendor table: a discovered NUS
+            // characteristic is already listed as `Vendor` above, and
+            // prompting an engineer to *register* a UUID Nordic publishes
+            // is the exact busywork decision 41 exists to remove.
             continue;
         }
         let (service_uuid, properties, sources) = sources_by_uuid[&uuid];
@@ -147,8 +214,20 @@ mod tests {
     #[test]
     fn built_ins_always_present_even_with_nothing_else() {
         let merged = merge_actions(None, None, &ActionRegistry::default());
-        assert_eq!(merged.len(), 3);
-        assert!(merged.iter().all(|a| matches!(a, MergedAction::BuiltIn(_))));
+        // Pinned against `BuiltInAction::ALL` rather than a bare literal, so
+        // adding a built-in (decision 36 added two) updates this in one
+        // place. Vendor entries (decision 41) are also unconditional, and
+        // counted the same way for the same reason.
+        let vendor_count: usize =
+            crate::vendor::ALL.iter().map(|s| s.characteristics.len()).sum();
+        assert_eq!(merged.len(), BuiltInAction::ALL.len() + vendor_count);
+        assert_eq!(
+            merged.iter().filter(|a| matches!(a, MergedAction::BuiltIn(_))).count(),
+            BuiltInAction::ALL.len()
+        );
+        assert!(merged
+            .iter()
+            .all(|a| matches!(a, MergedAction::BuiltIn(_) | MergedAction::Vendor { .. })));
     }
 
     #[test]

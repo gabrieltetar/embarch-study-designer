@@ -32,8 +32,11 @@ pub enum DataChannel {
     CapturedData,
     /// A step's `PowerSampleWindow` output, streamed into `data.csv`.
     PowerSamples,
-    /// A `GattOperation::StreamCapture` step's output, streamed into
-    /// `waveform.csv` (design.md §3 decision 21).
+    /// A sensor-waveform capture, streamed into `waveform.csv` (design.md
+    /// §3 decision 21). As of decision 39 that capture is a declared
+    /// `StreamSource::GattNotify` + `StreamEncoding::Samples` tap rather
+    /// than a `GattOperation::StreamCapture` step; the channel name and the
+    /// CSV row shape behind it are unchanged.
     SensorWaveform,
     /// A `GattMonitorAll` step's `StepResult.gatt_activity` (design.md §3
     /// decision 32). Added alongside that decision for future use — no
@@ -41,6 +44,12 @@ pub enum DataChannel {
     /// Definition of Done only requires the data to land in `events.json`,
     /// not a content assertion against it).
     GattActivity,
+    /// The whole study's streamed GATT transcript (`gatt.csv`, design.md §3
+    /// decision 36, §4.3b) — the uncapped, cross-step record, as opposed to
+    /// `GattActivity`'s per-step inline summary. Added alongside decision 36
+    /// for the same forward-looking reason `GattActivity` was: the channel
+    /// needs a name before a `PostHocCheck` can ever reference it.
+    GattTranscript,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

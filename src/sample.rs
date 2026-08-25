@@ -7,15 +7,25 @@ use serde::{Deserialize, Serialize};
 
 use crate::limits::MAX_CSV_ROW_LEN;
 
-/// The one wire-level record type carried by both `StreamChannel::Power` and
-/// `StreamChannel::SensorWaveform`. `data.csv` and `waveform.csv` (design.md
-/// §5.2) share this identical row shape rather than each inventing their own
+/// One decoded scalar sample. `data.csv` and `waveform.csv` (design.md §5.2)
+/// share this identical row shape rather than each inventing their own
 /// columns.
 ///
-/// `rx_utc_ms` is stamped by dev-bench itself, at the moment it captures the
-/// sample from its own sampling hardware — its own local clock, seeded and
-/// periodically resynced from Core's `host_utc_ms` on every `Hello` (design.md
-/// §3 decision 12) — not assigned by Core on arrival.
+/// **No longer a wire type as of schema v8** (design.md §3 decision 39): the
+/// wire carries arrival-stamped bytes
+/// ([`StreamRecord`](crate::streams::StreamRecord)), and a `Sample` is what
+/// [`samples_in`](crate::streams::samples_in) produces from those bytes
+/// against a tap's declared
+/// [`StreamEncoding::Samples`](crate::streams::StreamEncoding::Samples)
+/// layout. The row shape below is deliberately untouched by that move — the
+/// CSV columns survive the reshape unchanged, only the path the numbers take
+/// to reach them changed.
+///
+/// `rx_utc_ms` is the record's own arrival stamp, taken by whichever node
+/// received the bytes — dev-bench's local clock for a dev-bench-mediated tap,
+/// seeded and periodically resynced from Core's `host_utc_ms` on every
+/// `Hello` (design.md §3 decision 12); Core's own clock for a
+/// `StreamSource::Signal` tap it reads directly.
 ///
 /// `value`'s real-world shape (a single scalar vs. multiple hardware-specific
 /// fields, e.g. separate current/voltage) is still open per design.md §7;
@@ -24,7 +34,8 @@ use crate::limits::MAX_CSV_ROW_LEN;
 /// `unit`/`channel_id` (design.md §3 decision 27) disambiguate `value`: which
 /// physical quantity it is, and which of possibly several concurrent
 /// hardware channels it came from (e.g. more than one power rail sampled at
-/// once).
+/// once). Both are declared once per tap now, on `StreamEncoding::Samples`,
+/// rather than repeated per wire message.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Sample {
     pub rx_utc_ms: u64,
@@ -69,8 +80,9 @@ impl Sample {
     /// Renders this sample as one CSV row, given the step name Core already
     /// knows from the currently-open stream (design.md §3 decision 20). This
     /// is the crate's own CSV-rendering tool (§1, §3 decision 2): Core's job
-    /// writing `data.csv`/`waveform.csv` is to decode a `StreamChunk` into a
-    /// `Sample`, call this, and append the result — no column knowledge lives
+    /// writing `data.csv`/`waveform.csv` is to run a `StreamRecord` through
+    /// [`samples_in`](crate::streams::samples_in), call this on each
+    /// `Sample`, and append the result — no column or layout knowledge lives
     /// in Core itself.
     ///
     /// Returns `None` if `step_name` doesn't fit alongside the rest of the
