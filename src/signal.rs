@@ -15,9 +15,11 @@ use crate::validation::{ContentValidity, SignalCheck};
 /// check's `ValidationSource`).
 ///
 /// `sample_rate_hz` is required for `SignalCheck::FftPeakNear`'s
-/// frequency-domain check and unused otherwise — pass whatever the
-/// originating step's `PowerSampleWindow` specified for a `PowerSamples`
-/// channel. `SensorWaveform`'s sample rate isn't modeled yet (design.md §7).
+/// frequency-domain check and unused otherwise — pass whatever the tap this
+/// check names declared, i.e. a `StreamSource::PowerFrontEnd`'s `sample_hz`.
+/// A tap with no declared rate (`GattNotify`, `Signal`) has no sample rate to
+/// pass, and `samples_in` stamps its samples with the record's own arrival
+/// time rather than interpolating (design.md §4.8, §7).
 pub fn evaluate(check: &SignalCheck, samples: &[f32], sample_rate_hz: f32) -> ContentValidity {
     if samples.is_empty() {
         return invalid("no samples captured for this channel");

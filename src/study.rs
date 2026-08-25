@@ -1,4 +1,9 @@
-//! `Study`/`Step`/`Action`/`PowerSampleWindow` — design.md §4.1-§4.4.
+//! `Study`/`Step`/`Action` — design.md §4.1-§4.3.
+//!
+//! §4.4's `PowerSampleWindow` was here and is **retired** by §3 decision
+//! 39's 2026-08-25 amendment: a `StreamSource::PowerFrontEnd { sample_hz }`
+//! tap scoped to a step range says the same thing, and was already the only
+//! one of the two anything read.
 
 use heapless::{String, Vec};
 use serde::{Deserialize, Serialize};
@@ -11,8 +16,10 @@ use crate::limits::{
 use crate::streams::StreamTap;
 use crate::validation::PostHocValidation;
 
-/// design.md §4.1. `steps_crc` is design.md §3 decision 17's integrity seal
-/// over `steps` specifically — see [`crate::crc::steps_crc`].
+/// design.md §4.1. Sealed by two sibling CRCs: `steps_crc` over `steps`
+/// (design.md §3 decision 17) and `streams_crc` over `streams` (decision
+/// 39's 2026-08-25 amendment) — see [`crate::crc`] for why there are two
+/// rather than one widened one.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Study {
     /// Human-readable identifier; not required to be unique.
@@ -53,6 +60,21 @@ pub struct Study {
     /// CRC-32 over `steps` (design.md §3 decision 17), computed by whoever
     /// submits this `Study` via [`crate::crc::steps_crc`].
     pub steps_crc: u32,
+    /// CRC-32 over `streams` (design.md §3 decision 39's 2026-08-25
+    /// amendment), computed by the same submitter via
+    /// [`crate::crc::streams_crc`]. A **sibling** of `steps_crc`, not a
+    /// widening of it: `steps_crc`'s own definition is unchanged, and each
+    /// seal is checked independently at both hops, so a mismatch says which
+    /// half is corrupt.
+    ///
+    /// `#[serde(default)]` — and, unlike `requires`, that default is
+    /// *correct* rather than merely permissive: a saved study (design.md §3
+    /// decision 38) authored before taps existed has no `streams`, and `0`
+    /// is the genuine CRC-32/ISO-HDLC of zero bytes, not a sentinel standing
+    /// in for one. Every submitter recomputes and overwrites it anyway
+    /// (`embarch-api/design.md` §3 decision 26).
+    #[serde(default)]
+    pub streams_crc: u32,
 }
 
 /// The explicit "I don't care which build" value for either
@@ -143,9 +165,6 @@ pub struct Step {
     /// Max wall-clock time dev-bench allows this step before reporting
     /// `Outcome::TimedOut`.
     pub timeout_ms: u32,
-    /// Optional power measurement bounded by this step's own start/end (or
-    /// `timeout_ms`, whichever comes first).
-    pub power_sample: Option<PowerSampleWindow>,
     /// `false` (default) aborts the `Study` on this step's `Fail`/`TimedOut`;
     /// `true` continues to the next step regardless. design.md §3 decision 13.
     #[serde(default)]
@@ -296,13 +315,19 @@ pub enum GattOperation {
     // silently-captures-nothing failure decision 36 was opened by.
 }
 
-/// design.md §4.4. No separate duration field — bound by the step's own
-/// `timeout_ms`/completion, so a window can't silently outlive or fall short
-/// of the step it characterizes.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct PowerSampleWindow {
-    pub sample_rate_hz: u32,
-}
+// `PowerSampleWindow` was here (design.md §4.4) and is **retired** by §3
+// decision 39's 2026-08-25 amendment, along with `Step.power_sample` above.
+// It carried one field, `sample_rate_hz`, naming dev-bench's power-sampling
+// rate for a step-bounded window; a `StreamSource::PowerFrontEnd
+// { sample_hz }` tap with a `StreamScope::Steps { from, to }` covering the
+// same step (§4.8) expresses exactly that.
+//
+// Retired on evidence, not on symmetry: nothing consumed it. `embarch-core`
+// took a power capture's rate from the tap, dev-bench's C encoder wrote its
+// `Option` byte as `None` unconditionally while its decoder read-and-
+// discarded it, and `study_builder::build_study` always emitted `None`.
+// Milestone 4 — the first study that would author a power capture, and one
+// that has never run — now finds one way to do it rather than two.
 
 #[cfg(test)]
 mod tests {
@@ -371,6 +396,11 @@ mod tests {
                 // authored before taps existed captured nothing, and still
                 // does.
                 assert!(study.streams.is_empty());
+                // And so does its sibling seal — with the defaulted value
+                // being the *correct* one, since 0 really is the CRC of the
+                // empty tap list this study has (crate::crc::streams_crc).
+                assert_eq!(study.streams_crc, 0);
+                assert_eq!(crate::crc::streams_crc(&study.streams).unwrap(), 0);
             })
             .unwrap()
             .join()
