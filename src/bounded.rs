@@ -1,4 +1,5 @@
-//! `Study.steps`' storage, with one shape per target — design.md §3 decision 46.
+//! Capacity-bounded sequence storage, with one shape per target — design.md
+//! §3 decisions 46 and 49.
 //!
 //! # Why this type exists
 //!
@@ -11,10 +12,17 @@
 //! serving a live `study_status` call over MCP.
 //!
 //! On a host with an allocator there is no reason to pay that. Behind the
-//! `alloc` feature the backing store becomes a heap `Vec<Step>` and the field
+//! `alloc` feature the backing store becomes a heap `Vec<T>` and the field
 //! collapses to a pointer; without it — dev-bench's `no_std` firmware build —
 //! the fixed-capacity form is retained, because that build has no allocator
 //! and decision 15's reasoning is untouched there.
+//!
+//! Decision 46 introduced this for `Study.steps` alone. Decision 49 generalised
+//! it, because `steps` was not the worst instance and not even the one that
+//! crashed the *release* build: `StudyResult.steps` was a 64-slot array of
+//! 20 KB `StepResult`s — **1.29 MB** — and `StepResult` itself was 20 KB
+//! because `gatt_activity` inlined 32 × 536-byte records whether or not a step
+//! captured any.
 //!
 //! # This narrows decision 15, it does not overturn it
 //!
@@ -29,19 +37,20 @@
 //!
 //! `heapless::Vec::push` returns `Result<(), T>`; `alloc::vec::Vec::push`
 //! returns `()`. A bare alias would make every call site compile under one
-//! feature and fail under the other. [`StepList::push`] is fallible in both
-//! shapes — under `alloc` it enforces [`MAX_STEPS_PER_STUDY`] explicitly
-//! rather than growing without bound — so call sites are written once. Every
-//! read path (`iter`, `len`, `get`, `last`, indexing, slicing) comes free via
-//! `Deref<Target = [Step]>` and needed no migration at all.
+//! feature and fail under the other. [`Bounded::push`] is fallible in both
+//! shapes — under `alloc` it enforces `N` explicitly rather than growing
+//! without bound — so call sites are written once. Every read path (`iter`,
+//! `len`, `get`, `last`, indexing, slicing) comes free via
+//! `Deref<Target = [T]>` and needed no migration at all.
 //!
 //! # The capacity bound is preserved, deliberately
 //!
 //! Under `alloc` the limit is enforced in `push` *and* in `Deserialize`. That
 //! second one matters: `Study` is deserialized from untrusted-ish input on the
-//! host (`POST /study`, a saved study file), and dropping the bound along with
-//! the inline array would turn a documented limit into an unbounded allocation
-//! driven by whatever the caller sent.
+//! host (`POST /study`, a saved study file), and `StudyResult` from
+//! `events.json`. Dropping the bound along with the inline array would turn a
+//! documented limit into an unbounded allocation driven by whatever the caller
+//! sent — which is a worse bug than the one being fixed.
 
 use core::ops::{Deref, DerefMut};
 
@@ -54,88 +63,95 @@ use crate::study::Step;
 extern crate alloc;
 
 #[cfg(feature = "alloc")]
-type Backing = alloc::vec::Vec<Step>;
+type Backing<T, const N: usize> = alloc::vec::Vec<T>;
 #[cfg(not(feature = "alloc"))]
-type Backing = heapless::Vec<Step, MAX_STEPS_PER_STUDY>;
+type Backing<T, const N: usize> = heapless::Vec<T, N>;
 
-/// The ordered steps of a [`Study`](crate::study::Study). See the module
-/// docs for why this is a newtype and what differs per feature.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct StepList(Backing);
+/// A sequence of at most `N` `T`s. See the module docs for why this is a
+/// newtype and what differs per feature.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Bounded<T, const N: usize>(Backing<T, N>);
 
-impl StepList {
-    /// An empty list.
+/// `Study.steps` (design.md §3 decision 46).
+pub type StepList = Bounded<Step, MAX_STEPS_PER_STUDY>;
+
+impl<T, const N: usize> Default for Bounded<T, N> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<T, const N: usize> Bounded<T, N> {
+    /// An empty sequence.
     pub fn new() -> Self {
         Self(Backing::new())
     }
 
-    /// The maximum number of steps a study may contain, in either shape.
-    pub const CAPACITY: usize = MAX_STEPS_PER_STUDY;
+    /// The maximum number of elements, in either shape.
+    pub const CAPACITY: usize = N;
 
-    /// Append a step, returning it back on overflow.
+    /// Append an element, returning it back on overflow.
     ///
     /// Fallible in both shapes on purpose — see the module docs. The error
     /// type matches `heapless::Vec::push`'s (`Err(value)`) so the `no_std`
     /// call sites this replaced did not have to change at all.
-    /// `clippy::result_large_err` fires because `Step` is ~600 bytes and the
-    /// `Err` variant hands it back. That is deliberate and is exactly
-    /// `heapless::Vec::push`'s own signature — matching it is what let every
-    /// `no_std` call site migrate to this type without changing a line.
-    /// Boxing the error would need `alloc`, which the `no_std` build does not
-    /// have, so the lint's suggested fix is unavailable in the shape that
-    /// needs it most.
+    ///
+    /// `clippy::result_large_err` is allowed because that match *is* the
+    /// point: `T` may be large (a `Step` is ~600 bytes, a `StepResult` ~700),
+    /// and boxing the error would need `alloc`, which the `no_std` build —
+    /// the one that needs the signature to be unchanged — does not have.
     #[allow(clippy::result_large_err)]
-    pub fn push(&mut self, step: Step) -> Result<(), Step> {
+    pub fn push(&mut self, value: T) -> Result<(), T> {
         #[cfg(feature = "alloc")]
         {
-            if self.0.len() >= MAX_STEPS_PER_STUDY {
-                return Err(step);
+            if self.0.len() >= N {
+                return Err(value);
             }
-            self.0.push(step);
+            self.0.push(value);
             Ok(())
         }
         #[cfg(not(feature = "alloc"))]
         {
-            self.0.push(step)
+            self.0.push(value)
         }
     }
 
-    /// Whether another step would fit.
+    /// Whether another element would fit.
     pub fn is_full(&self) -> bool {
-        self.0.len() >= MAX_STEPS_PER_STUDY
+        self.0.len() >= N
     }
 }
 
-impl Deref for StepList {
-    type Target = [Step];
-    fn deref(&self) -> &[Step] {
+impl<T, const N: usize> Deref for Bounded<T, N> {
+    type Target = [T];
+    fn deref(&self) -> &[T] {
         &self.0
     }
 }
 
-impl DerefMut for StepList {
-    fn deref_mut(&mut self) -> &mut [Step] {
+impl<T, const N: usize> DerefMut for Bounded<T, N> {
+    fn deref_mut(&mut self) -> &mut [T] {
         &mut self.0
     }
 }
 
-impl<'a> IntoIterator for &'a StepList {
-    type Item = &'a Step;
-    type IntoIter = core::slice::Iter<'a, Step>;
+impl<'a, T, const N: usize> IntoIterator for &'a Bounded<T, N> {
+    type Item = &'a T;
+    type IntoIter = core::slice::Iter<'a, T>;
     fn into_iter(self) -> Self::IntoIter {
         self.0.iter()
     }
 }
 
-/// Collects up to [`MAX_STEPS_PER_STUDY`] steps and **silently stops** there,
-/// matching `heapless::Vec`'s own `FromIterator` behaviour rather than
-/// inventing a different one per feature. Prefer [`StepList::push`] where the
-/// overflow needs to be observed.
-impl FromIterator<Step> for StepList {
-    fn from_iter<I: IntoIterator<Item = Step>>(iter: I) -> Self {
+/// Collects up to `N` elements and **silently stops** there, matching
+/// `heapless::Vec`'s own `FromIterator` behaviour rather than inventing a
+/// different one per feature. Prefer [`Bounded::push`] where the overflow
+/// needs to be observed.
+impl<T, const N: usize> FromIterator<T> for Bounded<T, N> {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         let mut out = Self::new();
-        for step in iter {
-            if out.push(step).is_err() {
+        for value in iter {
+            if out.push(value).is_err() {
                 break;
             }
         }
@@ -143,24 +159,24 @@ impl FromIterator<Step> for StepList {
     }
 }
 
-impl Serialize for StepList {
+impl<T: Serialize, const N: usize> Serialize for Bounded<T, N> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         // Both backings serialize as a plain sequence, which is the whole
-        // reason decision 46 needs no schema bump: nothing observable crosses
-        // either hop differently.
+        // reason decisions 46/49 need no schema bump: nothing observable
+        // crosses either hop differently.
         self.0.serialize(serializer)
     }
 }
 
-impl<'de> Deserialize<'de> for StepList {
+impl<'de, T: Deserialize<'de>, const N: usize> Deserialize<'de> for Bounded<T, N> {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let inner = Backing::deserialize(deserializer)?;
+        let inner = Backing::<T, N>::deserialize(deserializer)?;
         #[cfg(feature = "alloc")]
-        if inner.len() > MAX_STEPS_PER_STUDY {
+        if inner.len() > N {
             // heapless enforces this for us; alloc does not, and dropping the
             // bound here would turn a documented limit into an unbounded
             // allocation driven by whatever the caller sent.
-            return Err(serde::de::Error::custom("too many steps"));
+            return Err(serde::de::Error::custom("sequence exceeds its bound"));
         }
         Ok(Self(inner))
     }
@@ -284,5 +300,65 @@ mod tests {
             // that is the accepted cost on dev-bench (decision 15).
             assert_eq!(core::mem::size_of::<StepList>(), inline);
         }
+    }
+
+    /// Decision 49's own guard. `StudyResult` was **1,293,608 bytes** — a
+    /// 64-slot inline array of 20 KB `StepResult`s — and per `embarch-core`'s
+    /// own `build_runtime` comment it is the value that overflowed the stack
+    /// of the real *release* Windows service, which decision 46's `Study` fix
+    /// did not touch at all.
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn the_result_types_are_no_longer_dominated_by_inline_arrays() {
+        use crate::result::{StepResult, StudyResult};
+
+        let study_result = core::mem::size_of::<StudyResult>();
+        let step_result = core::mem::size_of::<StepResult>();
+
+        // Ceilings with real headroom, not pins. Both were more than an order
+        // of magnitude above these before decision 49.
+        assert!(
+            step_result <= 4_096,
+            "StepResult should no longer inline its GATT arrays, got {step_result}"
+        );
+        assert!(
+            study_result <= 65_536,
+            "StudyResult should no longer inline 64 StepResults, got {study_result}"
+        );
+    }
+
+    /// The `no_std` build must keep the fixed-capacity shape — dev-bench has
+    /// no allocator, and decision 15 is unchanged there. Asserted so "make it
+    /// smaller" can never be applied to the one build that cannot afford an
+    /// allocator.
+    #[cfg(not(feature = "alloc"))]
+    #[test]
+    fn the_no_std_build_keeps_its_fixed_capacity_arrays() {
+        assert!(
+            core::mem::size_of::<crate::result::StepResult>() > 4_096,
+            "the no_std shape must still inline its arrays"
+        );
+    }
+
+    /// A `Bounded` and the `heapless::Vec` it replaces must be
+    /// indistinguishable on the wire — the whole basis for decisions 46/49
+    /// needing no schema bump. Asserted for a non-`Step` element type too,
+    /// since decision 49 applied the newtype to three more fields with
+    /// different element types.
+    #[test]
+    fn any_element_type_is_wire_compatible_with_the_heapless_shape() {
+        let mut bounded: Bounded<u32, 8> = Bounded::new();
+        let mut legacy: heapless::Vec<u32, 8> = heapless::Vec::new();
+        for v in [1u32, 2, 3] {
+            bounded.push(v).unwrap();
+            legacy.push(v).unwrap();
+        }
+
+        let mut a = [0u8; 64];
+        let mut b = [0u8; 64];
+        assert_eq!(
+            postcard::to_slice(&bounded, &mut a).unwrap(),
+            postcard::to_slice(&legacy, &mut b).unwrap()
+        );
     }
 }

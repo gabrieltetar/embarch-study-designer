@@ -124,9 +124,9 @@ mod tests {
 
     #[test]
     fn same_steps_produce_same_crc() {
-        let mut a: crate::step_list::StepList = crate::step_list::StepList::new();
+        let mut a: crate::bounded::StepList = crate::bounded::StepList::new();
         a.push(step("connect")).unwrap();
-        let mut b: crate::step_list::StepList = crate::step_list::StepList::new();
+        let mut b: crate::bounded::StepList = crate::bounded::StepList::new();
         b.push(step("connect")).unwrap();
 
         assert_eq!(steps_crc(&a).unwrap(), steps_crc(&b).unwrap());
@@ -134,9 +134,9 @@ mod tests {
 
     #[test]
     fn different_steps_produce_different_crc() {
-        let mut a: crate::step_list::StepList = crate::step_list::StepList::new();
+        let mut a: crate::bounded::StepList = crate::bounded::StepList::new();
         a.push(step("connect")).unwrap();
-        let mut b: crate::step_list::StepList = crate::step_list::StepList::new();
+        let mut b: crate::bounded::StepList = crate::bounded::StepList::new();
         b.push(step("connect-2")).unwrap();
 
         assert_ne!(steps_crc(&a).unwrap(), steps_crc(&b).unwrap());
@@ -167,7 +167,7 @@ mod tests {
     /// *which* half is corrupt.
     #[test]
     fn the_two_seals_are_independent() {
-        let mut steps: crate::step_list::StepList = crate::step_list::StepList::new();
+        let mut steps: crate::bounded::StepList = crate::bounded::StepList::new();
         steps.push(step("connect")).unwrap();
         let mut streams: Vec<StreamTap, MAX_STREAMS_PER_STUDY> = Vec::new();
         streams.push(tap(0, "power")).unwrap();

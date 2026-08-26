@@ -265,7 +265,7 @@ pub fn build_study(
         return Err(BuildStudyError::TooManySteps { max: MAX_STEPS_PER_STUDY, actual: rows.len() });
     }
 
-    let mut steps: crate::step_list::StepList = crate::step_list::StepList::new();
+    let mut steps: crate::bounded::StepList = crate::bounded::StepList::new();
     for row in rows {
         let action = resolve_action(&row.action, registry)?;
         let step = Step {

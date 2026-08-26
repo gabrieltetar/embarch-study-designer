@@ -314,7 +314,7 @@ mod tests {
 
     #[test]
     fn detects_crc_match_and_mismatch() {
-        let mut steps = crate::step_list::StepList::new();
+        let mut steps = crate::bounded::StepList::new();
         steps
             .push(crate::study::Step {
                 name: String::try_from("connect").unwrap(),
@@ -351,7 +351,7 @@ mod tests {
     }
 
     fn ble_advertise_study() -> Study {
-        let mut steps = crate::step_list::StepList::new();
+        let mut steps = crate::bounded::StepList::new();
         steps
             .push(crate::study::Step {
                 name: String::try_from("advertise-1").unwrap(),
@@ -437,7 +437,7 @@ mod tests {
 
     #[test]
     fn decode_full_rejects_unsupported_action() {
-        let mut steps = crate::step_list::StepList::new();
+        let mut steps = crate::bounded::StepList::new();
         steps
             .push(crate::study::Step {
                 name: String::try_from("connect").unwrap(),

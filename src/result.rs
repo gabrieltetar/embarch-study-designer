@@ -21,7 +21,7 @@ use crate::validation::ValidationResult;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StudyResult {
     pub study_name: String<MAX_STUDY_NAME_LEN>,
-    pub steps: Vec<StepResult, MAX_STEPS_PER_STUDY>,
+    pub steps: crate::bounded::Bounded<StepResult, MAX_STEPS_PER_STUDY>,
     pub validations: Vec<ValidationResult, MAX_VALIDATIONS_PER_STUDY>,
     /// What this run actually executed against, and how each version was
     /// established (design.md §3 decision 40, §4.5). Closes a gap wider than
@@ -178,10 +178,10 @@ pub struct StepResult {
     /// `#[serde(default)]` so a `Study`/`StudyResult` JSON predating this
     /// field still deserializes.
     #[serde(default)]
-    pub gatt_services: Option<Vec<GattServiceInfo, MAX_DISCOVERED_SERVICES>>,
+    pub gatt_services: Option<crate::bounded::Bounded<GattServiceInfo, MAX_DISCOVERED_SERVICES>>,
     /// Populated only by `Action::GattMonitorAll` (design.md §3 decision 32).
     #[serde(default)]
-    pub gatt_activity: Option<Vec<GattActivityRecord, MAX_GATT_ACTIVITY_RECORDS>>,
+    pub gatt_activity: Option<crate::bounded::Bounded<GattActivityRecord, MAX_GATT_ACTIVITY_RECORDS>>,
 }
 
 /// The only on-device validation signal — did the action complete without a
