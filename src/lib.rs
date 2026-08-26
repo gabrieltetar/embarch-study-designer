@@ -25,6 +25,11 @@
 // large on the stack is the accepted trade-off for staying allocator-free.
 #![allow(clippy::large_enum_variant)]
 
+// `alloc` is opted into by host consumers (design.md §3 decision 46) and is
+// unavailable to dev-bench firmware, so every use of it is feature-gated.
+#[cfg(feature = "alloc")]
+extern crate alloc;
+
 pub mod crc;
 #[cfg(feature = "ffi")]
 pub mod ffi;
@@ -33,6 +38,7 @@ pub mod gatt;
 pub mod gatt_extract;
 pub mod ids;
 pub mod limits;
+pub mod outpost;
 #[cfg(feature = "study-ui")]
 pub mod merged_actions;
 pub mod protocol;
@@ -372,7 +378,7 @@ mod tests {
             source: StreamSource::Signal {
                 name: heapless::String::try_from("outpost").unwrap(),
             },
-            encoding: StreamEncoding::OutpostTrace { manifest_crc: 0xDEAD_BEEF },
+            encoding: StreamEncoding::OutpostTrace,
             scope: StreamScope::WholeStudy,
         };
 

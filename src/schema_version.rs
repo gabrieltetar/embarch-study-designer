@@ -151,7 +151,22 @@
 ///   (`schema_version`, `firmware_version`), which is why it costs a wire
 ///   bump and no new mechanism. **Wire**, and the host constant moves with
 ///   it as always.
-pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 10;
+/// - **v11** (`embarch-outpost/design.md` §3 decision 9, Milestone 7 Phase C).
+///   `StreamEncoding::OutpostTrace` loses its `manifest_crc` payload and
+///   becomes a unit variant. **Wire**, unavoidably: `StreamEncoding` rides
+///   `StudyStart` inside every `StreamTap`, and dev-bench's decoder has to
+///   walk past the variant even though it never interprets one — its tag 4
+///   arm stops reading a varint.
+///
+///   Worth stating why a *removal* was affordable at all: the field encoded a
+///   mechanism decision 9 had already reversed (a post-link manifest CRC the
+///   firmware cannot know) and bound the wrong moment (study-authoring time,
+///   the staleness pattern that decision exists to avoid). Phase C producing
+///   the first real manifest is what made both visible. `embarch-dev-bench`'s
+///   firmware still had not been flashed when this landed, which is the same
+///   window decisions 29/39 were spent in and the reason this cost a reshape
+///   rather than a migration.
+pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 11;
 
 /// Served by `embarch-core`'s `GET /status` and compared by `embarch-api`
 /// against its own compiled-in copy before submitting a `Study` (design.md
@@ -215,7 +230,9 @@ pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 10;
 ///   be numbered before the other shipped. That re-derivation is
 ///   [embarch-decision-reversals.md](../embarch-decision-reversals.md) row
 ///   18's protocol working as intended, not a mistake being corrected.
-pub const HOST_TYPE_SCHEMA_VERSION: u32 = 12;
+/// - **v13** — a wire bump (`StreamEncoding::OutpostTrace` becomes a unit
+///   variant), so this follows by the superset rule rather than by judgement.
+pub const HOST_TYPE_SCHEMA_VERSION: u32 = 13;
 
 /// [`HOST_TYPE_SCHEMA_VERSION`]'s triggers are a strict superset of
 /// [`DEV_BENCH_WIRE_SCHEMA_VERSION`]'s (design.md §3 decision 12's

@@ -189,11 +189,34 @@ pub enum StreamEncoding {
     /// defined that field to mean.
     GattTranscript,
     /// Decoded against a build-time manifest from the DUT's own firmware
-    /// build (`embarch-outpost/design.md` §3 decision 9). `manifest_crc`
-    /// is the manifest the study was authored against; a running firmware
-    /// reporting a different one **refuses to decode rather than decoding
-    /// wrong** — the raw bytes are still written either way.
-    OutpostTrace { manifest_crc: u32 },
+    /// build (`embarch-outpost/design.md` §3 decision 9), via
+    /// [`crate::outpost`]. A firmware whose header frame reports a different
+    /// build **refuses to decode rather than decoding wrong** — the raw bytes
+    /// are still written either way.
+    ///
+    /// **A unit variant, corrected 2026-08-25 when Phase C produced the first
+    /// real manifest.** This shipped as `OutpostTrace { manifest_crc: u32 }`,
+    /// meaning "the manifest this study was authored against", and both halves
+    /// of that were wrong:
+    ///
+    /// * **The firmware cannot report a manifest CRC.** The manifest is
+    ///   generated *from the linked image* — it holds thread and ISR tables
+    ///   read out of the ELF — so there is no CRC the firmware could have been
+    ///   built knowing. The field encoded the post-link CRC patch that
+    ///   `embarch-outpost/design.md` §3 decision 9's own rework had already
+    ///   replaced with a compile-time build ID; the type layer kept the
+    ///   mechanism the decision dropped.
+    /// * **Author-time is the wrong moment to bind it.** A CRC chosen when the
+    ///   study was written is a persisted record of resolved state consulted at
+    ///   a later, unrelated moment — the write-ahead staleness pattern
+    ///   `embarch-topology/design.md` §3 decision 3 exists to eliminate, and
+    ///   the one decision 9 spent three paragraphs distinguishing itself from.
+    ///   A saved study would go stale on the next rebuild.
+    ///
+    /// Which manifest is a Core-side runtime question, answered by the flash
+    /// that bound it and verified by the build ID in the stream's own header.
+    /// The tap declares only what the bytes *are*.
+    OutpostTrace,
 }
 
 /// How to read scalar elements out of a [`StreamEncoding::Samples`] payload
