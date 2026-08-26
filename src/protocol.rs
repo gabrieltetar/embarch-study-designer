@@ -130,6 +130,16 @@ pub enum DevBenchMessage {
         /// dev-bench's hand-written C, or reshuffling this message's field
         /// order — a reshape where an append will do.
         streams_crc: u32,
+        /// How loud dev-bench should be for this study
+        /// (`embarch-dev-bench/design.md` §3 decision 39). Appended after
+        /// `streams_crc`, never inserted — postcard is positional.
+        ///
+        /// A scalar rather than a per-tap property, and deliberately not
+        /// carried on the reserved `DevBenchLog` tap that stores the result:
+        /// that tap is synthesized by Core and never crosses this hop at all
+        /// (§4.8), and "how verbose is the bench" is a property of the run,
+        /// not of one capture channel.
+        dev_bench_log_level: crate::study::DevBenchLogLevel,
     },
     /// Sent by dev-bench as each step completes, streaming results back
     /// incrementally rather than batched at the end (design.md §3 decision

@@ -130,6 +130,11 @@ fn dump_study_start_wire_bytes() {
         steps_crc: crc,
         streams,
         streams_crc: streams_crc_value,
+        // Deliberately **not** the default (`Warn`, discriminant 2) — schema
+        // v13's new field is pinned here precisely so an off-by-one in
+        // dev-bench's decode of it cannot hide behind a value that happens to
+        // match whatever the C side left in the struct. `Debug` is 4.
+        dev_bench_log_level: embarch_study_designer::DevBenchLogLevel::Debug,
     };
     let mut buf = [0u8; 4096];
     let encoded = postcard::to_slice(&msg, &mut buf).unwrap();
@@ -210,6 +215,11 @@ fn dump_study_start_with_taps_wire_bytes() {
         steps_crc: crc,
         streams,
         streams_crc: streams_crc_value,
+        // Deliberately **not** the default (`Warn`, discriminant 2) — schema
+        // v13's new field is pinned here precisely so an off-by-one in
+        // dev-bench's decode of it cannot hide behind a value that happens to
+        // match whatever the C side left in the struct. `Debug` is 4.
+        dev_bench_log_level: embarch_study_designer::DevBenchLogLevel::Debug,
     };
     let mut buf = [0u8; 4096];
     let encoded = postcard::to_slice(&msg, &mut buf).unwrap();
@@ -320,6 +330,11 @@ fn dump_study_start_with_security_wire_bytes() {
         steps_crc: crc,
         streams,
         streams_crc: streams_crc_value,
+        // Deliberately **not** the default (`Warn`, discriminant 2) — schema
+        // v13's new field is pinned here precisely so an off-by-one in
+        // dev-bench's decode of it cannot hide behind a value that happens to
+        // match whatever the C side left in the struct. `Debug` is 4.
+        dev_bench_log_level: embarch_study_designer::DevBenchLogLevel::Debug,
     };
     let mut buf = [0u8; 4096];
     let encoded = postcard::to_slice(&msg, &mut buf).unwrap();

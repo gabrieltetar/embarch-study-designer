@@ -310,6 +310,14 @@ pub fn build_study(
         // list (`crate::crc::streams_crc`) — but it is not written *as* a
         // correct value, for the same reason `steps_crc` isn't.
         streams_crc: 0,
+        // Defaulted rather than taken from the caller, unlike `requires`
+        // above: an unstated log level has a *correct* answer (be quiet, keep
+        // errors and warnings — `DevBenchLogLevel`'s own default), whereas an
+        // unstated `requires` has only a permissive one. A study author who
+        // wants a louder bench for one run says so; a study author who says
+        // nothing gets the level every study before this field existed already
+        // ran at.
+        dev_bench_log_level: crate::study::DevBenchLogLevel::default(),
     })
 }
 

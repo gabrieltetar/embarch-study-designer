@@ -192,7 +192,13 @@
 ///   declaration order (`BleSecurity` = 7, `BleUnbond` = 8), never inserted
 ///   — the same rule every previous `Action` addition followed, for the same
 ///   reason: postcard encodes the discriminant positionally.
-pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 12;
+///
+/// - **v13** — `StudyStart` gains `dev_bench_log_level`
+///   ([`crate::study::DevBenchLogLevel`], `embarch-dev-bench/design.md` §3
+///   decision 39). Appended after `streams_crc`, and a wire bump by the
+///   plainest possible reading of this constant's rule: dev-bench parses the
+///   field and acts on it.
+pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 13;
 
 /// Served by `embarch-core`'s `GET /status` and compared by `embarch-api`
 /// against its own compiled-in copy before submitting a `Study` (design.md
@@ -261,7 +267,11 @@ pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 12;
 /// - **v14** — a wire bump (§3 decisions 44/50: `Action::BleSecurity`,
 ///   `Action::BleUnbond`, `StepResult.security_level`), so this follows by
 ///   the superset rule rather than by judgement.
-pub const HOST_TYPE_SCHEMA_VERSION: u32 = 14;
+/// - **v15** — a wire bump (v13's `StudyStart.dev_bench_log_level`), plus the
+///   `Study.dev_bench_log_level` field that feeds it, which crosses
+///   `embarch-api` -> `embarch-core` as JSON. Follows by the superset rule
+///   either way.
+pub const HOST_TYPE_SCHEMA_VERSION: u32 = 15;
 
 /// [`HOST_TYPE_SCHEMA_VERSION`]'s triggers are a strict superset of
 /// [`DEV_BENCH_WIRE_SCHEMA_VERSION`]'s (design.md §3 decision 12's

@@ -15,6 +15,71 @@ use crate::limits::{
 };
 use crate::streams::StreamTap;
 
+/// How loud dev-bench's own firmware should be **for the duration of one
+/// study** (`embarch-dev-bench/design.md` §3 decision 39).
+///
+/// **Why this is per-study and not a build-time setting.** Decision 38 turned
+/// `CONFIG_LOG` on in the bench firmware and forwarded every record to Core as
+/// a `LogLine`. That made the bench's own account of a run available for the
+/// first time, and it made it available *always* — which is the wrong default
+/// for a link the study protocol shares: at `Info` the Zephyr BT host is
+/// genuinely chatty, and every 128-byte `LogLine` is ~1.3 ms of a 1 Mbaud wire
+/// that a timing measurement is also using. A compile-time level forced the
+/// choice to be made once, for every study, by whoever last edited `prj.conf`.
+///
+/// So the study says. The level a study asks for is applied by dev-bench when
+/// the study starts and reverted when it ends, so the bench is quiet again
+/// before the next one — see that decision for the revert rules.
+///
+/// [`Self::Warn`] is the default rather than [`Self::Off`], and that is a
+/// deliberate asymmetry: an `<err>`/`<wrn>` line is rare by construction and
+/// is *exactly* what someone wants to read about the run that just failed, so
+/// paying for it on every study is worth it. `Off` exists for the study that
+/// genuinely needs a clear link and is willing to be blind.
+///
+/// Fieldless, so postcard encodes it as a single varint discriminant. Variants
+/// are appended, never reordered — the same positional-encoding rule every
+/// other enum on this wire follows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum DevBenchLogLevel {
+    /// Send nothing. Not even errors, and not even the fatal-error dump —
+    /// the only setting under which a crash mid-study goes unreported.
+    Off,
+    /// Errors only.
+    Error,
+    /// Errors and warnings. The default (see above).
+    #[default]
+    Warn,
+    /// Adds informational records, including the Zephyr BT host's own account
+    /// of connecting, pairing and discovering. The level for "this study is
+    /// failing and I want to know what the radio thinks."
+    Info,
+    /// Everything the firmware was built with. Expect this to cost real link
+    /// bandwidth during BLE-heavy steps.
+    Debug,
+}
+
+impl DevBenchLogLevel {
+    /// The Zephyr severity number this maps to (`LOG_LEVEL_NONE` = 0 through
+    /// `LOG_LEVEL_DBG` = 4), which is what dev-bench passes to
+    /// `log_filter_set`.
+    ///
+    /// Kept here rather than in the firmware so both ends read the mapping
+    /// from one place — it is small, but it is exactly the sort of hand-mirrored
+    /// constant this project has already had go stale twice
+    /// (`embarch-dev-bench/app/CMakeLists.txt`'s own comment on
+    /// `STUDY_FFI_STUB_SCHEMA_VERSION`).
+    pub const fn zephyr_level(self) -> u8 {
+        match self {
+            Self::Off => 0,
+            Self::Error => 1,
+            Self::Warn => 2,
+            Self::Info => 3,
+            Self::Debug => 4,
+        }
+    }
+}
+
 /// design.md §4.1. Sealed by two sibling CRCs: `steps_crc` over `steps`
 /// (design.md §3 decision 17) and `streams_crc` over `streams` (decision
 /// 39's 2026-08-25 amendment) — see [`crate::crc`] for why there are two
@@ -71,6 +136,23 @@ pub struct Study {
     /// (`embarch-api/design.md` §3 decision 26).
     #[serde(default)]
     pub streams_crc: u32,
+    /// How loud dev-bench's firmware should be while this study runs
+    /// (`embarch-dev-bench/design.md` §3 decision 39). Crosses the wire to
+    /// dev-bench on `DevBenchMessage::StudyStart`, unlike `requires`, because
+    /// it is an instruction dev-bench acts on rather than a fact about the
+    /// host's expectations.
+    ///
+    /// **Sealed by neither CRC, on purpose.** `steps_crc` covers what
+    /// dev-bench executes and `streams_crc` covers what it captures; how
+    /// verbose it is about doing so changes neither, and a study re-run at a
+    /// louder level must stay the same study by every check that matters.
+    ///
+    /// `#[serde(default)]` so every study authored before this field existed
+    /// still loads, at [`DevBenchLogLevel::Warn`] — which is what those
+    /// studies already effectively ran at, so the default is *correct* here
+    /// and not merely permissive.
+    #[serde(default)]
+    pub dev_bench_log_level: DevBenchLogLevel,
 }
 
 /// The explicit "I don't care which build" value for either
