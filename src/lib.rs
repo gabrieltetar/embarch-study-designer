@@ -10,15 +10,15 @@
 //! 17`, etc.) point back into that document.
 //!
 //! `#![no_std]` by default (design.md §3 decision 5) — the `std` feature
-//! lifts that, solely so the `core-validation` feature (§3 decision 19) can
-//! use floating-point/statistics helpers. Every sequence/string field uses
+//! lifts that, solely so the `gatt-extract`/`study-ui` features' authoring-time
+//! tools can use the filesystem. Every sequence/string field uses
 //! fixed-capacity `heapless` collections, not `alloc` (§3 decision 15) — with
 //! exactly one opt-in exception, added by design decision 46: the `alloc`
 //! feature backs `Study.steps` with a heap `Vec` instead of a 64-slot inline
 //! array, for host consumers that have an allocator anyway and were paying
 //! ~38 KB of stack per `Study` to carry two steps. It is **off by default**,
 //! so dev-bench firmware and every default build of this crate still require
-//! no global allocator. See [`step_list`] for the full reasoning.
+//! no global allocator. See [`bounded`] for the full reasoning.
 #![cfg_attr(not(feature = "std"), no_std)]
 // `Box`-ing large enum variants would need `alloc`, which decision 15
 // deliberately rules out end to end — `MAX_PAYLOAD_LEN`-sized variants being
@@ -42,13 +42,10 @@ pub mod result;
 pub mod sample;
 pub mod bounded;
 pub mod schema_version;
-#[cfg(feature = "core-validation")]
-pub mod signal;
 pub mod streams;
 pub mod study;
 #[cfg(feature = "study-ui")]
 pub mod study_builder;
-pub mod validation;
 pub mod vendor;
 
 pub use crc::{steps_crc, streams_crc, StepTooLargeError, StreamTapTooLargeError};
@@ -82,10 +79,6 @@ pub use study::{
 };
 #[cfg(feature = "study-ui")]
 pub use study_builder::{build_study, BuildStudyError, BuiltInActionKind, RoleChoice, RowAction, TableRow};
-pub use validation::{
-    ContentValidity, DataChannel, ExpectedValue, PostHocCheck, PostHocValidation, SignalCheck,
-    ValidationResult, ValidationSource,
-};
 pub use vendor::{VendorCharacteristic, VendorService, NORDIC_UART_SERVICE};
 
 #[cfg(test)]
@@ -126,7 +119,6 @@ mod tests {
             name: heapless::String::try_from("smoke-test").unwrap(),
             requires: Requirements::any(),
             steps,
-            validations: HVec::new(),
             streams,
             steps_crc,
             streams_crc,
@@ -217,8 +209,8 @@ mod tests {
 
     #[test]
     fn requires_never_crosses_the_wire_to_dev_bench() {
-        // design.md §3 decision 40: `requires` is host-side only, exactly as
-        // `validations` is (§3 decision 17). dev-bench has no use for a
+        // design.md §3 decision 40: `requires` is host-side only. dev-bench
+        // has no use for a
         // requirement it cannot check about itself, and `steps_crc` seals
         // what dev-bench actually executes, which is unchanged.
         //
@@ -944,66 +936,6 @@ mod tests {
         }
     }
 
-    /// design.md §3 decision 19's 2026-08-25 amendment: a stream-fed check
-    /// names the tap and carries **no** `step_index`, because when a tap is
-    /// open is a property of its declared scope, not of a step.
-    #[test]
-    fn a_tap_sourced_validation_names_the_tap_and_carries_no_step_index() {
-        let source = ValidationSource::Tap {
-            name: heapless::String::try_from("outpost").unwrap(),
-        };
 
-        let mut buf = [0u8; 64];
-        let encoded = postcard::to_slice(&source, &mut buf).unwrap();
-        let decoded: ValidationSource = postcard::from_bytes(encoded).unwrap();
-        assert_eq!(source, decoded);
 
-        let json = serde_json::to_string(&source).unwrap();
-        // Structural, not a type reading: the serialized form has no
-        // `step_index` key at all for a tap target.
-        assert!(!json.contains("step_index"), "{json}");
-        let decoded: ValidationSource = serde_json::from_str(&json).unwrap();
-        assert_eq!(source, decoded);
-
-        // A per-step target still has one, and still means decision 14's
-        // array position.
-        let per_step = ValidationSource::Step { step_index: 3, channel: DataChannel::CapturedData };
-        let json = serde_json::to_string(&per_step).unwrap();
-        assert!(json.contains("step_index"), "{json}");
-        let decoded: ValidationSource = serde_json::from_str(&json).unwrap();
-        assert_eq!(per_step, decoded);
-    }
-
-    /// A `ValidationResult` reports the source it was produced from whole,
-    /// so a tap-sourced result is not forced to invent a `step_index` it
-    /// never had.
-    #[test]
-    fn a_validation_result_carries_the_whole_source() {
-        let result = ValidationResult {
-            source: ValidationSource::Tap {
-                name: heapless::String::try_from("power").unwrap(),
-            },
-            result: ContentValidity::Invalid {
-                reason: heapless::String::try_from("mean out of range").unwrap(),
-            },
-        };
-
-        let json = serde_json::to_string(&result).unwrap();
-        assert!(!json.contains("step_index"), "{json}");
-        let decoded: ValidationResult = serde_json::from_str(&json).unwrap();
-        assert_eq!(result, decoded);
-    }
-
-    #[test]
-    fn data_channel_gatt_activity_round_trips() {
-        let channel = DataChannel::GattActivity;
-        let mut buf = [0u8; 16];
-        let encoded = postcard::to_slice(&channel, &mut buf).unwrap();
-        let decoded: DataChannel = postcard::from_bytes(encoded).unwrap();
-        assert_eq!(channel, decoded);
-
-        let json = serde_json::to_string(&channel).unwrap();
-        let decoded: DataChannel = serde_json::from_str(&json).unwrap();
-        assert_eq!(channel, decoded);
-    }
 }

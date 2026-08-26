@@ -94,7 +94,7 @@ pub enum DevBenchMessage {
         /// which `id` each one answers to on `StreamOpen`/
         /// `StreamChunkBatch`/`StreamClose`.
         ///
-        /// `Study.validations` and `Study.requires` still never cross this
+        /// `Study.requires` still never crosses this
         /// hop (design.md §3 decisions 17, 40) — neither is anything
         /// dev-bench could act on. **`steps_crc` still seals `steps`
         /// alone**; `streams` has its own sibling seal, `streams_crc`

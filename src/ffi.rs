@@ -122,11 +122,9 @@ impl EssdStep {
 }
 
 /// Mirrors `Study` (design.md §4.1), `steps` narrowed to [`EssdStep`] -- see
-/// `essd_study_decode_full`'s doc comment. `validations`/`steps_crc` are not
-/// carried into this struct: `validations` is Core-only and never needed by a
-/// C caller dispatching steps (same as it's never transmitted to dev-bench at
-/// all, design.md §3 decision 17), and `steps_crc` has already been checked
-/// by the time this struct is populated.
+/// `essd_study_decode_full`'s doc comment. `steps_crc` is not carried into
+/// this struct: it has already been checked by the time this struct is
+/// populated.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct EssdStudy {
@@ -330,7 +328,6 @@ mod tests {
             name: String::try_from("t").unwrap(),
             requires: crate::study::Requirements::any(),
             steps: steps.clone(),
-            validations: Vec::new(),
             streams: Vec::new(),
             steps_crc,
             streams_crc: 0,
@@ -384,7 +381,6 @@ mod tests {
             name: String::try_from("ble-advertise-study").unwrap(),
             requires: crate::study::Requirements::any(),
             steps,
-            validations: Vec::new(),
             streams: Vec::new(),
             steps_crc,
             streams_crc: 0,
@@ -452,7 +448,6 @@ mod tests {
             name: String::try_from("t").unwrap(),
             requires: crate::study::Requirements::any(),
             steps,
-            validations: Vec::new(),
             streams: Vec::new(),
             steps_crc,
             streams_crc: 0,

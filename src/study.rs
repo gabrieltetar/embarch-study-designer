@@ -11,10 +11,9 @@ use serde::{Deserialize, Serialize};
 use crate::ids::{BleAddress, Uuid};
 use crate::limits::{
     MAX_FIRMWARE_VERSION_LEN, MAX_LOCAL_NAME_LEN, MAX_NAME_LEN, MAX_PAYLOAD_LEN, MAX_SERVICE_UUIDS,
-    MAX_STREAMS_PER_STUDY, MAX_STUDY_NAME_LEN, MAX_VALIDATIONS_PER_STUDY,
+    MAX_STREAMS_PER_STUDY, MAX_STUDY_NAME_LEN,
 };
 use crate::streams::StreamTap;
-use crate::validation::PostHocValidation;
 
 /// design.md §4.1. Sealed by two sibling CRCs: `steps_crc` over `steps`
 /// (design.md §3 decision 17) and `streams_crc` over `streams` (decision
@@ -26,7 +25,7 @@ pub struct Study {
     pub name: String<MAX_STUDY_NAME_LEN>,
     /// The builds this study is meant to run against (design.md §3 decision
     /// 40, §4.1). **Host-side only — never transmitted to dev-bench**,
-    /// exactly as `validations` isn't: dev-bench has no use for a
+    /// dev-bench has no use for a
     /// requirement it cannot check about itself, and `steps_crc` seals what
     /// dev-bench actually executes, which is unchanged.
     ///
@@ -39,14 +38,11 @@ pub struct Study {
     pub requires: Requirements,
     /// Run in order. Entirely static once submitted for v1.
     pub steps: crate::bounded::StepList,
-    /// Never transmitted to dev-bench (§3 decision 17) — Core-only,
-    /// evaluated post-hoc once the study reaches `"completed"` (§4.6).
-    pub validations: Vec<PostHocValidation, MAX_VALIDATIONS_PER_STUDY>,
     /// Declared capture channels for this study (design.md §3 decision 39,
     /// §4.8) — the one generic inbound stream pipeline that replaced power,
     /// sensor-waveform, and GATT-transcript capture as three separate ones.
     ///
-    /// Unlike `validations`/`requires`, this **does** cross the wire to
+    /// Unlike `requires`, this **does** cross the wire to
     /// dev-bench, on `DevBenchMessage::StudyStart`: four of the five
     /// [`StreamSource`](crate::streams::StreamSource) variants are
     /// dev-bench-mediated, so dev-bench has to know which taps to open and
@@ -385,11 +381,11 @@ mod tests {
             .spawn(|| {
                 // Mandatory on purpose (decision 40): omitting it must fail,
                 // not silently become "any".
-                let without = r#"{"name":"s","steps":[],"validations":[],"steps_crc":0}"#;
+                let without = r#"{"name":"s","steps":[],"steps_crc":0}"#;
                 assert!(serde_json::from_str::<Study>(without).is_err());
 
                 let with = r#"{"name":"s","requires":{"dev_bench_version":"any",
-                    "firmware_version":"any"},"steps":[],"validations":[],"steps_crc":0}"#;
+                    "firmware_version":"any"},"steps":[],"steps_crc":0}"#;
                 let study: Study = serde_json::from_str(with).unwrap();
                 assert_eq!(study.requires, Requirements::any());
                 // `streams`, unlike `requires`, defaults: a saved study
