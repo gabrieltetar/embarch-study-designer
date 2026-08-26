@@ -188,7 +188,18 @@ pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 9;
 ///   amendment said would happen "on the first host-only pass" and which is
 ///   the only real evidence the mechanism works — equal numbers proved
 ///   nothing.
-pub const HOST_TYPE_SCHEMA_VERSION: u32 = 10;
+/// - **v11** — post-hoc validation is **removed outright**. `Study.validations`,
+///   `StudyResult.validations`, `PostHocValidation`, `PostHocCheck`,
+///   `ExpectedValue`, `SignalCheck`, `ValidationSource`, `DataChannel`,
+///   `ContentValidity` and `ValidationResult` are all gone, along with the
+///   `core-validation` feature and `signal.rs`'s evaluation logic. The second
+///   bump to move this constant alone, and for the cleanest possible reason:
+///   none of it ever crossed the dev-bench wire (§3 decision 17), so
+///   [`DEV_BENCH_WIRE_SCHEMA_VERSION`] is untouched at 9 and dev-bench needs
+///   no reflash. A removal is exactly as breaking as an addition on this hop —
+///   an api built before this and a Core built after it disagree about
+///   `Study`'s shape — which is what this constant exists to refuse.
+pub const HOST_TYPE_SCHEMA_VERSION: u32 = 11;
 
 /// [`HOST_TYPE_SCHEMA_VERSION`]'s triggers are a strict superset of
 /// [`DEV_BENCH_WIRE_SCHEMA_VERSION`]'s (design.md §3 decision 12's

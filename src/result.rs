@@ -7,22 +7,18 @@ use crate::gatt::{GattActivityRecord, GattServiceInfo};
 use crate::limits::{
     MAX_DISCOVERED_SERVICES, MAX_FAIL_REASON_LEN, MAX_FIRMWARE_VERSION_LEN,
     MAX_GATT_ACTIVITY_RECORDS, MAX_NAME_LEN, MAX_PAYLOAD_LEN, MAX_STEPS_PER_STUDY,
-    MAX_STREAMS_PER_STUDY, MAX_STUDY_NAME_LEN, MAX_VALIDATIONS_PER_STUDY,
+    MAX_STREAMS_PER_STUDY, MAX_STUDY_NAME_LEN,
     MAX_VERSION_OVERRIDES,
 };
 use crate::streams::StreamRef;
-use crate::validation::ValidationResult;
 
 /// The aggregate outcome of running a `Study`. `steps` is a proper prefix of
 /// the submitted `Study.steps` when a step with `continue_on_fail: false`
 /// (the default) fails — not guaranteed to cover every submitted step.
-/// `validations` is populated only once the study reaches `"completed"`
-/// status; it stays empty on any `"failed"` outcome. design.md §3 decision 19.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StudyResult {
     pub study_name: String<MAX_STUDY_NAME_LEN>,
     pub steps: crate::bounded::Bounded<StepResult, MAX_STEPS_PER_STUDY>,
-    pub validations: Vec<ValidationResult, MAX_VALIDATIONS_PER_STUDY>,
     /// What this run actually executed against, and how each version was
     /// established (design.md §3 decision 40, §4.5). Closes a gap wider than
     /// the one it was raised for: before this, two runs of the same study

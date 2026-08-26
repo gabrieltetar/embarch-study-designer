@@ -290,7 +290,6 @@ pub fn build_study(
         // it (`embarch-ui/design.md` §3 decision 11, Milestone 7 Phase D).
         requires,
         steps,
-        validations: HVec::new(),
         streams: HVec::new(),
         steps_crc: 0,
         // Both seals are left at 0 here, and both are overwritten by

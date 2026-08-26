@@ -54,17 +54,12 @@ default = []
 # which is what actually crashed a debug embarch-api. No wire effect — both
 # backings serialize as a plain sequence.
 alloc = []
-# Enables std, only so `core-validation` can use floating-point/statistics helpers
-# from the standard library. embarch-api and dev-bench firmware never enable this.
+# Enables std for the authoring-time tools (`gatt-extract`, `study-ui`).
+# dev-bench firmware never enables this.
 # `std` implies `alloc`: a build with the standard library has a global
 # allocator by definition, so there is no coherent "std but keep the 64-slot
 # inline array" configuration to preserve (decision 46).
 std = ["alloc"]
-# Gates the SignalCheck evaluation logic (design.md §3 decision 19) behind an
-# explicit feature only embarch-core's build turns on — embarch-api and dev-bench
-# firmware link the crate without it, so they see/serialize every SignalCheck
-# variant but never compile the code that evaluates one against real samples.
-core-validation = ["std"]
 # Exposes the extern "C" surface dev-bench firmware links against (design.md
 # §3 decisions 7, 23). Off by default so embarch-core/embarch-api (plain
 # Cargo dependents) don't carry unused #[no_mangle] symbols.

@@ -23,8 +23,6 @@ pub const MAX_LOCAL_NAME_LEN: usize = 26;
 pub const MAX_PAYLOAD_LEN: usize = 512;
 /// `Outcome::Fail.reason`, `ContentValidity::Invalid.reason`.
 pub const MAX_FAIL_REASON_LEN: usize = 64;
-/// `Study.validations`, `StudyResult.validations`.
-pub const MAX_VALIDATIONS_PER_STUDY: usize = 64;
 /// `Sample::to_csv_row`'s returned buffer (design.md §4.7): sized to
 /// comfortably fit `rx_utc_ms` (up to 20 ASCII digits for a `u64`), a
 /// `MAX_NAME_LEN`-bounded step name, a formatted `value`, and separators.
