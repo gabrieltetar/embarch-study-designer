@@ -12,7 +12,7 @@
 use crc::{Crc, CRC_32_ISO_HDLC};
 use heapless::Vec;
 
-use crate::limits::{MAX_STEPS_PER_STUDY, MAX_STREAMS_PER_STUDY};
+use crate::limits::MAX_STREAMS_PER_STUDY;
 use crate::streams::StreamTap;
 use crate::study::Step;
 
@@ -42,7 +42,11 @@ pub struct StreamTapTooLargeError;
 /// time rather than buffering the whole `steps` list at once, so a
 /// constrained dev-bench MCU only ever needs a stack buffer sized for one
 /// `Step`, not for `MAX_STEPS_PER_STUDY` of them.
-pub fn steps_crc(steps: &Vec<Step, MAX_STEPS_PER_STUDY>) -> Result<u32, StepTooLargeError> {
+/// Takes a slice rather than a concrete collection (design.md §3 decision
+/// 46): `Study.steps`' backing store now differs per feature, and this
+/// function only ever iterates, so a slice is both the honest signature and
+/// the one that works for either shape. `&study.steps` coerces via `Deref`.
+pub fn steps_crc(steps: &[Step]) -> Result<u32, StepTooLargeError> {
     // Generous margin above the worst-case single encoded `Step` (~600
     // bytes, dominated by `GattOperation::Write`'s 512-byte payload).
     const SCRATCH_LEN: usize = 768;
@@ -120,9 +124,9 @@ mod tests {
 
     #[test]
     fn same_steps_produce_same_crc() {
-        let mut a: Vec<Step, MAX_STEPS_PER_STUDY> = Vec::new();
+        let mut a: crate::step_list::StepList = crate::step_list::StepList::new();
         a.push(step("connect")).unwrap();
-        let mut b: Vec<Step, MAX_STEPS_PER_STUDY> = Vec::new();
+        let mut b: crate::step_list::StepList = crate::step_list::StepList::new();
         b.push(step("connect")).unwrap();
 
         assert_eq!(steps_crc(&a).unwrap(), steps_crc(&b).unwrap());
@@ -130,9 +134,9 @@ mod tests {
 
     #[test]
     fn different_steps_produce_different_crc() {
-        let mut a: Vec<Step, MAX_STEPS_PER_STUDY> = Vec::new();
+        let mut a: crate::step_list::StepList = crate::step_list::StepList::new();
         a.push(step("connect")).unwrap();
-        let mut b: Vec<Step, MAX_STEPS_PER_STUDY> = Vec::new();
+        let mut b: crate::step_list::StepList = crate::step_list::StepList::new();
         b.push(step("connect-2")).unwrap();
 
         assert_ne!(steps_crc(&a).unwrap(), steps_crc(&b).unwrap());
@@ -163,7 +167,7 @@ mod tests {
     /// *which* half is corrupt.
     #[test]
     fn the_two_seals_are_independent() {
-        let mut steps: Vec<Step, MAX_STEPS_PER_STUDY> = Vec::new();
+        let mut steps: crate::step_list::StepList = crate::step_list::StepList::new();
         steps.push(step("connect")).unwrap();
         let mut streams: Vec<StreamTap, MAX_STREAMS_PER_STUDY> = Vec::new();
         streams.push(tap(0, "power")).unwrap();

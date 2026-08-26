@@ -12,8 +12,13 @@
 //! `#![no_std]` by default (design.md §3 decision 5) — the `std` feature
 //! lifts that, solely so the `core-validation` feature (§3 decision 19) can
 //! use floating-point/statistics helpers. Every sequence/string field uses
-//! fixed-capacity `heapless` collections, not `alloc` (§3 decision 15) — this
-//! crate never requires a global allocator, with or without `std`.
+//! fixed-capacity `heapless` collections, not `alloc` (§3 decision 15) — with
+//! exactly one opt-in exception, added by design decision 46: the `alloc`
+//! feature backs `Study.steps` with a heap `Vec` instead of a 64-slot inline
+//! array, for host consumers that have an allocator anyway and were paying
+//! ~38 KB of stack per `Study` to carry two steps. It is **off by default**,
+//! so dev-bench firmware and every default build of this crate still require
+//! no global allocator. See [`step_list`] for the full reasoning.
 #![cfg_attr(not(feature = "std"), no_std)]
 // `Box`-ing large enum variants would need `alloc`, which decision 15
 // deliberately rules out end to end — `MAX_PAYLOAD_LEN`-sized variants being
@@ -35,6 +40,7 @@ pub mod protocol;
 pub mod registry;
 pub mod result;
 pub mod sample;
+pub mod step_list;
 pub mod schema_version;
 #[cfg(feature = "core-validation")]
 pub mod signal;
@@ -88,7 +94,7 @@ mod tests {
     use heapless::Vec as HVec;
 
     fn sample_study() -> Study {
-        let mut steps: HVec<Step, { limits::MAX_STEPS_PER_STUDY }> = HVec::new();
+        let mut steps = step_list::StepList::new();
         steps
             .push(Step {
                 name: heapless::String::try_from("connect").unwrap(),
@@ -150,11 +156,12 @@ mod tests {
     /// Encode/decode one message and assert it survives, in a callee frame
     /// so the caller never holds more than one at a time.
     ///
-    /// `size_of::<DevBenchMessage>()` is ~40 KiB — `StudyStart`'s
-    /// `Vec<Step, MAX_STEPS_PER_STUDY>` is a 64-slot inline array whatever a
-    /// message actually carries — so a test that binds a dozen of them in
-    /// one frame genuinely overflows libtest's stack (design.md §7's open
-    /// item, which this does **not** fix, only stops tripping over).
+    /// Still in a callee frame after design.md §3 decision 46, for a reason
+    /// that changed: `StudyStart`'s steps are no longer a 64-slot inline
+    /// array (this test build has `alloc`), so `DevBenchMessage` is far
+    /// smaller than the ~40 KiB it used to be — but `StepResult`'s own
+    /// `gatt_activity` is still large and unmigrated, so holding a dozen
+    /// messages in one frame is still not free.
     #[inline(never)]
     fn assert_round_trips(msg: &DevBenchMessage) {
         let mut buf = [0u8; 4096];

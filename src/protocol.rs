@@ -10,12 +10,11 @@ use heapless::{String, Vec};
 use serde::{Deserialize, Serialize};
 
 use crate::limits::{
-    MAX_FIRMWARE_VERSION_LEN, MAX_LOG_LINE_LEN, MAX_STEPS_PER_STUDY, MAX_STREAMS_PER_STUDY,
+    MAX_FIRMWARE_VERSION_LEN, MAX_LOG_LINE_LEN, MAX_STREAMS_PER_STUDY,
     MAX_STREAM_RECORDS_PER_BATCH,
 };
 use crate::result::StepResult;
 use crate::streams::{StreamRecord, StreamTap};
-use crate::study::Step;
 
 /// Every message dev-bench sends or receives. Append-only (design.md §3
 /// decision 10) — do not reorder or remove variants once this ships.
@@ -83,7 +82,7 @@ pub enum DevBenchMessage {
     /// `Hello` (design.md §3 decision 17's integrity seal), since `Hello`
     /// itself precedes any `Study` being submitted.
     StudyStart {
-        steps: Vec<Step, MAX_STEPS_PER_STUDY>,
+        steps: crate::step_list::StepList,
         steps_crc: u32,
         /// The study's declared taps (design.md §3 decision 39, §4.8).
         ///

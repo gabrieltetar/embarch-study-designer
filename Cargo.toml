@@ -45,9 +45,21 @@ required-features = ["gatt-extract"]
 
 [features]
 default = []
+# design.md §3 decision 46: back `Study.steps` with a heap `Vec<Step>` instead
+# of `heapless::Vec<Step, MAX_STEPS_PER_STUDY>`. Off by default — dev-bench's
+# no_std firmware build has no allocator, and decision 15's allocator-free
+# stance is unchanged for it. Host consumers (embarch-core, embarch-api,
+# embarch-ui) enable it: `Step`'s 512-byte payload variant makes the
+# fixed-capacity form a ~38 KB inline value moved on the stack per `Study`,
+# which is what actually crashed a debug embarch-api. No wire effect — both
+# backings serialize as a plain sequence.
+alloc = []
 # Enables std, only so `core-validation` can use floating-point/statistics helpers
 # from the standard library. embarch-api and dev-bench firmware never enable this.
-std = []
+# `std` implies `alloc`: a build with the standard library has a global
+# allocator by definition, so there is no coherent "std but keep the 64-slot
+# inline array" configuration to preserve (decision 46).
+std = ["alloc"]
 # Gates the SignalCheck evaluation logic (design.md §3 decision 19) behind an
 # explicit feature only embarch-core's build turns on — embarch-api and dev-bench
 # firmware link the crate without it, so they see/serialize every SignalCheck
