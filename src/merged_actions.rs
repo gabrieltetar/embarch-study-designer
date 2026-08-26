@@ -17,8 +17,8 @@ use crate::gatt::GattServiceInfo;
 use crate::ids::Uuid;
 use crate::registry::{ActionRegistry, RegisteredAction};
 
-/// The four built-in `Action` kinds every Study Designer row can always
-/// pick, independent of what's been discovered or registered.
+/// The built-in `Action` kinds every Study Designer row can always pick,
+/// independent of what's been discovered or registered.
 /// `DataExchange` isn't listed here — authoring one directly means already
 /// knowing a raw UUID + payload, exactly what decisions 34/35 exist to
 /// avoid requiring; it's still a real `Action` variant (`study::Action`),
@@ -35,11 +35,23 @@ pub enum BuiltInAction {
     /// design.md §3 decision 36 — closes the window `GattMonitorStart`
     /// opened.
     GattMonitorStop,
+    /// design.md §3 decision 50 — elevates the link's security. Listed here
+    /// rather than left to `Raw`/`Registered`: it takes no UUID and no
+    /// payload, so it is exactly the shape this list is for, and an action
+    /// that exists on the wire but on no clickable row is an action nobody
+    /// can author (the failure this list's own existence is the answer to).
+    /// The level it asks for rides on the row, not on this enum — see
+    /// `study_builder::RowAction::BuiltIn::security_level`.
+    BleSecurity,
+    /// design.md §3 decision 51 — drops the bond mid-study.
+    BleUnbond,
 }
 
 impl BuiltInAction {
-    pub const ALL: [BuiltInAction; 5] = [
+    pub const ALL: [BuiltInAction; 7] = [
         BuiltInAction::BleConnect,
+        BuiltInAction::BleSecurity,
+        BuiltInAction::BleUnbond,
         BuiltInAction::GattDiscover,
         BuiltInAction::GattMonitorAll,
         BuiltInAction::GattMonitorStart,

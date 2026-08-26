@@ -178,6 +178,26 @@ pub struct StepResult {
     /// Populated only by `Action::GattMonitorAll` (design.md §3 decision 32).
     #[serde(default)]
     pub gatt_activity: Option<crate::bounded::Bounded<GattActivityRecord, MAX_GATT_ACTIVITY_RECORDS>>,
+    /// The BLE security level the link was actually sitting at when this
+    /// step finished (design.md §3 decision 50) — `None` when there was no
+    /// connection to ask about.
+    ///
+    /// **Populated for every step, not only for
+    /// [`Action::BleSecurity`](crate::study::Action::BleSecurity).** A
+    /// security action that reported only `Pass`/`Fail` would leave "which
+    /// level did it actually reach" unanswered, which is the half of the
+    /// question that matters; and reporting it on every step is what makes a
+    /// *later* step's failure legible — `disconnected during service
+    /// discovery` at `L1` and the same failure at `L4` are different
+    /// findings, and until this field existed a result could not tell them
+    /// apart.
+    ///
+    /// Declared and encoded last: postcard carries no field names and
+    /// dev-bench hand-encodes `StepResult` in C, so this is one trailing
+    /// `Option` byte for a step that has no link, not a re-shuffle. Wire
+    /// change all the same — hence v12 in [`crate::schema_version`].
+    #[serde(default)]
+    pub security_level: Option<crate::study::BleSecurityLevel>,
 }
 
 /// The only on-device validation signal — did the action complete without a

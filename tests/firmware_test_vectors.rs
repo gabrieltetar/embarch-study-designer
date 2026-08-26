@@ -244,6 +244,113 @@ fn dump_step_result_wire_bytes() {
             captured_data: Some(heapless::Vec::from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]).unwrap()),
             gatt_services: None,
             gatt_activity: None,
+            security_level: None,
+        },
+    };
+    let mut buf = [0u8; 4096];
+    let encoded = postcard::to_slice(&msg, &mut buf).unwrap();
+    println!("len = {}", encoded.len());
+    let hex: std::vec::Vec<std::string::String> =
+        encoded.iter().map(|b| std::format!("0x{b:02x}")).collect();
+    println!("{}", hex.join(", "));
+}
+
+/// Dumps a `StudyStart` carrying schema v12's two new actions
+/// (`embarch-study-designer/design.md` §3 decisions 50/51), so dev-bench's
+/// hand-written C decoder is pinned against bytes this crate produced rather
+/// than against its own encoder — decision 36's both-languages rule, applied
+/// to a new record the pass that adds it rather than a version later (which
+/// is how `StepResult`'s own two stale bytes survived a whole schema
+/// version).
+///
+/// `BleSecurity` is the interesting one: it is the first `Action` variant
+/// since `BleConnect` to carry a field, so its tag is followed by a varint a
+/// decoder must walk. `BleUnbond` is field-less and proves the tag after it
+/// still lands where the encoder put it.
+///
+/// Run with: cargo test --test firmware_test_vectors -- --nocapture dump_study_start_with_security
+#[test]
+fn dump_study_start_with_security_wire_bytes() {
+    use embarch_study_designer::protocol::DevBenchMessage;
+    use embarch_study_designer::BleSecurityLevel;
+
+    let mut steps = embarch_study_designer::bounded::StepList::new();
+    steps
+        .push(Step {
+            name: heapless::String::try_from("connect").unwrap(),
+            action: Action::BleConnect {
+                role: embarch_study_designer::BleRole::Central,
+                target_address: None,
+                target_name: Some(heapless::String::try_from("the client S11").unwrap()),
+            },
+            timeout_ms: 20_000,
+            continue_on_fail: false,
+            delay_before_ms: 0,
+        })
+        .unwrap();
+    steps
+        .push(Step {
+            name: heapless::String::try_from("secure").unwrap(),
+            action: Action::BleSecurity { level: BleSecurityLevel::L4 },
+            // A DUT that enforces a post-connect security deadline needs the
+            // elevation to start promptly and finish inside a bounded
+            // window; both halves are ordinary `Step` fields (design.md §3
+            // decision 42), which is why this action needed no timing field
+            // of its own.
+            timeout_ms: 10_000,
+            continue_on_fail: false,
+            delay_before_ms: 0,
+        })
+        .unwrap();
+    steps
+        .push(Step {
+            name: heapless::String::try_from("drop-bond").unwrap(),
+            action: Action::BleUnbond {},
+            timeout_ms: 5_000,
+            continue_on_fail: false,
+            delay_before_ms: 0,
+        })
+        .unwrap();
+
+    let streams: Vec<embarch_study_designer::StreamTap, MAX_STREAMS_PER_STUDY> = Vec::new();
+    let crc = steps_crc(&steps).unwrap();
+    let streams_crc_value = streams_crc(&streams).unwrap();
+    let msg = DevBenchMessage::StudyStart {
+        steps,
+        steps_crc: crc,
+        streams,
+        streams_crc: streams_crc_value,
+    };
+    let mut buf = [0u8; 4096];
+    let encoded = postcard::to_slice(&msg, &mut buf).unwrap();
+    println!("steps_crc = {crc:#010x}");
+    println!("streams_crc = {streams_crc_value:#010x}");
+    println!("len = {}", encoded.len());
+    let hex: std::vec::Vec<std::string::String> =
+        encoded.iter().map(|b| std::format!("0x{b:02x}")).collect();
+    println!("{}", hex.join(", "));
+}
+
+/// Dumps a `StepResult` that actually *reports* a security level, so the
+/// trailing `Option<BleSecurityLevel>` schema v12 appends is pinned in the
+/// populated case and not only in the `None` one
+/// (`dump_step_result_wire_bytes` above covers `None`).
+///
+/// Run with: cargo test --test firmware_test_vectors -- --nocapture dump_step_result_with_security
+#[test]
+fn dump_step_result_with_security_wire_bytes() {
+    use embarch_study_designer::protocol::DevBenchMessage;
+    use embarch_study_designer::{Outcome, BleSecurityLevel, StepResult};
+
+    let msg = DevBenchMessage::StepResult {
+        step_index: 1,
+        result: StepResult {
+            step_name: heapless::String::try_from("secure").unwrap(),
+            outcome: Outcome::Pass,
+            captured_data: None,
+            gatt_services: None,
+            gatt_activity: None,
+            security_level: Some(BleSecurityLevel::L4),
         },
     };
     let mut buf = [0u8; 4096];

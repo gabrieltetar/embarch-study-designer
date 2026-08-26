@@ -166,7 +166,33 @@
 ///   firmware still had not been flashed when this landed, which is the same
 ///   window decisions 29/39 were spent in and the reason this cost a reshape
 ///   rather than a migration.
-pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 11;
+/// - **v12** (§3 decisions 44 **and** 50, one bump for the pair — the
+///   standing one-bump-per-pass discipline). `Action` gains
+///   `BleSecurity { level }` and `BleUnbond {}`, appended at
+///   discriminants 7 and 8; `BleSecurityLevel` is a new enum riding inside
+///   the first of them; and `StepResult` gains a trailing
+///   `security_level: Option<BleSecurityLevel>`. **Wire, all three parts** —
+///   dev-bench decodes both actions, dispatches both, and encodes the new
+///   `StepResult` field.
+///
+///   **This is the number decision 44 declined to write down, and it was
+///   right to.** That decision reserved discriminant 7 for `BleSecurity`
+///   (which it got) but deliberately left the schema version to be
+///   *re-derived at implementation time*, citing
+///   [`embarch-decision-reversals.md`][rev] row 18: a bump number written
+///   into a design doc ahead of the work is a fact with a shelf life. It had
+///   already reserved 8 → 9 once, and decision 39's amendment took v9 first.
+///   Derived here from what is actually implemented: v11 → v12.
+///
+///   **Both actions in one bump on purpose, and worth stating why.**
+///   Splitting them across two passes would have cost two wire versions and
+///   two dev-bench reflashes for no benefit: `BleUnbond` is only reachable
+///   once something can establish a bond, so shipping `BleSecurity` alone
+///   would have shipped half a feature at full price. Appended in
+///   declaration order (`BleSecurity` = 7, `BleUnbond` = 8), never inserted
+///   — the same rule every previous `Action` addition followed, for the same
+///   reason: postcard encodes the discriminant positionally.
+pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 12;
 
 /// Served by `embarch-core`'s `GET /status` and compared by `embarch-api`
 /// against its own compiled-in copy before submitting a `Study` (design.md
@@ -232,7 +258,10 @@ pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 11;
 ///   18's protocol working as intended, not a mistake being corrected.
 /// - **v13** — a wire bump (`StreamEncoding::OutpostTrace` becomes a unit
 ///   variant), so this follows by the superset rule rather than by judgement.
-pub const HOST_TYPE_SCHEMA_VERSION: u32 = 13;
+/// - **v14** — a wire bump (§3 decisions 44/50: `Action::BleSecurity`,
+///   `Action::BleUnbond`, `StepResult.security_level`), so this follows by
+///   the superset rule rather than by judgement.
+pub const HOST_TYPE_SCHEMA_VERSION: u32 = 14;
 
 /// [`HOST_TYPE_SCHEMA_VERSION`]'s triggers are a strict superset of
 /// [`DEV_BENCH_WIRE_SCHEMA_VERSION`]'s (design.md §3 decision 12's
