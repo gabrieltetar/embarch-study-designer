@@ -28,10 +28,47 @@ use crate::limits::{
 use crate::sample::{Sample, Unit};
 
 /// The one stream name a submitted `Study` may not use: it belongs to the
-/// reserved [`StreamSource::DevBenchLog`] tap dev-bench adds for its own
-/// `LogLine` output (design.md §4.8). Rejected by `POST /study`'s pre-flight
-/// validation (design.md §3 decision 18) via [`validate_taps`].
+/// reserved [`StreamSource::DevBenchLog`] tap that carries dev-bench's own
+/// `LogLine` output (design.md §4.8), built by [`dev_bench_log_tap`].
+/// Rejected by `POST /study`'s pre-flight validation (design.md §3 decision
+/// 18) via [`validate_taps`].
 pub const RESERVED_DEV_BENCH_STREAM_NAME: &str = "dev-bench";
+
+/// The reserved `dev-bench` tap, synthesized rather than declared (design.md
+/// §4.8) — the one tap a submitted `Study` may not author, since
+/// [`validate_taps`] rejects its name.
+///
+/// **Its `id` is `declared.len()`**, which is free by construction: a
+/// declared tap's `id` is its own index in `Study.streams`, so the first
+/// index past the end can never collide with one. That single rule is what
+/// lets both ends agree on the handle without either sending it — which is
+/// why it lives here rather than being computed twice.
+///
+/// Encoding is [`StreamEncoding::Text`] because that is what a firmware log
+/// line is, and scope is [`StreamScope::WholeStudy`] because dev-bench can
+/// have something to say before the first step and after the last.
+///
+/// **Where the bytes come from, in the shipped implementation:** Core
+/// renders them out of the `DevBenchMessage::LogLine` frames it already
+/// receives, rather than dev-bench opening a second channel for its own log
+/// and sending each line twice. §4.8's original sketch had dev-bench
+/// emitting `StreamOpen`/`StreamChunkBatch`/`StreamClose` for this tap
+/// itself; that was strictly more firmware, more link traffic, and more
+/// SRAM on a board already at 98% of `sram0_0_seg`, to move bytes that were
+/// crossing the link anyway. The asymmetry the tap exists to close — a
+/// firmware log reaching only Core's rolling log and never the study's own
+/// results — is closed either way.
+pub fn dev_bench_log_tap(declared: &Vec<StreamTap, MAX_STREAMS_PER_STUDY>) -> StreamTap {
+    StreamTap {
+        // `declared.len()` is at most MAX_STREAMS_PER_STUDY, far inside u8.
+        id: declared.len() as u8,
+        name: String::try_from(RESERVED_DEV_BENCH_STREAM_NAME)
+            .expect("RESERVED_DEV_BENCH_STREAM_NAME fits MAX_STREAM_NAME_LEN"),
+        source: StreamSource::DevBenchLog,
+        encoding: StreamEncoding::Text,
+        scope: StreamScope::WholeStudy,
+    }
+}
 
 /// One declared capture channel for the duration of a `Study` (design.md
 /// §4.8).
@@ -86,8 +123,9 @@ pub enum StreamSource {
     /// `gatt.csv` columns all survive; only its dedicated
     /// `DevBenchMessage::GattTranscriptRecord` variant is retired.
     GattTranscript,
-    /// dev-bench's own log output. Reserved: dev-bench adds this tap itself
-    /// under [`RESERVED_DEV_BENCH_STREAM_NAME`], closing a real asymmetry —
+    /// dev-bench's own log output. Reserved: this tap is synthesized under
+    /// [`RESERVED_DEV_BENCH_STREAM_NAME`] rather than declared (see
+    /// [`dev_bench_log_tap`]), closing a real asymmetry —
     /// `DevBenchMessage::LogLine` reached only Core's rolling log and never
     /// a study's own results at all.
     DevBenchLog,
@@ -508,6 +546,59 @@ mod tests {
         assert!(window.covers(1));
         assert!(window.covers(2), "`to` is inclusive");
         assert!(!window.covers(3));
+    }
+
+    #[test]
+    fn the_reserved_log_taps_id_is_the_first_index_past_the_declared_ones() {
+        // The whole point of the rule: neither end sends this handle, so
+        // both have to derive the same one, and it must never collide with
+        // a declared tap's id (which is that tap's own index).
+        let none: Vec<StreamTap, MAX_STREAMS_PER_STUDY> = Vec::new();
+        let reserved = dev_bench_log_tap(&none);
+        assert_eq!(reserved.id, 0);
+        assert_eq!(reserved.name.as_str(), RESERVED_DEV_BENCH_STREAM_NAME);
+        assert_eq!(reserved.source, StreamSource::DevBenchLog);
+        assert_eq!(reserved.encoding, StreamEncoding::Text);
+        assert_eq!(reserved.scope, StreamScope::WholeStudy);
+
+        let two = taps(&[
+            tap(0, "gatt", StreamScope::WholeStudy),
+            tap(1, "power", StreamScope::WholeStudy),
+        ]);
+        assert_eq!(dev_bench_log_tap(&two).id, 2);
+    }
+
+    #[test]
+    fn the_reserved_tap_stays_addressable_even_with_a_full_declared_list() {
+        // A full Study still leaves the reserved handle free, because it is
+        // one past the last index rather than a slot carved out of the
+        // capacity. Nothing here needs MAX_STREAMS_PER_STUDY to grow.
+        let mut full: Vec<StreamTap, MAX_STREAMS_PER_STUDY> = Vec::new();
+        for i in 0..MAX_STREAMS_PER_STUDY {
+            let mut t = tap(i as u8, "x", StreamScope::WholeStudy);
+            t.name = String::try_from(
+                ["a", "b", "c", "d", "e", "f", "g", "h"][i],
+            )
+            .unwrap();
+            full.push(t).unwrap();
+        }
+        assert_eq!(validate_taps(&full, 1), Ok(()));
+        let reserved = dev_bench_log_tap(&full);
+        assert_eq!(usize::from(reserved.id), MAX_STREAMS_PER_STUDY);
+        assert!(
+            full.iter().all(|t| t.id != reserved.id),
+            "the reserved id must not collide with any declared tap's"
+        );
+    }
+
+    #[test]
+    fn a_study_may_not_declare_the_reserved_tap_itself() {
+        // The synthesized tap and validate_taps' rejection are two halves of
+        // one rule: exactly one producer for that name.
+        let list = taps(&[tap(0, RESERVED_DEV_BENCH_STREAM_NAME, StreamScope::WholeStudy)]);
+        assert_eq!(validate_taps(&list, 1), Err(StreamTapError::ReservedName { index: 0 }));
+        let none: Vec<StreamTap, MAX_STREAMS_PER_STUDY> = Vec::new();
+        assert_eq!(dev_bench_log_tap(&none).name.as_str(), RESERVED_DEV_BENCH_STREAM_NAME);
     }
 
     #[test]
