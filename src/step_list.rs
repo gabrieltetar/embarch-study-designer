@@ -207,8 +207,11 @@ mod tests {
         list.push(a_step()).unwrap();
         assert_eq!(list.len(), 2);
         assert_eq!(list.iter().count(), 2);
-        assert!(list.first().is_some());
-        assert!(list.last().is_some());
+        // Named accessors specifically — these are the `Deref` methods real
+        // call sites use, so exercising them is the point (clippy would
+        // rather see `!is_empty()`, which tests something else).
+        assert_eq!(list.first().map(|s| s.timeout_ms), Some(1_000));
+        assert_eq!(list.last().map(|s| s.timeout_ms), Some(1_000));
         list[0].timeout_ms = 42;
         assert_eq!(list[0].timeout_ms, 42);
     }
