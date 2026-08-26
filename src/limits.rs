@@ -38,6 +38,13 @@ pub const MAX_LOG_LINE_LEN: usize = 128;
 /// identifier (e.g. `git describe` output) for whichever dev-bench build
 /// replied to `Hello`.
 pub const MAX_FIRMWARE_VERSION_LEN: usize = 32;
+/// `Provenance.overrides` (design.md §3 decision 40, §4.5) — how many
+/// version requirements one run can have had waved through. Exactly two,
+/// and not a knob: there are two requirements (`dev_bench_version`,
+/// `firmware_version`) and an override names one of them, so this is the
+/// arity of the thing rather than a capacity guess like the constants
+/// around it.
+pub const MAX_VERSION_OVERRIDES: usize = 2;
 /// `Study.streams` / `StudyResult.streams` (design.md §3 decision 39,
 /// §4.8). Deliberately small: a tap is a declared capture channel, not a
 /// per-step artifact, and the four sources that exist plus a couple of

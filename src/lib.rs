@@ -61,7 +61,9 @@ pub use registry::{
     ActionField, ActionFieldValue, ActionRegistry, RegisteredAction, RegisteredOperation,
     RegistryError,
 };
-pub use result::{Outcome, Provenance, StepResult, StudyResult, VersionSource};
+pub use result::{
+    Outcome, Provenance, StepResult, StudyResult, VersionOverride, VersionSource, VersionSubject,
+};
 pub use sample::{Sample, Unit};
 pub use schema_version::{DEV_BENCH_WIRE_SCHEMA_VERSION, HOST_TYPE_SCHEMA_VERSION};
 pub use streams::{
@@ -254,6 +256,7 @@ mod tests {
             firmware_version: heapless::String::try_from("g-dut-1a1a1a1a").unwrap(),
             dev_bench_source: VersionSource::ReportedByDevBench,
             firmware_source: VersionSource::Declared,
+            overrides: HVec::new(),
         };
         assert!(provenance.dev_bench_source.is_verified());
         assert!(!provenance.firmware_source.is_verified());
@@ -273,6 +276,62 @@ mod tests {
         let json = serde_json::to_string(&provenance).unwrap();
         let decoded: Provenance = serde_json::from_str(&json).unwrap();
         assert_eq!(provenance, decoded);
+    }
+
+    #[test]
+    fn an_overridden_run_says_so_in_its_own_result() {
+        // design.md §3 decision 40: an override is "recorded in the result
+        // rather than silently honoured". The thing that makes the record
+        // worth having is that both strings survive into it — `Study.requires`
+        // never travels into a `StudyResult`, so without them a reader has no
+        // way to see what was waved through.
+        let mut overrides: HVec<VersionOverride, { limits::MAX_VERSION_OVERRIDES }> = HVec::new();
+        overrides
+            .push(VersionOverride {
+                subject: VersionSubject::DevBench,
+                required: heapless::String::try_from("g1a2b3c4").unwrap(),
+                actual: heapless::String::try_from("gdeadbeef").unwrap(),
+            })
+            .unwrap();
+        let provenance = Provenance {
+            dev_bench_version: heapless::String::try_from("gdeadbeef").unwrap(),
+            firmware_version: heapless::String::try_from("g-dut-1a1a1a1a").unwrap(),
+            dev_bench_source: VersionSource::ReportedByDevBench,
+            firmware_source: VersionSource::FlashedThisRun,
+            overrides,
+        };
+        assert!(provenance.was_overridden());
+        let recorded = provenance.override_for(VersionSubject::DevBench).unwrap();
+        assert_eq!(recorded.required.as_str(), "g1a2b3c4");
+        assert_eq!(recorded.actual.as_str(), "gdeadbeef");
+        assert_eq!(VersionSubject::DevBench.field_name(), "dev_bench_version");
+        assert!(provenance.override_for(VersionSubject::Firmware).is_none());
+
+        let mut buf = [0u8; 512];
+        let encoded = postcard::to_slice(&provenance, &mut buf).unwrap();
+        let decoded: Provenance = postcard::from_bytes(encoded).unwrap();
+        assert_eq!(provenance, decoded);
+
+        let json = serde_json::to_string(&provenance).unwrap();
+        let decoded: Provenance = serde_json::from_str(&json).unwrap();
+        assert_eq!(provenance, decoded);
+    }
+
+    #[test]
+    fn a_result_written_before_overrides_existed_still_reads_as_not_overridden() {
+        // `events.json` files on disk predate this field, and those runs
+        // predate any way to override anything — so an absent `overrides` is
+        // truthfully empty rather than unknown. `#[serde(default)]` is what
+        // keeps `GET /study/{id}` able to read them back at all.
+        let json = r#"{
+            "dev_bench_version": "gdeadbeef",
+            "firmware_version": "any",
+            "dev_bench_source": "ReportedByDevBench",
+            "firmware_source": "Declared"
+        }"#;
+        let decoded: Provenance = serde_json::from_str(json).unwrap();
+        assert!(decoded.overrides.is_empty());
+        assert!(!decoded.was_overridden());
     }
 
     #[test]
