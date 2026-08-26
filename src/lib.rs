@@ -80,8 +80,8 @@ pub use streams::{
     StreamSource, StreamTap, StreamTapError, RESERVED_DEV_BENCH_STREAM_NAME,
 };
 pub use study::{
-    requirement_satisfied, Action, BleRole, GattOperation, Requirements, RequirementsError,
-    BleSecurityLevel, Step, Study, REQUIREMENT_ANY,
+    requirement_satisfied, Action, BleRole, DevBenchLogLevel, GattOperation, Requirements,
+    RequirementsError, BleSecurityLevel, Step, Study, REQUIREMENT_ANY,
 };
 #[cfg(feature = "study-ui")]
 pub use study_builder::{build_study, BuildStudyError, BuiltInActionKind, RoleChoice, RowAction, TableRow};
@@ -128,6 +128,7 @@ mod tests {
             streams,
             steps_crc,
             streams_crc,
+            dev_bench_log_level: DevBenchLogLevel::default(),
         }
     }
 
@@ -210,6 +211,7 @@ mod tests {
             steps_crc: study.steps_crc,
             streams: study.streams.clone(),
             streams_crc: study.streams_crc,
+            dev_bench_log_level: study.dev_bench_log_level,
         });
         assert_round_trips(&DevBenchMessage::StepResult {
             step_index: 0,
@@ -250,6 +252,7 @@ mod tests {
                 steps_crc: study.steps_crc,
                 streams: study.streams.clone(),
                 streams_crc: study.streams_crc,
+                dev_bench_log_level: study.dev_bench_log_level,
             };
             postcard::to_slice(&msg, into).unwrap().len()
         }

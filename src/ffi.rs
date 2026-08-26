@@ -331,6 +331,7 @@ mod tests {
             streams: Vec::new(),
             steps_crc,
             streams_crc: 0,
+            dev_bench_log_level: crate::study::DevBenchLogLevel::default(),
         };
         let mut buf = [0u8; 256];
         let encoded = postcard::to_slice(&good, &mut buf).unwrap();
@@ -384,6 +385,7 @@ mod tests {
             streams: Vec::new(),
             steps_crc,
             streams_crc: 0,
+            dev_bench_log_level: crate::study::DevBenchLogLevel::default(),
         }
     }
 
@@ -451,6 +453,7 @@ mod tests {
             streams: Vec::new(),
             steps_crc,
             streams_crc: 0,
+            dev_bench_log_level: crate::study::DevBenchLogLevel::default(),
         };
 
         let mut buf = [0u8; 256];
