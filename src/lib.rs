@@ -70,7 +70,7 @@ pub use result::{
 pub use sample::{Sample, Unit};
 pub use schema_version::{DEV_BENCH_WIRE_SCHEMA_VERSION, HOST_TYPE_SCHEMA_VERSION};
 pub use streams::{
-    samples_in, validate_taps, SampleLayout, StreamEncoding, StreamRecord, StreamRef, StreamScope,
+    dev_bench_log_tap, samples_in, validate_taps, SampleLayout, StreamEncoding, StreamRecord, StreamRef, StreamScope,
     StreamSource, StreamTap, StreamTapError, RESERVED_DEV_BENCH_STREAM_NAME,
 };
 pub use study::{
