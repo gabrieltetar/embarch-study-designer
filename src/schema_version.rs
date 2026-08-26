@@ -143,7 +143,15 @@
 /// own — a vendor-defined characteristic resolves into an ordinary
 /// `Action::DataExchange` carrying plain UUIDs before anything is encoded,
 /// so dev-bench firmware never needs to know the table exists.
-pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 9;
+/// - **v10** (§3 decision 47, `embarch-core/design.md` §3 decision 35).
+///   `HelloAck` gained `hardware_id` — dev-bench's own factory-unique chip
+///   ID, hex-encoded — so Core can confirm the board answering on the serial
+///   link is the same silicon its JTAG probe just verified. One field on the
+///   frame that already carries the two things Core checks at this moment
+///   (`schema_version`, `firmware_version`), which is why it costs a wire
+///   bump and no new mechanism. **Wire**, and the host constant moves with
+///   it as always.
+pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 10;
 
 /// Served by `embarch-core`'s `GET /status` and compared by `embarch-api`
 /// against its own compiled-in copy before submitting a `Study` (design.md
@@ -199,7 +207,15 @@ pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 9;
 ///   no reflash. A removal is exactly as breaking as an addition on this hop —
 ///   an api built before this and a Core built after it disagree about
 ///   `Study`'s shape — which is what this constant exists to refuse.
-pub const HOST_TYPE_SCHEMA_VERSION: u32 = 11;
+/// - **v12** (§3 decision 47) — a wire bump, so this one follows by the rule
+///   above rather than by a judgement call: `HelloAck.hardware_id`. Written
+///   in that decision as 10 → 11 and **re-derived to 12 here**, because
+///   decision 48's removal landed first and took this constant to 11; the
+///   two decisions were designed in the same pass and only one of them could
+///   be numbered before the other shipped. That re-derivation is
+///   [embarch-decision-reversals.md](../embarch-decision-reversals.md) row
+///   18's protocol working as intended, not a mistake being corrected.
+pub const HOST_TYPE_SCHEMA_VERSION: u32 = 12;
 
 /// [`HOST_TYPE_SCHEMA_VERSION`]'s triggers are a strict superset of
 /// [`DEV_BENCH_WIRE_SCHEMA_VERSION`]'s (design.md §3 decision 12's
