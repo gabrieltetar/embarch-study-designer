@@ -128,6 +128,16 @@
 ///   never crosses this hop. That is the first change the split actually
 ///   spares dev-bench, and it is why the split was worth making.
 ///
+/// - **v10 did not move this constant either**, and that is the second time
+///   the split paid for itself. `Provenance` grew `overrides` (§3 decision
+///   40, Milestone 7 Phase B item 2) — a `StudyResult` field, and
+///   `StudyResult` is assembled *by the host* out of the `StepResult`
+///   messages dev-bench sends. dev-bench has never encoded or decoded a
+///   `StudyResult`, so no firmware decoder can drift on this and no
+///   both-languages pin (§3 decision 36) applies. Under the pre-split single
+///   constant this would have charged a firmware reflash for a type firmware
+///   cannot observe.
+///
 /// Note what has never bumped either constant: `vendor.rs` (§3 decision 41)
 /// is a table of compile-time constants with no wire representation of its
 /// own — a vendor-defined characteristic resolves into an ordinary
@@ -165,4 +175,29 @@ pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 9;
 ///   `ValidationSource` rather than a flattened `step_index`/`channel` pair.
 ///   Both cross this hop inside `Study`/`StudyResult`; neither reaches
 ///   dev-bench.
-pub const HOST_TYPE_SCHEMA_VERSION: u32 = 9;
+/// - **v10** (§3 decision 40, Milestone 7 Phase B item 2) — the **first bump
+///   that moves this constant alone**, which is the split working as
+///   designed rather than a special case. `Provenance` gained `overrides:
+///   Vec<VersionOverride, 2>`, so a run that was allowed to proceed past a
+///   version requirement says so in its own result instead of being
+///   indistinguishable from one that satisfied it. `VersionOverride` and
+///   `VersionSubject` are new host-side types; nothing on the dev-bench wire
+///   changed, and [`DEV_BENCH_WIRE_SCHEMA_VERSION`] stays at 9.
+///
+///   The two constants are **no longer equal**, which the split's own
+///   amendment said would happen "on the first host-only pass" and which is
+///   the only real evidence the mechanism works — equal numbers proved
+///   nothing.
+pub const HOST_TYPE_SCHEMA_VERSION: u32 = 10;
+
+/// [`HOST_TYPE_SCHEMA_VERSION`]'s triggers are a strict superset of
+/// [`DEV_BENCH_WIRE_SCHEMA_VERSION`]'s (design.md §3 decision 12's
+/// amendment), so every wire bump is also a host bump and the host number
+/// can never trail the wire one.
+///
+/// Pinned at **compile time** rather than in a test, because the failure it
+/// guards against is silent and a `#[cfg(test)]` check would not fire in the
+/// builds that matter: a wire change that moved only the wire constant would
+/// leave the api<->Core hop talking happily across a shape difference it
+/// exists to refuse, in a release binary nobody ran the test suite against.
+const _: () = assert!(HOST_TYPE_SCHEMA_VERSION >= DEV_BENCH_WIRE_SCHEMA_VERSION);

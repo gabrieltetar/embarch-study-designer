@@ -8,6 +8,7 @@ use crate::limits::{
     MAX_DISCOVERED_SERVICES, MAX_FAIL_REASON_LEN, MAX_FIRMWARE_VERSION_LEN,
     MAX_GATT_ACTIVITY_RECORDS, MAX_NAME_LEN, MAX_PAYLOAD_LEN, MAX_STEPS_PER_STUDY,
     MAX_STREAMS_PER_STUDY, MAX_STUDY_NAME_LEN, MAX_VALIDATIONS_PER_STUDY,
+    MAX_VERSION_OVERRIDES,
 };
 use crate::streams::StreamRef;
 use crate::validation::ValidationResult;
@@ -47,6 +48,77 @@ pub struct Provenance {
     pub firmware_version: String<MAX_FIRMWARE_VERSION_LEN>,
     pub dev_bench_source: VersionSource,
     pub firmware_source: VersionSource,
+    /// Every version requirement this run had **waved through** rather than
+    /// satisfied (design.md §3 decision 40: an override "is recorded in the
+    /// result rather than silently honoured"). Empty is the normal case and
+    /// means the gate was satisfied, not that nobody looked.
+    ///
+    /// A record rather than a flag, because the two strings that make an
+    /// override readable are not otherwise anywhere in a `StudyResult`:
+    /// `Study.requires` never travels into the result, and the *actual*
+    /// version is only in the sibling field when the override is the reason
+    /// that field is there at all. A bare `overridden: bool` would say a
+    /// rule was bent without saying which one or by how far, which is the
+    /// same half-answer `VersionSource::Declared` exists to stop
+    /// [`Provenance`] giving.
+    ///
+    /// `#[serde(default)]` so a `StudyResult` written before this field
+    /// existed still deserializes — those runs predate any way to override
+    /// anything, so an empty list is the truthful reading of them.
+    #[serde(default)]
+    pub overrides: Vec<VersionOverride, MAX_VERSION_OVERRIDES>,
+}
+
+impl Provenance {
+    /// Whether any version requirement was waved through on this run.
+    /// Prefer this to `!overrides.is_empty()` at a call site that only cares
+    /// whether to render the result as caveated.
+    pub fn was_overridden(&self) -> bool {
+        !self.overrides.is_empty()
+    }
+
+    /// The recorded override for `subject`, if that requirement was waved
+    /// through on this run.
+    pub fn override_for(&self, subject: VersionSubject) -> Option<&VersionOverride> {
+        self.overrides.iter().find(|o| o.subject == subject)
+    }
+}
+
+/// One version requirement a run was allowed to proceed in spite of
+/// (design.md §3 decision 40, §4.5).
+///
+/// Carries both strings because the whole content of an override is the gap
+/// between them: "this study asked for X, it ran against Y, and somebody
+/// said proceed anyway" is the sentence a reader of the result needs, and
+/// neither half of it is recoverable from the rest of a `StudyResult`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VersionOverride {
+    pub subject: VersionSubject,
+    /// What `Study.requires` asked for.
+    pub required: String<MAX_FIRMWARE_VERSION_LEN>,
+    /// What the run actually had — the bench's own `HelloAck` string, or the
+    /// version the flashing process reported putting on the DUT.
+    pub actual: String<MAX_FIRMWARE_VERSION_LEN>,
+}
+
+/// Which of [`crate::study::Requirements`]' two fields a
+/// [`VersionOverride`] is about. Append-only, same discipline as
+/// [`VersionSource`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum VersionSubject {
+    DevBench,
+    Firmware,
+}
+
+impl VersionSubject {
+    /// The `requires` field name this subject names, for an error message or
+    /// a rendered result — so no caller writes the string itself.
+    pub const fn field_name(self) -> &'static str {
+        match self {
+            VersionSubject::DevBench => "dev_bench_version",
+            VersionSubject::Firmware => "firmware_version",
+        }
+    }
 }
 
 /// How a version in [`Provenance`] was established (design.md §3 decision
@@ -58,8 +130,16 @@ pub enum VersionSource {
     /// The DUT's own outpost stream header carried a build ID
     /// (`embarch-outpost/design.md` §3 decision 9).
     ReportedByOutpost,
-    /// This run flashed it, so Core knows what it put there — the only way
-    /// to *know* a DUT's firmware version rather than assert it.
+    /// This run flashed it, so the run knows what it put there — the only
+    /// way to *know* a DUT's firmware version rather than assert it.
+    ///
+    /// **Not producible by `embarch-core`, structurally.** `POST /flash` and
+    /// `POST /study` are separate calls with nothing linking them, so the
+    /// only process that can honestly say this is the one that sequenced
+    /// both — `embarch-api`, which tells Core so out of band of the `Study`
+    /// body (`embarch-api/design.md` §3 decision 40,
+    /// `embarch-core/design.md` §3 decision 31). Reflash is a run parameter,
+    /// not a study field, so it could not have ridden inside `Study`.
     FlashedThisRun,
     /// Asserted, unverified. Render this visibly weaker than the three
     /// above (`embarch-ui/design.md` §3 decision 11); never as a fact.
