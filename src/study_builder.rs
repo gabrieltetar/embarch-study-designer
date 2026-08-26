@@ -24,7 +24,7 @@ use crate::limits::{
     MAX_LOCAL_NAME_LEN, MAX_NAME_LEN, MAX_PAYLOAD_LEN, MAX_STEPS_PER_STUDY, MAX_STUDY_NAME_LEN,
 };
 use crate::registry::{ActionRegistry, RegisteredAction, RegisteredOperation};
-use crate::study::{Action, BleRole, GattOperation, Requirements, Step, Study};
+use crate::study::{Action, BleRole, GattOperation, Requirements, BleSecurityLevel, Step, Study};
 
 /// Which built-in `Action` a `RowAction::BuiltIn` row picks — a UI-facing
 /// enumeration distinct from `merged_actions::BuiltInAction` only in that
@@ -41,6 +41,11 @@ pub enum BuiltInActionKind {
     GattMonitorStart,
     /// design.md §3 decision 36.
     GattMonitorStop,
+    /// design.md §3 decision 44 — takes `security_level` from the same
+    /// [`RowAction::BuiltIn`] row.
+    BleSecurity,
+    /// design.md §3 decision 50.
+    BleUnbond,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -71,6 +76,12 @@ pub enum RowAction {
         /// `Action::BleConnect::target_name`.
         #[serde(default)]
         target_name: Option<String>,
+        /// Only meaningful for `BleSecurity` — which level the study asks
+        /// the link to reach (design.md §3 decision 44). Absent defaults to
+        /// [`BleSecurityLevel::L4`], the level decision 44 was written for;
+        /// an author who wants a weaker one says so, `L1` included.
+        #[serde(default)]
+        security_level: Option<BleSecurityLevel>,
     },
     /// References a `RegisteredAction` by name, plus — for a `Write` — which
     /// value the engineer picked per field: field name -> that field's
@@ -304,7 +315,7 @@ pub fn build_study(
 
 fn resolve_action(row_action: &RowAction, registry: &ActionRegistry) -> Result<Action, BuildStudyError> {
     match row_action {
-        RowAction::BuiltIn { which, role, target_name } => Ok(match which {
+        RowAction::BuiltIn { which, role, target_name, security_level } => Ok(match which {
             BuiltInActionKind::BleConnect => Action::BleConnect {
                 role: match role {
                     RoleChoice::Central => BleRole::Central,
@@ -323,6 +334,14 @@ fn resolve_action(row_action: &RowAction, registry: &ActionRegistry) -> Result<A
             BuiltInActionKind::GattMonitorAll => Action::GattMonitorAll {},
             BuiltInActionKind::GattMonitorStart => Action::GattMonitorStart {},
             BuiltInActionKind::GattMonitorStop => Action::GattMonitorStop {},
+            // No level is refused here, `L1` included: design.md §3 decision
+            // 44 makes `L1` the honest way to say "this DUT needs none"
+            // rather than omitting the step and hoping, which is the same
+            // distinction `REQUIREMENT_ANY` draws for `requires`.
+            BuiltInActionKind::BleSecurity => {
+                Action::BleSecurity { level: security_level.unwrap_or(BleSecurityLevel::L4) }
+            }
+            BuiltInActionKind::BleUnbond => Action::BleUnbond {},
         }),
         RowAction::Registered { name, field_choices } => {
             let registered = registry
@@ -570,10 +589,87 @@ mod tests {
     }
 
     #[test]
+    fn a_security_row_defaults_to_l4_and_an_unbond_row_carries_nothing() {
+        let rows = vec![
+            TableRow {
+                name: "secure".to_string(),
+                action: RowAction::BuiltIn {
+                    which: BuiltInActionKind::BleSecurity,
+                    role: RoleChoice::Central,
+                    target_name: None,
+                    security_level: None,
+                },
+                timeout_ms: 10_000,
+                continue_on_fail: false,
+                delay_before_ms: 0,
+            },
+            TableRow {
+                name: "drop-bond".to_string(),
+                action: RowAction::BuiltIn {
+                    which: BuiltInActionKind::BleUnbond,
+                    role: RoleChoice::Central,
+                    target_name: None,
+                    security_level: None,
+                },
+                timeout_ms: 5_000,
+                continue_on_fail: false,
+                delay_before_ms: 0,
+            },
+        ];
+        let study =
+            build_study("secure-then-drop", &rows, &ActionRegistry::default()).unwrap();
+        // L4 is the level this action exists for, so an untouched dropdown
+        // asks for it rather than for the weakest thing that would pass.
+        assert_eq!(study.steps[0].action, Action::BleSecurity { level: BleSecurityLevel::L4 });
+        assert_eq!(study.steps[1].action, Action::BleUnbond {});
+    }
+
+    #[test]
+    fn a_security_row_honours_an_explicitly_weaker_level() {
+        let rows = vec![TableRow {
+            name: "encrypt".to_string(),
+            action: RowAction::BuiltIn {
+                which: BuiltInActionKind::BleSecurity,
+                role: RoleChoice::Central,
+                target_name: None,
+                security_level: Some(BleSecurityLevel::L2),
+            },
+            timeout_ms: 10_000,
+            continue_on_fail: false,
+            delay_before_ms: 0,
+        }];
+        let study =
+            build_study("encrypt", &rows, &ActionRegistry::default()).unwrap();
+        assert_eq!(study.steps[0].action, Action::BleSecurity { level: BleSecurityLevel::L2 });
+    }
+
+    /// Decision 44 makes `L1` a real answer — "this DUT needs none", said
+    /// out loud rather than reached by leaving the step out. An earlier
+    /// implementation of this pass refused it, which contradicted the
+    /// decision it was implementing.
+    #[test]
+    fn a_security_row_may_ask_for_l1_because_that_is_a_real_answer() {
+        let rows = vec![TableRow {
+            name: "no-security-needed".to_string(),
+            action: RowAction::BuiltIn {
+                which: BuiltInActionKind::BleSecurity,
+                role: RoleChoice::Central,
+                target_name: None,
+                security_level: Some(BleSecurityLevel::L1),
+            },
+            timeout_ms: 5_000,
+            continue_on_fail: false,
+            delay_before_ms: 0,
+        }];
+        let study = build_study("plain", &rows, &ActionRegistry::default()).unwrap();
+        assert_eq!(study.steps[0].action, Action::BleSecurity { level: BleSecurityLevel::L1 });
+    }
+
+    #[test]
     fn built_in_ble_connect_defaults_to_central_role() {
         let rows = vec![TableRow {
             name: "connect".to_string(),
-            action: RowAction::BuiltIn { which: BuiltInActionKind::BleConnect, role: RoleChoice::Central , target_name: None },
+            action: RowAction::BuiltIn { which: BuiltInActionKind::BleConnect, role: RoleChoice::Central , target_name: None, security_level: None },
             timeout_ms: 20_000,
             continue_on_fail: false,
             delay_before_ms: 0,
@@ -594,14 +690,14 @@ mod tests {
         let rows = vec![
             TableRow {
                 name: "discover".to_string(),
-                action: RowAction::BuiltIn { which: BuiltInActionKind::GattDiscover, role: RoleChoice::Central , target_name: None },
+                action: RowAction::BuiltIn { which: BuiltInActionKind::GattDiscover, role: RoleChoice::Central , target_name: None, security_level: None },
                 timeout_ms: 15_000,
                 continue_on_fail: false,
                 delay_before_ms: 0,
             },
             TableRow {
                 name: "monitor".to_string(),
-                action: RowAction::BuiltIn { which: BuiltInActionKind::GattMonitorAll, role: RoleChoice::Central , target_name: None },
+                action: RowAction::BuiltIn { which: BuiltInActionKind::GattMonitorAll, role: RoleChoice::Central , target_name: None, security_level: None },
                 timeout_ms: 15_000,
                 continue_on_fail: false,
                 delay_before_ms: 0,
@@ -811,6 +907,7 @@ mod tests {
                     which: BuiltInActionKind::GattMonitorStart,
                     role: RoleChoice::Central,
                     target_name: None,
+                    security_level: None,
                 },
                 timeout_ms: 10_000,
                 continue_on_fail: false,
@@ -822,6 +919,7 @@ mod tests {
                     which: BuiltInActionKind::GattMonitorStop,
                     role: RoleChoice::Central,
                     target_name: None,
+                    security_level: None,
                 },
                 timeout_ms: 5_000,
                 continue_on_fail: false,
@@ -838,7 +936,7 @@ mod tests {
         let rows: Vec<TableRow> = (0..MAX_STEPS_PER_STUDY + 1)
             .map(|i| TableRow {
                 name: format!("s{i}"),
-                action: RowAction::BuiltIn { which: BuiltInActionKind::GattDiscover, role: RoleChoice::Central , target_name: None },
+                action: RowAction::BuiltIn { which: BuiltInActionKind::GattDiscover, role: RoleChoice::Central , target_name: None, security_level: None },
                 timeout_ms: 1_000,
                 continue_on_fail: false,
                 delay_before_ms: 0,
@@ -868,7 +966,7 @@ mod tests {
     fn round_trip_body() {
         let rows = vec![TableRow {
             name: "connect".to_string(),
-            action: RowAction::BuiltIn { which: BuiltInActionKind::BleConnect, role: RoleChoice::Central , target_name: None },
+            action: RowAction::BuiltIn { which: BuiltInActionKind::BleConnect, role: RoleChoice::Central , target_name: None, security_level: None },
             timeout_ms: 20_000,
             continue_on_fail: false,
             delay_before_ms: 0,
@@ -1076,7 +1174,7 @@ mod tests {
     fn delay_before_ms_is_covered_by_steps_crc() {
         let mut row = TableRow {
             name: "connect".to_string(),
-            action: RowAction::BuiltIn { which: BuiltInActionKind::BleConnect, role: RoleChoice::Central , target_name: None },
+            action: RowAction::BuiltIn { which: BuiltInActionKind::BleConnect, role: RoleChoice::Central , target_name: None, security_level: None },
             timeout_ms: 20_000,
             continue_on_fail: false,
             delay_before_ms: 0,
@@ -1099,6 +1197,7 @@ mod tests {
                 which: BuiltInActionKind::BleConnect,
                 role: RoleChoice::Central,
                 target_name: target_name.map(str::to_string),
+                security_level: None,
             },
             timeout_ms: 20_000,
             continue_on_fail: false,
@@ -1175,6 +1274,7 @@ mod tests {
                 which: BuiltInActionKind::GattMonitorStart,
                 role: RoleChoice::Central,
                 target_name: Some("the client S11".to_string()),
+                security_level: None,
             },
             timeout_ms: 10_000,
             continue_on_fail: false,

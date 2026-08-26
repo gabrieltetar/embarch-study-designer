@@ -80,8 +80,8 @@ pub use streams::{
     StreamSource, StreamTap, StreamTapError, RESERVED_DEV_BENCH_STREAM_NAME,
 };
 pub use study::{
-    requirement_satisfied, Action, BleRole, GattOperation, Requirements, RequirementsError, Step,
-    Study, REQUIREMENT_ANY,
+    requirement_satisfied, Action, BleRole, GattOperation, Requirements, RequirementsError,
+    BleSecurityLevel, Step, Study, REQUIREMENT_ANY,
 };
 #[cfg(feature = "study-ui")]
 pub use study_builder::{build_study, BuildStudyError, BuiltInActionKind, RoleChoice, RowAction, TableRow};
@@ -219,6 +219,7 @@ mod tests {
                 captured_data: None,
                 gatt_services: None,
                 gatt_activity: None,
+                security_level: None,
             },
         });
         assert_round_trips(&DevBenchMessage::StudyDone { completed: true });
@@ -519,6 +520,7 @@ mod tests {
             captured_data: None,
             gatt_services: Some(sample_gatt_services()),
             gatt_activity: None,
+            security_level: None,
         };
 
         let mut buf = [0u8; 1024];
@@ -691,6 +693,7 @@ mod tests {
         0xde, 0xad, 0xbe, 0xef,
         0x00, // gatt_services: None
         0x00, // gatt_activity: None
+        0x00, // security_level: None (schema v12, decision 50)
         // Nothing between `captured_data` and `gatt_services`: the two
         // retired refs are gone from the type and must be gone from the
         // wire.
@@ -785,6 +788,7 @@ mod tests {
                     captured_data: Some(captured),
                     gatt_services: None,
                     gatt_activity: None,
+                    security_level: None,
                 },
             },
         );
@@ -989,7 +993,7 @@ mod tests {
         // pins all seven rather than trusting the declaration order to be
         // left alone (design.md §3 decision 10's append-only rule, applied
         // to `Action` as well as `DevBenchMessage`).
-        let cases: [(Action, u8); 5] = [
+        let cases: [(Action, u8); 7] = [
             (
                 Action::BleConnect { role: BleRole::Central, target_address: None , target_name: None },
                 1,
@@ -998,12 +1002,102 @@ mod tests {
             (Action::GattMonitorAll {}, 4),
             (Action::GattMonitorStart {}, 5),
             (Action::GattMonitorStop {}, 6),
+            // Schema v12 (design.md §3 decisions 50/51) -- appended at the
+            // end, never inserted, which is the whole reason these two
+            // numbers are worth pinning rather than reading off the
+            // declaration.
+            // Discriminant 7 is the one decision 44 reserved for this
+            // variant, back when it was still prospective. It landed there.
+            (Action::BleSecurity { level: BleSecurityLevel::L4 }, 7),
+            (Action::BleUnbond {}, 8),
         ];
         for (action, expected) in cases {
             let mut buf = [0u8; 64];
             let encoded = postcard::to_slice(&action, &mut buf).unwrap();
             assert_eq!(encoded[0], expected, "{action:?} moved discriminant");
         }
+    }
+
+    #[test]
+    fn security_actions_round_trip() {
+        let actions = [
+            Action::BleSecurity { level: BleSecurityLevel::L2 },
+            Action::BleSecurity { level: BleSecurityLevel::L3 },
+            Action::BleSecurity { level: BleSecurityLevel::L4 },
+            Action::BleUnbond {},
+        ];
+        for action in actions {
+            let mut buf = [0u8; 64];
+            let encoded = postcard::to_slice(&action, &mut buf).unwrap();
+            let decoded: Action = postcard::from_bytes(encoded).unwrap();
+            assert_eq!(action, decoded);
+
+            let json = serde_json::to_string(&action).unwrap();
+            let decoded: Action = serde_json::from_str(&json).unwrap();
+            assert_eq!(action, decoded);
+        }
+    }
+
+    #[test]
+    fn security_level_discriminants_are_the_ones_dev_bench_decodes() {
+        // dev-bench maps these varints onto Zephyr's BT_SECURITY_L* by
+        // hand (`serial_protocol.h`'s `enum dbm_security_level`), so the
+        // encoding is a cross-language contract, not an implementation
+        // detail. L1 is included even though no study may request it --
+        // `StepResult.security_level` reports it, so the wire has to carry
+        // it.
+        let cases = [
+            (BleSecurityLevel::L1, 0u8),
+            (BleSecurityLevel::L2, 1),
+            (BleSecurityLevel::L3, 2),
+            (BleSecurityLevel::L4, 3),
+        ];
+        for (level, expected) in cases {
+            let mut buf = [0u8; 8];
+            let encoded = postcard::to_slice(&level, &mut buf).unwrap();
+            assert_eq!(encoded, &[expected], "{level:?} moved discriminant");
+            assert_eq!(level.number(), expected + 1);
+        }
+    }
+
+    #[test]
+    fn every_level_including_l1_is_authorable() {
+        // Decision 44: `L1` is "this DUT needs no security", said out loud,
+        // rather than reached by leaving the step out and hoping. An earlier
+        // implementation of this pass refused it — the same class of mistake
+        // as defaulting `requires` would be.
+        for level in [
+            BleSecurityLevel::L1,
+            BleSecurityLevel::L2,
+            BleSecurityLevel::L3,
+            BleSecurityLevel::L4,
+        ] {
+            let action = Action::BleSecurity { level };
+            let mut buf = [0u8; 64];
+            let encoded = postcard::to_slice(&action, &mut buf).unwrap();
+            assert_eq!(postcard::from_bytes::<Action>(encoded).unwrap(), action);
+        }
+    }
+
+    #[test]
+    fn security_levels_order_by_strength() {
+        // `execute_set_security`'s C counterpart compares the requested
+        // level against the achieved one; the Rust side has to agree that
+        // stronger sorts higher, or a host-side check would disagree with
+        // the firmware's.
+        assert!(BleSecurityLevel::L1 < BleSecurityLevel::L2);
+        assert!(BleSecurityLevel::L2 < BleSecurityLevel::L3);
+        assert!(BleSecurityLevel::L3 < BleSecurityLevel::L4);
+    }
+
+    #[test]
+    fn a_step_result_json_without_security_level_still_loads() {
+        // Every `StudyResult` written before schema v12 has no such field,
+        // and those runs genuinely had no level recorded -- `None` is the
+        // truthful reading, not a placeholder.
+        let json = r#"{"step_name":"connect","outcome":"Pass","captured_data":null}"#;
+        let result: StepResult = serde_json::from_str(json).unwrap();
+        assert_eq!(result.security_level, None);
     }
 
 

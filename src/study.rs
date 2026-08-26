@@ -274,6 +274,121 @@ pub enum Action {
     /// its window closed implicitly when the study does. design.md §3
     /// decision 36.
     GattMonitorStop {},
+    /// Elevates the live BLE link to at least `level`, answering the pairing
+    /// prompts itself — design.md §3 decision 44.
+    ///
+    /// Until this existed a study could not ask for security at all, which
+    /// made a DUT that requires an encrypted link before it will answer GATT
+    /// simply un-testable: every later step failed, and the failure named
+    /// the wrong thing ("service not found", "disconnected during service
+    /// discovery"). The "when" half needs nothing new — `Step`'s
+    /// `delay_before_ms` and `timeout_ms` already express "settle, then
+    /// establish security inside this budget", which is what a DUT-side
+    /// security timeout needs authoring against.
+    ///
+    /// **The step fails when the level actually reached is lower than
+    /// `level`, and `StepResult.security_level` reports what was reached
+    /// either way.** There is deliberately no separate "request it but
+    /// don't insist" flag: `Step.continue_on_fail` is already exactly that
+    /// knob, so a study that wants to observe an attempted elevation
+    /// without aborting sets it, and a study that leaves it at its default
+    /// gets the strict reading. A step named "establish L4" that passes at
+    /// L2 is the silent-degradation failure this suite keeps arriving at
+    /// from other directions.
+    ///
+    /// Reaching [`BleSecurityLevel::L4`] requires a pairing method the
+    /// Bluetooth spec counts as *authenticated*, and the method selection
+    /// takes **both** peers' IO capabilities — see that variant's own docs
+    /// for what dev-bench does about its half and what it cannot do about
+    /// the DUT's.
+    BleSecurity { level: BleSecurityLevel },
+    /// Drops the bond established by a preceding [`Action::BleSecurity`],
+    /// inside the study — design.md §3 decision 50.
+    ///
+    /// dev-bench already clears bonds at the *end* of every study, so a
+    /// second run of a study behaves like the first. This is the other
+    /// half: "pair, do work, drop the bond, pair again" is a real test, and
+    /// without an authorable unbond the only way to reach the second
+    /// pairing was to end the study.
+    ///
+    /// **This drops the link.** Clearing a bond for a peer dev-bench is
+    /// connected to disconnects that connection — Zephyr's `bt_unpair`
+    /// does it, not dev-bench, and it is the correct behavior (a link whose
+    /// keys just went away is not a link). A study that unbonds mid-run
+    /// therefore needs its own [`Action::BleConnect`] afterwards, which is
+    /// what "pair again" meant in the first place.
+    BleUnbond {},
+}
+
+/// LE security mode 1's levels, as [`Action::BleSecurity`] asks for one and
+/// [`crate::result::StepResult`] reports one — design.md §3 decision 44.
+///
+/// Numbered by the spec's own level numbers rather than renamed, so a value
+/// here and a Zephyr `BT_SECURITY_L*` constant and a line in a Bluetooth
+/// Core Spec table are all obviously the same thing. Append-only, like every
+/// other enum that crosses the dev-bench wire.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BleSecurityLevel {
+    /// No encryption, no authentication — a plain connection.
+    ///
+    /// **Authorable, and deliberately so** (design.md §3 decision 44): `L1`
+    /// is "this DUT needs no security", *said out loud*, rather than reached
+    /// by leaving the step out and hoping. It is the same distinction
+    /// `REQUIREMENT_ANY` draws for [`crate::study::Requirements`] — a real
+    /// answer that has to be given. Since a connected link is already at
+    /// L1, a step asking for it is a `Pass` under the same
+    /// already-at-or-above rule every other level uses; it is not a special
+    /// case in dev-bench.
+    ///
+    /// It is also the level a `StepResult` most needs to be able to
+    /// *report*: a link that never got encrypted is exactly the answer a
+    /// study debugging a security-requiring DUT is looking for.
+    L1,
+    /// Encrypted with an unauthenticated key — what Just Works reaches.
+    L2,
+    /// Encrypted with an authenticated key.
+    L3,
+    /// Authenticated LE Secure Connections with a 128-bit key.
+    ///
+    /// **Just Works cannot reach this**, which is the whole reason
+    /// dev-bench had to change rather than merely gain an action: Level 4
+    /// requires an authenticated key, Just Works produces an
+    /// unauthenticated one, so no `bt_conn_set_security(L4)` against the
+    /// old posture could ever have succeeded. dev-bench now declares a
+    /// DisplayYesNo-class IO capability and auto-confirms, which selects LE
+    /// Secure Connections Numeric Comparison — authenticated, and
+    /// answerable without a human.
+    ///
+    /// **What that L4 is, said plainly.** The MITM flag is set, the key is
+    /// authenticated in the stack's own bookkeeping, and
+    /// `bt_conn_get_security` reports Level 4. It provides **no real
+    /// man-in-the-middle protection**, because nothing compared the numbers
+    /// — dev-bench confirmed them to itself. That is the right trade for an
+    /// unattended bench and it is what was asked for; it is written down
+    /// here so a result reporting "L4" is never later read as evidence the
+    /// link was humanly verified.
+    ///
+    /// **Selection takes both peers.** The spec's matrix is indexed by the
+    /// local *and* remote IO capability, so a DUT presenting
+    /// NoInputNoOutput forces Just Works whatever dev-bench declares, and
+    /// L4 becomes unreachable against that DUT. dev-bench cannot fix that
+    /// from its side and does not pretend to: the step fails, and
+    /// `StepResult.security_level` says which level it actually got.
+    L4,
+}
+
+impl BleSecurityLevel {
+    /// The spec's own level number — `2` for `L2`, and so on. For a message
+    /// or a rendered result, so no call site writes the digit itself.
+    pub const fn number(self) -> u8 {
+        match self {
+            BleSecurityLevel::L1 => 1,
+            BleSecurityLevel::L2 => 2,
+            BleSecurityLevel::L3 => 3,
+            BleSecurityLevel::L4 => 4,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
