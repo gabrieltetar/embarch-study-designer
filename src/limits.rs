@@ -36,6 +36,17 @@ pub const MAX_LOG_LINE_LEN: usize = 128;
 /// identifier (e.g. `git describe` output) for whichever dev-bench build
 /// replied to `Hello`.
 pub const MAX_FIRMWARE_VERSION_LEN: usize = 32;
+/// `DevBenchMessage::HelloAck.hardware_id` (design.md §3 decision 47,
+/// `embarch-core/design.md` §3 decision 35) — dev-bench's own factory-unique
+/// chip ID, hex-encoded lowercase, so Core can confirm the board answering
+/// on the serial link is the same silicon its JTAG probe just verified.
+///
+/// 32 chars fits 16 raw bytes hex-encoded. Both IDs this suite reads over
+/// JTAG today are 8 bytes (`{a:08x}{b:08x}` — 16 chars), so this is double
+/// the known case: dev-bench reports what Zephyr's `hwinfo_get_device_id`
+/// gives it, whose length is a per-SoC driver decision rather than something
+/// this crate gets to fix.
+pub const MAX_HARDWARE_ID_LEN: usize = 32;
 /// `Provenance.overrides` (design.md §3 decision 40, §4.5) — how many
 /// version requirements one run can have had waved through. Exactly two,
 /// and not a knob: there are two requirements (`dev_bench_version`,

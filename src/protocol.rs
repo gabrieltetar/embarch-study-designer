@@ -10,7 +10,7 @@ use heapless::{String, Vec};
 use serde::{Deserialize, Serialize};
 
 use crate::limits::{
-    MAX_FIRMWARE_VERSION_LEN, MAX_LOG_LINE_LEN, MAX_STREAMS_PER_STUDY,
+    MAX_FIRMWARE_VERSION_LEN, MAX_HARDWARE_ID_LEN, MAX_LOG_LINE_LEN, MAX_STREAMS_PER_STUDY,
     MAX_STREAM_RECORDS_PER_BATCH,
 };
 use crate::result::StepResult;
@@ -39,6 +39,24 @@ pub enum DevBenchMessage {
         /// §3 decision 18) — e.g. `git describe` output, a board ID, a build timestamp, or
         /// some combination; the exact contents are dev-bench build-tooling's own concern.
         firmware_version: String<MAX_FIRMWARE_VERSION_LEN>,
+        /// Dev-bench's own factory-unique chip ID, hex-encoded lowercase —
+        /// what Zephyr's `hwinfo_get_device_id` returns on the board that
+        /// replied (design.md §3 decision 47, `embarch-core/design.md` §3
+        /// decision 35).
+        ///
+        /// **Closes a hole nothing else could see.** Core re-verifies the
+        /// enrolled probe's identity over JTAG on every call, and the
+        /// handshake already ran that check — but since the port migration
+        /// the runtime serial link is a *physically separate USB device*
+        /// from the JTAG connection, so "the enrolled probe is attached"
+        /// and "some dev-bench answered on the link" were two facts
+        /// neither of which implied the other. This is the one thing the
+        /// bench can say about itself that ties them together.
+        ///
+        /// Empty when the board's Zephyr build has no `hwinfo` driver: a
+        /// bench that cannot answer says so, rather than sending something
+        /// that would compare equal to nothing.
+        hardware_id: String<MAX_HARDWARE_ID_LEN>,
     },
     /// Opens the tap whose `id` this is — its own index in `Study.streams`
     /// (design.md §3 decision 39, §4.8). Carries no `step_index`: when a

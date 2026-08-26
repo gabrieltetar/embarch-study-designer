@@ -172,6 +172,17 @@ mod tests {
             schema_version: DEV_BENCH_WIRE_SCHEMA_VERSION,
             compatible: true,
             firmware_version: heapless::String::try_from("nrf54l15dk-g1a2b3c").unwrap(),
+            hardware_id: heapless::String::try_from("aaaaaaaabbbbbbbb").unwrap(),
+        });
+        // A bench whose build has no `hwinfo` driver reports an empty
+        // string, and that has to survive the wire like any other value —
+        // Core's own comparison is what decides it is unusable, not the
+        // encoder silently dropping it.
+        assert_round_trips(&DevBenchMessage::HelloAck {
+            schema_version: DEV_BENCH_WIRE_SCHEMA_VERSION,
+            compatible: true,
+            firmware_version: heapless::String::try_from("nrf54l15dk-g1a2b3c").unwrap(),
+            hardware_id: heapless::String::new(),
         });
         assert_round_trips(&DevBenchMessage::LogLine {
             text: heapless::String::try_from("ble: connected").unwrap(),
@@ -678,6 +689,59 @@ mod tests {
         // retired refs are gone from the type and must be gone from the
         // wire.
     ];
+
+    /// `HelloAck { schema_version: 10, compatible: true, firmware_version:
+    /// "g1a2b3c", hardware_id: "aaaaaaaabbbbbbbb" }` (schema v10, decision
+    /// 47).
+    ///
+    /// **Pinned because the field is new, which is exactly decision 36's
+    /// rule.** `HelloAck` had never been pinned — like `StepResult`, it
+    /// predates that rule — and `StepResult`'s own history is the argument
+    /// for doing it now rather than later: dev-bench's C encoder wrote two
+    /// stale `Option` bytes for a whole schema version while both sides'
+    /// round-trip suites stayed green, because each agreed with itself. Two
+    /// self-consistent encoders are not one wire format.
+    const WIRE_HELLO_ACK: &[u8] = &[
+        0x01, // tag: HelloAck (DevBenchMessage variant 1)
+        0x0a, // schema_version: 10, varint
+        0x01, // compatible: true
+        0x07, // firmware_version: 7 bytes
+        0x67, 0x31, 0x61, 0x32, 0x62, 0x33, 0x63, // "g1a2b3c"
+        0x10, // hardware_id: 16 bytes
+        0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, // "aaaaaaaa"
+        0x62, 0x62, 0x62, 0x62, 0x62, 0x62, 0x62, 0x62, // "bbbbbbbb"
+    ];
+
+    #[test]
+    fn hello_ack_matches_dev_bench_firmwares_own_hand_written_encoding() {
+        assert_pinned(
+            WIRE_HELLO_ACK,
+            &DevBenchMessage::HelloAck {
+                schema_version: 10,
+                compatible: true,
+                firmware_version: heapless::String::try_from("g1a2b3c").unwrap(),
+                hardware_id: heapless::String::try_from("aaaaaaaabbbbbbbb").unwrap(),
+            },
+        );
+    }
+
+    #[test]
+    fn an_empty_hardware_id_is_one_zero_length_byte_not_an_absent_field() {
+        // The distinction matters to the C decoder: a bench with no hwinfo
+        // driver still writes the length prefix, so the frame stays walkable
+        // for anything appended after it.
+        let mut expected = WIRE_HELLO_ACK[..WIRE_HELLO_ACK.len() - 17].to_vec();
+        expected.push(0x00);
+        assert_pinned(
+            &expected,
+            &DevBenchMessage::HelloAck {
+                schema_version: 10,
+                compatible: true,
+                firmware_version: heapless::String::try_from("g1a2b3c").unwrap(),
+                hardware_id: heapless::String::new(),
+            },
+        );
+    }
 
     fn stream_record(rx_utc_ms: u64, bytes: &[u8]) -> StreamRecord {
         StreamRecord { rx_utc_ms, bytes: HVec::from_slice(bytes).unwrap() }
