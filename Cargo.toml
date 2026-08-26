@@ -53,13 +53,21 @@ default = []
 # fixed-capacity form a ~38 KB inline value moved on the stack per `Study`,
 # which is what actually crashed a debug embarch-api. No wire effect — both
 # backings serialize as a plain sequence.
-alloc = []
+# `serde/alloc` is not optional here even though it looks like a detail: with
+# `default-features = false` serde has no `Deserialize` for `Vec`, `String` or
+# `BTreeMap` at all, so `Backing<T, N>::deserialize` did not exist and
+# `cargo build --features alloc` (and `--features std`) failed outright. Nobody
+# noticed because every real consumer also depends on something that turns on
+# `serde/std`, so feature unification supplied it -- the crate's own
+# single-feature build was the only configuration that could see the gap, and
+# it is exactly the configuration the feature matrix is supposed to check.
+alloc = ["serde/alloc"]
 # Enables std for the authoring-time tools (`gatt-extract`, `study-ui`).
 # dev-bench firmware never enables this.
 # `std` implies `alloc`: a build with the standard library has a global
 # allocator by definition, so there is no coherent "std but keep the 64-slot
 # inline array" configuration to preserve (decision 46).
-std = ["alloc"]
+std = ["alloc", "serde/std"]
 # Exposes the extern "C" surface dev-bench firmware links against (design.md
 # §3 decisions 7, 23). Off by default so embarch-core/embarch-api (plain
 # Cargo dependents) don't carry unused #[no_mangle] symbols.

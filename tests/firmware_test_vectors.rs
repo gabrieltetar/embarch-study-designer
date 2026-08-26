@@ -189,7 +189,7 @@ fn dump_study_start_with_taps_wire_bytes() {
             source: StreamSource::Signal {
                 name: heapless::String::try_from("outpost-trace").unwrap(),
             },
-            encoding: StreamEncoding::OutpostTrace { manifest_crc: 0xDEAD_BEEF },
+            encoding: StreamEncoding::OutpostTrace,
             scope: StreamScope::WholeStudy,
         })
         .unwrap();
