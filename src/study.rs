@@ -38,7 +38,7 @@ pub struct Study {
     /// thought about it.
     pub requires: Requirements,
     /// Run in order. Entirely static once submitted for v1.
-    pub steps: crate::step_list::StepList,
+    pub steps: crate::bounded::StepList,
     /// Never transmitted to dev-bench (§3 decision 17) — Core-only,
     /// evaluated post-hoc once the study reaches `"completed"` (§4.6).
     pub validations: Vec<PostHocValidation, MAX_VALIDATIONS_PER_STUDY>,

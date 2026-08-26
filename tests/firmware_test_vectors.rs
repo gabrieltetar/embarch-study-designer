@@ -37,7 +37,7 @@ fn advertise(name: &str, local_name: Option<&str>, adv_interval_ms: u16, timeout
 /// `test_study_start_round_trip_one_step`.
 #[test]
 fn one_step_vector() {
-    let mut steps = embarch_study_designer::step_list::StepList::new();
+    let mut steps = embarch_study_designer::bounded::StepList::new();
     steps.push(advertise("advertise", Some("embarch-dev-bench"), 100, 5000, false)).unwrap();
     assert_eq!(
         steps_crc(&steps).unwrap(),
@@ -49,7 +49,7 @@ fn one_step_vector() {
 /// `test_study_start_round_trip_two_steps`.
 #[test]
 fn two_step_vector() {
-    let mut steps = embarch_study_designer::step_list::StepList::new();
+    let mut steps = embarch_study_designer::bounded::StepList::new();
     steps.push(advertise("advertise-1", Some("dev-bench"), 100, 5000, false)).unwrap();
     steps.push(advertise("advertise-2", None, 250, 2000, true)).unwrap();
     assert_eq!(
@@ -71,7 +71,7 @@ fn dump_study_start_wire_bytes() {
     use embarch_study_designer::protocol::DevBenchMessage;
     use embarch_study_designer::{Action, GattOperation};
 
-    let mut steps = embarch_study_designer::step_list::StepList::new();
+    let mut steps = embarch_study_designer::bounded::StepList::new();
     steps
         .push(Step {
             name: heapless::String::try_from("connect").unwrap(),
@@ -162,7 +162,7 @@ fn dump_study_start_with_taps_wire_bytes() {
         SampleLayout, StreamEncoding, StreamScope, StreamSource, StreamTap, Unit, Uuid,
     };
 
-    let mut steps = embarch_study_designer::step_list::StepList::new();
+    let mut steps = embarch_study_designer::bounded::StepList::new();
     steps.push(advertise("advertise", Some("embarch-dev-bench"), 100, 5000, false)).unwrap();
 
     let mut streams: Vec<StreamTap, MAX_STREAMS_PER_STUDY> = Vec::new();

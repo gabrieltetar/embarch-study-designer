@@ -40,7 +40,7 @@ pub mod protocol;
 pub mod registry;
 pub mod result;
 pub mod sample;
-pub mod step_list;
+pub mod bounded;
 pub mod schema_version;
 #[cfg(feature = "core-validation")]
 pub mod signal;
@@ -94,7 +94,7 @@ mod tests {
     use heapless::Vec as HVec;
 
     fn sample_study() -> Study {
-        let mut steps = step_list::StepList::new();
+        let mut steps = bounded::StepList::new();
         steps
             .push(Step {
                 name: heapless::String::try_from("connect").unwrap(),
@@ -427,7 +427,7 @@ mod tests {
     // (the Core<->dev-bench wire format) and serde_json (the
     // embarch-api/events.json path, §3 decision 3's format-agnostic stance).
 
-    fn sample_gatt_services() -> HVec<crate::gatt::GattServiceInfo, { limits::MAX_DISCOVERED_SERVICES }> {
+    fn sample_gatt_services() -> bounded::Bounded<crate::gatt::GattServiceInfo, { limits::MAX_DISCOVERED_SERVICES }> {
         let mut chars: HVec<crate::gatt::GattCharacteristicInfo, { limits::MAX_CHARS_PER_SERVICE }> =
             HVec::new();
         chars
@@ -437,8 +437,8 @@ mod tests {
             .push(crate::gatt::GattCharacteristicInfo { uuid: Uuid([2u8; 16]), properties: 0x0a })
             .unwrap();
 
-        let mut services: HVec<crate::gatt::GattServiceInfo, { limits::MAX_DISCOVERED_SERVICES }> =
-            HVec::new();
+        let mut services: bounded::Bounded<crate::gatt::GattServiceInfo, { limits::MAX_DISCOVERED_SERVICES }> =
+            bounded::Bounded::new();
         services
             .push(crate::gatt::GattServiceInfo { uuid: Uuid([0u8; 16]), characteristics: chars })
             .unwrap();
@@ -449,16 +449,23 @@ mod tests {
     fn gatt_service_info_round_trips_through_postcard_and_json() {
         let services = sample_gatt_services();
 
+        // Encoded from a `Bounded` and decoded back into a plain
+        // `heapless::Vec` — which is now the load-bearing assertion behind
+        // §3 decisions 46/49 needing no schema bump. A host encoding this
+        // field and a dev-bench build decoding it hold *different* shapes of
+        // the same type, and this is what says those shapes agree on the
+        // wire. Compared as slices because the two are deliberately not the
+        // same Rust type.
         let mut buf = [0u8; 512];
         let encoded = postcard::to_slice(&services, &mut buf).unwrap();
         let decoded: HVec<crate::gatt::GattServiceInfo, { limits::MAX_DISCOVERED_SERVICES }> =
             postcard::from_bytes(encoded).unwrap();
-        assert_eq!(services, decoded);
+        assert_eq!(&services[..], &decoded[..]);
 
         let json = serde_json::to_string(&services).unwrap();
         let decoded: HVec<crate::gatt::GattServiceInfo, { limits::MAX_DISCOVERED_SERVICES }> =
             serde_json::from_str(&json).unwrap();
-        assert_eq!(services, decoded);
+        assert_eq!(&services[..], &decoded[..]);
     }
 
     #[test]

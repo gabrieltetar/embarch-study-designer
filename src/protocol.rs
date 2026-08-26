@@ -82,7 +82,7 @@ pub enum DevBenchMessage {
     /// `Hello` (design.md §3 decision 17's integrity seal), since `Hello`
     /// itself precedes any `Study` being submitted.
     StudyStart {
-        steps: crate::step_list::StepList,
+        steps: crate::bounded::StepList,
         steps_crc: u32,
         /// The study's declared taps (design.md §3 decision 39, §4.8).
         ///
