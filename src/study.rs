@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::ids::{BleAddress, Uuid};
 use crate::limits::{
     MAX_FIRMWARE_VERSION_LEN, MAX_LOCAL_NAME_LEN, MAX_NAME_LEN, MAX_PAYLOAD_LEN, MAX_SERVICE_UUIDS,
-    MAX_STEPS_PER_STUDY, MAX_STREAMS_PER_STUDY, MAX_STUDY_NAME_LEN, MAX_VALIDATIONS_PER_STUDY,
+    MAX_STREAMS_PER_STUDY, MAX_STUDY_NAME_LEN, MAX_VALIDATIONS_PER_STUDY,
 };
 use crate::streams::StreamTap;
 use crate::validation::PostHocValidation;
@@ -38,7 +38,7 @@ pub struct Study {
     /// thought about it.
     pub requires: Requirements,
     /// Run in order. Entirely static once submitted for v1.
-    pub steps: Vec<Step, MAX_STEPS_PER_STUDY>,
+    pub steps: crate::step_list::StepList,
     /// Never transmitted to dev-bench (§3 decision 17) — Core-only,
     /// evaluated post-hoc once the study reaches `"completed"` (§4.6).
     pub validations: Vec<PostHocValidation, MAX_VALIDATIONS_PER_STUDY>,

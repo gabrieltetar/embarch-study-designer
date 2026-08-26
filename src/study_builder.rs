@@ -265,7 +265,7 @@ pub fn build_study(
         return Err(BuildStudyError::TooManySteps { max: MAX_STEPS_PER_STUDY, actual: rows.len() });
     }
 
-    let mut steps: HVec<Step, MAX_STEPS_PER_STUDY> = HVec::new();
+    let mut steps: crate::step_list::StepList = crate::step_list::StepList::new();
     for row in rows {
         let action = resolve_action(&row.action, registry)?;
         let step = Step {
@@ -851,15 +851,13 @@ mod tests {
 
     #[test]
     fn resulting_study_round_trips_through_serde_json_matching_the_run_study_wire_shape() {
-        // Run on a dedicated, generously-sized stack: `Study` embeds a
-        // `heapless::Vec<Step, MAX_STEPS_PER_STUDY>` -- a fixed-size *inline*
-        // array sized for all 64 slots regardless of how many this test's
-        // own one-step `Study` actually populates -- so deserializing it on
-        // a debug build's default test-thread stack overflows, the exact
-        // already-tracked risk `design.md` §7 documents (confirmed by
-        // hitting it for real writing this test, not assumed). Same fix
-        // this crate's own `self_test_fixture_round_trips_end_to_end`
-        // (embarch-api's `study.rs`) already uses for the identical cause.
+        // Kept on a dedicated, generously-sized stack even though design.md
+        // §3 decision 46 removed the cause: `Study.steps` is a heap `Vec`
+        // under `alloc` (which `study-ui` implies via `std`), so the 64-slot
+        // inline array this comment used to describe is gone here. The big
+        // stack stays because `Step` itself is still large and this test
+        // deserializes a whole `Study` -- it is cheap insurance, not a
+        // workaround any more.
         std::thread::Builder::new()
             .stack_size(16 * 1024 * 1024)
             .spawn(round_trip_body)
