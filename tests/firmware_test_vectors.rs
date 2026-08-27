@@ -253,7 +253,6 @@ fn dump_step_result_wire_bytes() {
             outcome: Outcome::Pass,
             captured_data: Some(heapless::Vec::from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]).unwrap()),
             gatt_services: None,
-            gatt_activity: None,
             security_level: None,
         },
     };
@@ -364,12 +363,107 @@ fn dump_step_result_with_security_wire_bytes() {
             outcome: Outcome::Pass,
             captured_data: None,
             gatt_services: None,
-            gatt_activity: None,
             security_level: Some(BleSecurityLevel::L4),
         },
     };
     let mut buf = [0u8; 4096];
     let encoded = postcard::to_slice(&msg, &mut buf).unwrap();
+    println!("len = {}", encoded.len());
+    let hex: std::vec::Vec<std::string::String> =
+        encoded.iter().map(|b| std::format!("0x{b:02x}")).collect();
+    println!("{}", hex.join(", "));
+}
+
+/// Dumps a `StudyStart` carrying schema v14's new wire shapes
+/// (`embarch-study-designer/design.md` §3 decisions 52/53), so dev-bench's
+/// hand-written C decoder is pinned against bytes this crate produced — the
+/// both-languages rule, applied in the pass that adds them.
+///
+/// Three things here can only be walked at the right width by a decoder that
+/// knows about them, and each shifts every later byte if it isn't:
+///
+/// * **`GattMonitorSelectedStart`'s `targets`** — the first `Action` variant
+///   ever to carry a *sequence*. A decoder that walked it as a field-less
+///   variant (which is what every monitor action was until now) would read
+///   the length varint as the next step's name length and produce garbage
+///   that still decodes.
+/// * **`StreamEncoding::Struct`** — one raw `u8` after the tag, inside the
+///   span `streams_crc` seals. Skipped at the wrong width and the C-side CRC
+///   check fails, which is the failure this vector wants: loud, at the
+///   handshake, rather than a study that runs and captures into the wrong
+///   file.
+/// * **A `GattMonitorStop` after both**, proving the tag after the
+///   variable-length one still lands where the encoder put it — the same
+///   role `BleUnbond` plays in the v12 vector.
+///
+/// Run with: cargo test --test firmware_test_vectors -- --nocapture dump_study_start_with_selective_monitor
+#[test]
+fn dump_study_start_with_selective_monitor_wire_bytes() {
+    use embarch_study_designer::protocol::DevBenchMessage;
+    use embarch_study_designer::{
+        GattTarget, StreamEncoding, StreamScope, StreamSource, StreamTap, Uuid,
+    };
+
+    let service = Uuid::parse("6e400001-b5a3-f393-e0a9-e50e24dcca9e").unwrap();
+    let tx = Uuid::parse("6e400003-b5a3-f393-e0a9-e50e24dcca9e").unwrap();
+    let rx = Uuid::parse("6e400002-b5a3-f393-e0a9-e50e24dcca9e").unwrap();
+
+    let mut targets = embarch_study_designer::bounded::Bounded::<
+        GattTarget,
+        { embarch_study_designer::limits::MAX_MONITOR_TARGETS },
+    >::new();
+    targets.push(GattTarget { service_uuid: service, characteristic_uuid: tx }).unwrap();
+    targets.push(GattTarget { service_uuid: service, characteristic_uuid: rx }).unwrap();
+
+    let mut steps = embarch_study_designer::bounded::StepList::new();
+    steps
+        .push(Step {
+            name: heapless::String::try_from("monitor").unwrap(),
+            action: Action::GattMonitorSelectedStart { targets },
+            timeout_ms: 5_000,
+            continue_on_fail: false,
+            delay_before_ms: 0,
+        })
+        .unwrap();
+    steps
+        .push(Step {
+            name: heapless::String::try_from("stop").unwrap(),
+            action: Action::GattMonitorStop {},
+            timeout_ms: 1_000,
+            continue_on_fail: false,
+            delay_before_ms: 250,
+        })
+        .unwrap();
+
+    let mut streams: Vec<StreamTap, MAX_STREAMS_PER_STUDY> = Vec::new();
+    streams
+        .push(StreamTap {
+            id: 0,
+            name: heapless::String::try_from("nus-tx").unwrap(),
+            source: StreamSource::GattNotify {
+                service_uuid: service,
+                characteristic_uuid: tx,
+            },
+            // Deliberately a non-zero index, so a C decoder that skipped the
+            // byte entirely rather than reading it still shifts the span.
+            encoding: StreamEncoding::Struct { decoder: 1 },
+            scope: StreamScope::WholeStudy,
+        })
+        .unwrap();
+
+    let crc = steps_crc(&steps).unwrap();
+    let streams_crc_value = streams_crc(&streams).unwrap();
+    let msg = DevBenchMessage::StudyStart {
+        steps,
+        steps_crc: crc,
+        streams,
+        streams_crc: streams_crc_value,
+        dev_bench_log_level: embarch_study_designer::DevBenchLogLevel::Debug,
+    };
+    let mut buf = [0u8; 4096];
+    let encoded = postcard::to_slice(&msg, &mut buf).unwrap();
+    println!("steps_crc = {crc:#010x}");
+    println!("streams_crc = {streams_crc_value:#010x}");
     println!("len = {}", encoded.len());
     let hex: std::vec::Vec<std::string::String> =
         encoded.iter().map(|b| std::format!("0x{b:02x}")).collect();

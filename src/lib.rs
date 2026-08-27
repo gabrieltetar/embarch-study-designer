@@ -31,6 +31,7 @@
 extern crate alloc;
 
 pub mod crc;
+pub mod decoder;
 #[cfg(feature = "ffi")]
 pub mod ffi;
 pub mod gatt;
@@ -55,9 +56,10 @@ pub mod study_builder;
 pub mod vendor;
 
 pub use crc::{steps_crc, streams_crc, StepTooLargeError, StreamTapTooLargeError};
+pub use decoder::{DecodeError, ScalarType, StructField, StructLayout};
 pub use gatt::{
-    GattActivityRecord, GattCharacteristicInfo, GattDirection, GattEventKind,
-    GattServiceInfo, GattTranscriptEntry,
+    GattCharacteristicInfo, GattDirection, GattEventKind, GattServiceInfo, GattTarget,
+    GattTranscriptEntry,
 };
 #[cfg(feature = "gatt-extract")]
 pub use gatt_extract::{ZephyrBleDefExtractor, ExtractError, GattConfigExtractor};
@@ -68,7 +70,7 @@ pub use protocol::DevBenchMessage;
 #[cfg(feature = "study-ui")]
 pub use registry::{
     ActionField, ActionFieldValue, ActionRegistry, RegisteredAction, RegisteredOperation,
-    RegistryError,
+    RegistryError, StructRegistry,
 };
 pub use result::{
     Outcome, Provenance, StepResult, StudyResult, VersionOverride, VersionSource, VersionSubject,
@@ -122,6 +124,8 @@ mod tests {
         let streams_crc = crc::streams_crc(&streams).unwrap();
 
         Study {
+
+            decoders: Default::default(),
             name: heapless::String::try_from("smoke-test").unwrap(),
             requires: Requirements::any(),
             steps,
@@ -159,7 +163,6 @@ mod tests {
     /// that changed: `StudyStart`'s steps are no longer a 64-slot inline
     /// array (this test build has `alloc`), so `DevBenchMessage` is far
     /// smaller than the ~40 KiB it used to be — but `StepResult`'s own
-    /// `gatt_activity` is still large and unmigrated, so holding a dozen
     /// messages in one frame is still not free.
     #[inline(never)]
     fn assert_round_trips(msg: &DevBenchMessage) {
@@ -220,7 +223,6 @@ mod tests {
                 outcome: Outcome::Pass,
                 captured_data: None,
                 gatt_services: None,
-                gatt_activity: None,
                 security_level: None,
             },
         });
@@ -482,23 +484,24 @@ mod tests {
     }
 
     #[test]
-    fn gatt_activity_record_round_trips_through_postcard_and_json() {
-        let mut payload: HVec<u8, { limits::MAX_PAYLOAD_LEN }> = HVec::new();
-        payload.extend_from_slice(&[0xAB, 0xCD, 0xEF]).unwrap();
-        let record = crate::gatt::GattActivityRecord {
-            rx_utc_ms: 1_753_000_000_500,
-            characteristic_index: 3,
-            payload,
+    fn a_gatt_target_round_trips_through_both_formats() {
+        // Replaces `GattActivityRecord`'s round-trip, retired with the type
+        // by design.md §3 decision 54. `GattTarget` is what a study now says
+        // about a characteristic it cares about (decision 53).
+        let target = crate::gatt::GattTarget {
+            service_uuid: Uuid([0x11; 16]),
+            characteristic_uuid: Uuid([0x22; 16]),
         };
 
-        let mut buf = [0u8; 512];
-        let encoded = postcard::to_slice(&record, &mut buf).unwrap();
-        let decoded: crate::gatt::GattActivityRecord = postcard::from_bytes(encoded).unwrap();
-        assert_eq!(record, decoded);
+        let mut buf = [0u8; 64];
+        let encoded = postcard::to_slice(&target, &mut buf).unwrap();
+        assert_eq!(encoded.len(), 32, "two raw UUIDs, no length prefixes");
+        let decoded: crate::gatt::GattTarget = postcard::from_bytes(encoded).unwrap();
+        assert_eq!(target, decoded);
 
-        let json = serde_json::to_string(&record).unwrap();
-        let decoded: crate::gatt::GattActivityRecord = serde_json::from_str(&json).unwrap();
-        assert_eq!(record, decoded);
+        let json = serde_json::to_string(&target).unwrap();
+        let decoded: crate::gatt::GattTarget = serde_json::from_str(&json).unwrap();
+        assert_eq!(target, decoded);
     }
 
     #[test]
@@ -522,7 +525,6 @@ mod tests {
             outcome: Outcome::Pass,
             captured_data: None,
             gatt_services: Some(sample_gatt_services()),
-            gatt_activity: None,
             security_level: None,
         };
 
@@ -536,7 +538,6 @@ mod tests {
         assert_eq!(result, decoded);
 
         // A `StepResult` JSON predating decision 31/32 (no `gatt_services`/
-        // `gatt_activity` keys at all) still deserializes, per `#[serde(default)]`
         // — this is the specific claim milestone-9.md §2's scope note makes.
         let legacy_json = r#"{
             "step_name": "connect",
@@ -545,7 +546,6 @@ mod tests {
         }"#;
         let decoded: StepResult = serde_json::from_str(legacy_json).unwrap();
         assert_eq!(decoded.gatt_services, None);
-        assert_eq!(decoded.gatt_activity, None);
     }
 
     // design.md §3 decision 36, §4.3b: the streamed GATT transcript — its
@@ -676,7 +676,6 @@ mod tests {
 
     /// `StepResult { step_index: 1, result: { step_name: "advertise",
     /// outcome: Pass, captured_data: Some([DE AD BE EF]), gatt_services:
-    /// None, gatt_activity: None } }` (schema v9).
     ///
     /// **Pinned only at v9, and that is the point.** `StepResult` predates
     /// decision 36's both-languages rule, which applied to *new* records, so
@@ -695,7 +694,6 @@ mod tests {
         0x04, // ...4 bytes
         0xde, 0xad, 0xbe, 0xef,
         0x00, // gatt_services: None
-        0x00, // gatt_activity: None
         0x00, // security_level: None (schema v12, decision 50)
         // Nothing between `captured_data` and `gatt_services`: the two
         // retired refs are gone from the type and must be gone from the
@@ -790,7 +788,6 @@ mod tests {
                     outcome: Outcome::Pass,
                     captured_data: Some(captured),
                     gatt_services: None,
-                    gatt_activity: None,
                     security_level: None,
                 },
             },
@@ -798,7 +795,6 @@ mod tests {
     }
 
     /// [`assert_pinned`] with a buffer big enough for a `StepResult`, whose
-    /// `gatt_activity` array makes the message far larger than the 256-byte
     /// scratch the stream records need. `#[inline(never)]` for the same
     /// stack reason `assert_round_trips` is.
     #[inline(never)]

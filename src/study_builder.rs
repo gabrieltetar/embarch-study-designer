@@ -19,9 +19,12 @@ use std::collections::HashMap;
 use heapless::Vec as HVec;
 use serde::{Deserialize, Serialize};
 
+use crate::bounded::Bounded;
+use crate::gatt::GattTarget;
 use crate::ids::Uuid;
 use crate::limits::{
-    MAX_LOCAL_NAME_LEN, MAX_NAME_LEN, MAX_PAYLOAD_LEN, MAX_STEPS_PER_STUDY, MAX_STUDY_NAME_LEN,
+    MAX_LOCAL_NAME_LEN, MAX_MONITOR_TARGETS, MAX_NAME_LEN, MAX_PAYLOAD_LEN, MAX_STEPS_PER_STUDY,
+    MAX_STUDY_NAME_LEN,
 };
 use crate::registry::{ActionRegistry, RegisteredAction, RegisteredOperation};
 use crate::study::{Action, BleRole, GattOperation, Requirements, BleSecurityLevel, Step, Study};
@@ -46,6 +49,11 @@ pub enum BuiltInActionKind {
     BleSecurity,
     /// design.md §3 decision 50.
     BleUnbond,
+    /// design.md §3 decision 53 — takes `targets` from the same
+    /// [`RowAction::BuiltIn`] row.
+    GattMonitorSelected,
+    /// design.md §3 decision 53.
+    GattMonitorSelectedStart,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -82,6 +90,18 @@ pub enum RowAction {
         /// an author who wants a weaker one says so, `L1` included.
         #[serde(default)]
         security_level: Option<BleSecurityLevel>,
+        /// Only meaningful for `GattMonitorSelected`/`GattMonitorSelectedStart`
+        /// — which characteristics the step subscribes to (design.md §3
+        /// decision 53). UUIDs as text, parsed by the same
+        /// [`Uuid::parse`] `RowAction::Raw` uses, so a value picked from the
+        /// discovered table and one typed by hand mean the same thing.
+        ///
+        /// An empty list on a selective action is **refused**, not silently
+        /// promoted to `GattMonitorAll`: "monitor these" with nothing named
+        /// is the not-thought-about case, and quietly subscribing to
+        /// everything is exactly the flood this action exists to avoid.
+        #[serde(default)]
+        targets: Vec<TargetInput>,
     },
     /// References a `RegisteredAction` by name, plus — for a `Write` — which
     /// value the engineer picked per field: field name -> that field's
@@ -146,6 +166,15 @@ pub enum RowAction {
     },
 }
 
+/// One characteristic a selective monitor row names — design.md §3
+/// decision 53. Text UUIDs, resolved to [`crate::GattTarget`] by
+/// [`build_study`] rather than by the client.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TargetInput {
+    pub service_uuid: String,
+    pub characteristic_uuid: String,
+}
+
 /// One Study Designer UI row.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TableRow {
@@ -177,6 +206,11 @@ pub enum BuildStudyError {
     UnparseableUuid { which: &'static str, value: String },
     PayloadTooLong { max: usize, actual: usize },
     PayloadOnNonWrite,
+    /// A selective monitor row that names no characteristic.
+    NoMonitorTargets,
+    /// More characteristics than one step can carry
+    /// ([`crate::limits::MAX_MONITOR_TARGETS`]).
+    TooManyMonitorTargets { max: usize, actual: usize },
     UnknownVendorService(String),
     UnknownVendorCharacteristic { service: String, characteristic: String },
     /// The chosen operation isn't among the ones the vendor declares for
@@ -228,6 +262,16 @@ impl std::fmt::Display for BuildStudyError {
             BuildStudyError::PayloadOnNonWrite => {
                 write!(f, "a payload was given for an operation that isn't a Write")
             }
+            BuildStudyError::NoMonitorTargets => write!(
+                f,
+                "a selective GATT monitor step names no characteristic; pick at least one, or \
+                 use GattMonitorAll to subscribe to everything"
+            ),
+            BuildStudyError::TooManyMonitorTargets { max, actual } => write!(
+                f,
+                "a selective GATT monitor step names {actual} characteristics, but one step \
+                 carries at most {max}"
+            ),
             BuildStudyError::UnknownVendorService(id) => {
                 write!(f, "no vendor-defined service with id '{id}'")
             }
@@ -318,12 +362,52 @@ pub fn build_study(
         // nothing gets the level every study before this field existed already
         // ran at.
         dev_bench_log_level: crate::study::DevBenchLogLevel::default(),
+        // Left empty for the same reason `streams` is: a decoder is only
+        // reachable through a tap, taps are authored one layer up
+        // (`embarch-ui`'s Study Designer, which is also where a firmware
+        // repo's `study-structs.toml` is in reach), and this function has no
+        // repo path to resolve a layout name against.
+        decoders: crate::bounded::Bounded::new(),
     })
+}
+
+/// Parses a selective monitor row's text UUID pairs into the wire type —
+/// design.md §3 decision 53.
+fn resolve_targets(
+    targets: &[TargetInput],
+) -> Result<Bounded<GattTarget, MAX_MONITOR_TARGETS>, BuildStudyError> {
+    if targets.is_empty() {
+        return Err(BuildStudyError::NoMonitorTargets);
+    }
+    if targets.len() > MAX_MONITOR_TARGETS {
+        return Err(BuildStudyError::TooManyMonitorTargets {
+            max: MAX_MONITOR_TARGETS,
+            actual: targets.len(),
+        });
+    }
+    let mut out: Bounded<GattTarget, MAX_MONITOR_TARGETS> = Bounded::new();
+    for target in targets {
+        let service_uuid = Uuid::parse(&target.service_uuid).ok_or_else(|| {
+            BuildStudyError::UnparseableUuid {
+                which: "service UUID",
+                value: target.service_uuid.clone(),
+            }
+        })?;
+        let characteristic_uuid = Uuid::parse(&target.characteristic_uuid).ok_or_else(|| {
+            BuildStudyError::UnparseableUuid {
+                which: "characteristic UUID",
+                value: target.characteristic_uuid.clone(),
+            }
+        })?;
+        // Capacity checked above, so this cannot fail.
+        let _ = out.push(GattTarget { service_uuid, characteristic_uuid });
+    }
+    Ok(out)
 }
 
 fn resolve_action(row_action: &RowAction, registry: &ActionRegistry) -> Result<Action, BuildStudyError> {
     match row_action {
-        RowAction::BuiltIn { which, role, target_name, security_level } => Ok(match which {
+        RowAction::BuiltIn { which, role, target_name, security_level, targets } => Ok(match which {
             BuiltInActionKind::BleConnect => Action::BleConnect {
                 role: match role {
                     RoleChoice::Central => BleRole::Central,
@@ -350,6 +434,12 @@ fn resolve_action(row_action: &RowAction, registry: &ActionRegistry) -> Result<A
                 Action::BleSecurity { level: security_level.unwrap_or(BleSecurityLevel::L4) }
             }
             BuiltInActionKind::BleUnbond => Action::BleUnbond {},
+            BuiltInActionKind::GattMonitorSelected => {
+                Action::GattMonitorSelected { targets: resolve_targets(targets)? }
+            }
+            BuiltInActionKind::GattMonitorSelectedStart => {
+                Action::GattMonitorSelectedStart { targets: resolve_targets(targets)? }
+            }
         }),
         RowAction::Registered { name, field_choices } => {
             let registered = registry
@@ -556,6 +646,93 @@ pub fn characteristic_pair(service_uuid: Uuid, uuid: Uuid) -> (Uuid, Uuid) {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_selective_monitor_row_resolves_its_targets() {
+        let rows = [TableRow {
+            name: "monitor".to_string(),
+            action: RowAction::BuiltIn {
+                targets: vec![TargetInput {
+                    service_uuid: "6e400001-b5a3-f393-e0a9-e50e24dcca9e".to_string(),
+                    characteristic_uuid: "6e400003-b5a3-f393-e0a9-e50e24dcca9e".to_string(),
+                }],
+                which: BuiltInActionKind::GattMonitorSelectedStart,
+                role: RoleChoice::Central,
+                target_name: None,
+                security_level: None,
+            },
+            timeout_ms: 1_000,
+            continue_on_fail: false,
+            delay_before_ms: 0,
+        }];
+        let study =
+            build_study("s", &rows, &ActionRegistry::default()).unwrap();
+        match &study.steps[0].action {
+            Action::GattMonitorSelectedStart { targets } => {
+                assert_eq!(targets.len(), 1);
+                assert_eq!(
+                    targets[0].characteristic_uuid,
+                    Uuid::parse("6e400003-b5a3-f393-e0a9-e50e24dcca9e").unwrap()
+                );
+            }
+            other => panic!("expected a selective monitor start, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_selective_monitor_row_naming_nothing_is_refused_not_promoted_to_all() {
+        // Quietly subscribing to everything is exactly the flood this
+        // action exists to avoid, and "monitor these" with nothing named is
+        // the not-thought-about case.
+        for which in
+            [BuiltInActionKind::GattMonitorSelected, BuiltInActionKind::GattMonitorSelectedStart]
+        {
+            let rows = [TableRow {
+                name: "monitor".to_string(),
+                action: RowAction::BuiltIn {
+                    targets: Vec::new(),
+                    which,
+                    role: RoleChoice::Central,
+                    target_name: None,
+                    security_level: None,
+                },
+                timeout_ms: 1_000,
+                continue_on_fail: false,
+                delay_before_ms: 0,
+            }];
+            assert_eq!(
+                build_study("s", &rows, &ActionRegistry::default()),
+                Err(BuildStudyError::NoMonitorTargets)
+            );
+        }
+    }
+
+    #[test]
+    fn a_selective_monitor_targets_unparseable_uuid_is_named() {
+        let rows = [TableRow {
+            name: "monitor".to_string(),
+            action: RowAction::BuiltIn {
+                targets: vec![TargetInput {
+                    service_uuid: "6e400001-b5a3-f393-e0a9-e50e24dcca9e".to_string(),
+                    characteristic_uuid: "not-a-uuid".to_string(),
+                }],
+                which: BuiltInActionKind::GattMonitorSelected,
+                role: RoleChoice::Central,
+                target_name: None,
+                security_level: None,
+            },
+            timeout_ms: 1_000,
+            continue_on_fail: false,
+            delay_before_ms: 0,
+        }];
+        assert_eq!(
+            build_study("s", &rows, &ActionRegistry::default()),
+            Err(BuildStudyError::UnparseableUuid {
+                which: "characteristic UUID",
+                value: "not-a-uuid".to_string(),
+            })
+        );
+    }
     use super::*;
     use crate::registry::{ActionField, ActionFieldValue};
 
@@ -602,6 +779,7 @@ mod tests {
             TableRow {
                 name: "secure".to_string(),
                 action: RowAction::BuiltIn {
+                targets: Vec::new(),
                     which: BuiltInActionKind::BleSecurity,
                     role: RoleChoice::Central,
                     target_name: None,
@@ -614,6 +792,7 @@ mod tests {
             TableRow {
                 name: "drop-bond".to_string(),
                 action: RowAction::BuiltIn {
+                targets: Vec::new(),
                     which: BuiltInActionKind::BleUnbond,
                     role: RoleChoice::Central,
                     target_name: None,
@@ -637,6 +816,7 @@ mod tests {
         let rows = vec![TableRow {
             name: "encrypt".to_string(),
             action: RowAction::BuiltIn {
+                targets: Vec::new(),
                 which: BuiltInActionKind::BleSecurity,
                 role: RoleChoice::Central,
                 target_name: None,
@@ -660,6 +840,7 @@ mod tests {
         let rows = vec![TableRow {
             name: "no-security-needed".to_string(),
             action: RowAction::BuiltIn {
+                targets: Vec::new(),
                 which: BuiltInActionKind::BleSecurity,
                 role: RoleChoice::Central,
                 target_name: None,
@@ -677,7 +858,7 @@ mod tests {
     fn built_in_ble_connect_defaults_to_central_role() {
         let rows = vec![TableRow {
             name: "connect".to_string(),
-            action: RowAction::BuiltIn { which: BuiltInActionKind::BleConnect, role: RoleChoice::Central , target_name: None, security_level: None },
+            action: RowAction::BuiltIn { targets: Vec::new(), which: BuiltInActionKind::BleConnect, role: RoleChoice::Central , target_name: None, security_level: None },
             timeout_ms: 20_000,
             continue_on_fail: false,
             delay_before_ms: 0,
@@ -698,14 +879,14 @@ mod tests {
         let rows = vec![
             TableRow {
                 name: "discover".to_string(),
-                action: RowAction::BuiltIn { which: BuiltInActionKind::GattDiscover, role: RoleChoice::Central , target_name: None, security_level: None },
+                action: RowAction::BuiltIn { targets: Vec::new(), which: BuiltInActionKind::GattDiscover, role: RoleChoice::Central , target_name: None, security_level: None },
                 timeout_ms: 15_000,
                 continue_on_fail: false,
                 delay_before_ms: 0,
             },
             TableRow {
                 name: "monitor".to_string(),
-                action: RowAction::BuiltIn { which: BuiltInActionKind::GattMonitorAll, role: RoleChoice::Central , target_name: None, security_level: None },
+                action: RowAction::BuiltIn { targets: Vec::new(), which: BuiltInActionKind::GattMonitorAll, role: RoleChoice::Central , target_name: None, security_level: None },
                 timeout_ms: 15_000,
                 continue_on_fail: false,
                 delay_before_ms: 0,
@@ -912,6 +1093,7 @@ mod tests {
             TableRow {
                 name: "open".into(),
                 action: RowAction::BuiltIn {
+                targets: Vec::new(),
                     which: BuiltInActionKind::GattMonitorStart,
                     role: RoleChoice::Central,
                     target_name: None,
@@ -924,6 +1106,7 @@ mod tests {
             TableRow {
                 name: "close".into(),
                 action: RowAction::BuiltIn {
+                targets: Vec::new(),
                     which: BuiltInActionKind::GattMonitorStop,
                     role: RoleChoice::Central,
                     target_name: None,
@@ -944,7 +1127,7 @@ mod tests {
         let rows: Vec<TableRow> = (0..MAX_STEPS_PER_STUDY + 1)
             .map(|i| TableRow {
                 name: format!("s{i}"),
-                action: RowAction::BuiltIn { which: BuiltInActionKind::GattDiscover, role: RoleChoice::Central , target_name: None, security_level: None },
+                action: RowAction::BuiltIn { targets: Vec::new(), which: BuiltInActionKind::GattDiscover, role: RoleChoice::Central , target_name: None, security_level: None },
                 timeout_ms: 1_000,
                 continue_on_fail: false,
                 delay_before_ms: 0,
@@ -974,7 +1157,7 @@ mod tests {
     fn round_trip_body() {
         let rows = vec![TableRow {
             name: "connect".to_string(),
-            action: RowAction::BuiltIn { which: BuiltInActionKind::BleConnect, role: RoleChoice::Central , target_name: None, security_level: None },
+            action: RowAction::BuiltIn { targets: Vec::new(), which: BuiltInActionKind::BleConnect, role: RoleChoice::Central , target_name: None, security_level: None },
             timeout_ms: 20_000,
             continue_on_fail: false,
             delay_before_ms: 0,
@@ -1182,7 +1365,7 @@ mod tests {
     fn delay_before_ms_is_covered_by_steps_crc() {
         let mut row = TableRow {
             name: "connect".to_string(),
-            action: RowAction::BuiltIn { which: BuiltInActionKind::BleConnect, role: RoleChoice::Central , target_name: None, security_level: None },
+            action: RowAction::BuiltIn { targets: Vec::new(), which: BuiltInActionKind::BleConnect, role: RoleChoice::Central , target_name: None, security_level: None },
             timeout_ms: 20_000,
             continue_on_fail: false,
             delay_before_ms: 0,
@@ -1202,6 +1385,7 @@ mod tests {
         TableRow {
             name: "connect".to_string(),
             action: RowAction::BuiltIn {
+                targets: Vec::new(),
                 which: BuiltInActionKind::BleConnect,
                 role: RoleChoice::Central,
                 target_name: target_name.map(str::to_string),
@@ -1279,6 +1463,7 @@ mod tests {
         let row = TableRow {
             name: "open".to_string(),
             action: RowAction::BuiltIn {
+                targets: Vec::new(),
                 which: BuiltInActionKind::GattMonitorStart,
                 role: RoleChoice::Central,
                 target_name: Some("the client S11".to_string()),

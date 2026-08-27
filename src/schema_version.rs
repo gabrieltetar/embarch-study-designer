@@ -198,7 +198,19 @@
 ///   decision 39). Appended after `streams_crc`, and a wire bump by the
 ///   plainest possible reading of this constant's rule: dev-bench parses the
 ///   field and acts on it.
-pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 13;
+/// - **v14** — three changes dev-bench itself parses or emits, taken as one
+///   bump the same way v4 took decisions 31/32 together (design.md §3
+///   decisions 52/53/54):
+///   `Action::GattMonitorSelected`/`GattMonitorSelectedStart` at
+///   discriminants 9 and 10, each carrying a `GattTarget` list dev-bench
+///   decodes and subscribes from; `StreamEncoding::Struct { decoder }` at
+///   discriminant 5, which dev-bench only has to *walk past* but cannot walk
+///   past without knowing it exists; and the removal of
+///   `StepResult.gatt_activity`, which dev-bench encodes. The last is the one
+///   that makes this unambiguously a wire bump rather than a host-only one —
+///   a removal in the middle of a hand-encoded struct is exactly the drift
+///   this handshake exists to refuse.
+pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 14;
 
 /// Served by `embarch-core`'s `GET /status` and compared by `embarch-api`
 /// against its own compiled-in copy before submitting a `Study` (design.md
@@ -271,7 +283,12 @@ pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 13;
 ///   `Study.dev_bench_log_level` field that feeds it, which crosses
 ///   `embarch-api` -> `embarch-core` as JSON. Follows by the superset rule
 ///   either way.
-pub const HOST_TYPE_SCHEMA_VERSION: u32 = 15;
+/// - **v16** — a wire bump (v14's selective monitor actions, the `Struct`
+///   encoding and the retired `gatt_activity`), plus the host-only
+///   `Study.decoders` those taps resolve against (design.md §3 decision 52),
+///   which crosses `embarch-api` -> `embarch-core` as JSON and reaches
+///   dev-bench never. Follows by the superset rule either way.
+pub const HOST_TYPE_SCHEMA_VERSION: u32 = 16;
 
 /// [`HOST_TYPE_SCHEMA_VERSION`]'s triggers are a strict superset of
 /// [`DEV_BENCH_WIRE_SCHEMA_VERSION`]'s (design.md §3 decision 12's

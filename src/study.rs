@@ -8,10 +8,12 @@
 use heapless::{String, Vec};
 use serde::{Deserialize, Serialize};
 
+use crate::bounded::Bounded;
+use crate::gatt::GattTarget;
 use crate::ids::{BleAddress, Uuid};
 use crate::limits::{
-    MAX_FIRMWARE_VERSION_LEN, MAX_LOCAL_NAME_LEN, MAX_NAME_LEN, MAX_PAYLOAD_LEN, MAX_SERVICE_UUIDS,
-    MAX_STREAMS_PER_STUDY, MAX_STUDY_NAME_LEN,
+    MAX_DECODERS_PER_STUDY, MAX_FIRMWARE_VERSION_LEN, MAX_LOCAL_NAME_LEN, MAX_MONITOR_TARGETS,
+    MAX_NAME_LEN, MAX_PAYLOAD_LEN, MAX_SERVICE_UUIDS, MAX_STREAMS_PER_STUDY, MAX_STUDY_NAME_LEN,
 };
 use crate::streams::StreamTap;
 
@@ -153,6 +155,34 @@ pub struct Study {
     /// and not merely permissive.
     #[serde(default)]
     pub dev_bench_log_level: DevBenchLogLevel,
+    /// Named payload layouts this study's `Struct`-encoded taps decode with
+    /// (design.md §3 decision 52, [`crate::decoder`]). A tap's
+    /// `StreamEncoding::Struct { decoder }` is an index into this list.
+    ///
+    /// **Host-side only — never transmitted to dev-bench**, the same posture
+    /// as `requires` and for a stronger reason: what a payload means is
+    /// precisely the knowledge decision 39 took away from dev-bench, and it
+    /// captures and stamps bytes perfectly well without it. Core is the only
+    /// consumer, at render time.
+    ///
+    /// Resolved out of the firmware repo's own `embarch/study-structs.toml`
+    /// when the study is built ([`crate::registry::StructRegistry`]), so the
+    /// submitted `Study` is self-contained and a saved study replays
+    /// identically — Core cannot read that repo, and a study that named a
+    /// layout without carrying it would render nothing on a machine that
+    /// isn't the author's.
+    ///
+    /// **Sealed by neither CRC, deliberately**, for the same reason
+    /// `dev_bench_log_level` isn't: `steps_crc` covers what dev-bench
+    /// executes and `streams_crc` covers what it captures, and how the host
+    /// later renders a captured byte changes neither. A re-render with a
+    /// corrected layout must stay the same study.
+    ///
+    /// `#[serde(default)]` so every study authored before this field existed
+    /// still loads, as a study that decodes nothing — which is what those
+    /// studies did.
+    #[serde(default)]
+    pub decoders: crate::bounded::Bounded<crate::decoder::StructLayout, MAX_DECODERS_PER_STUDY>,
 }
 
 /// The explicit "I don't care which build" value for either
@@ -400,6 +430,30 @@ pub enum Action {
     /// therefore needs its own [`Action::BleConnect`] afterwards, which is
     /// what "pair again" meant in the first place.
     BleUnbond {},
+    /// [`Action::GattMonitorAll`], narrowed to the characteristics the study
+    /// names — design.md §3 decision 53.
+    ///
+    /// Discovery still runs exactly as `GattMonitorAll`'s does, so
+    /// `gatt_services` reports the whole table either way; what narrows is
+    /// **what gets subscribed**. Subscribing to every notify-capable
+    /// characteristic on a DUT that streams a high-rate waveform floods the
+    /// serial link with traffic nobody asked for, and buries the two
+    /// characteristics the study is actually about.
+    ///
+    /// A target naming a characteristic the DUT doesn't have, or one that is
+    /// neither notify- nor indicate-capable, is reported as a `Fail` naming
+    /// it — not skipped. A study that names a characteristic has said it
+    /// expects one, and a silently-empty capture is the failure this whole
+    /// family of decisions keeps being opened by.
+    GattMonitorSelected { targets: Bounded<GattTarget, MAX_MONITOR_TARGETS> },
+    /// [`Action::GattMonitorStart`], narrowed the same way
+    /// [`Action::GattMonitorSelected`] narrows `GattMonitorAll` — design.md
+    /// §3 decision 53.
+    ///
+    /// Closed by the same [`Action::GattMonitorStop`]: a window is a window
+    /// regardless of how many characteristics it armed, and a second stop
+    /// action would be two names for one thing.
+    GattMonitorSelectedStart { targets: Bounded<GattTarget, MAX_MONITOR_TARGETS> },
 }
 
 /// LE security mode 1's levels, as [`Action::BleSecurity`] asks for one and

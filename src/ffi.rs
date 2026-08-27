@@ -325,6 +325,7 @@ mod tests {
         let steps_crc = crate::crc::steps_crc(&steps).unwrap();
 
         let good = Study {
+            decoders: Default::default(),
             name: String::try_from("t").unwrap(),
             requires: crate::study::Requirements::any(),
             steps: steps.clone(),
@@ -379,6 +380,8 @@ mod tests {
         let steps_crc = crate::crc::steps_crc(&steps).unwrap();
 
         Study {
+
+            decoders: Default::default(),
             name: String::try_from("ble-advertise-study").unwrap(),
             requires: crate::study::Requirements::any(),
             steps,
@@ -447,6 +450,7 @@ mod tests {
             .unwrap();
         let steps_crc = crate::crc::steps_crc(&steps).unwrap();
         let study = Study {
+            decoders: Default::default(),
             name: String::try_from("t").unwrap(),
             requires: crate::study::Requirements::any(),
             steps,

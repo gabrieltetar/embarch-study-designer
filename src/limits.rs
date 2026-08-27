@@ -86,10 +86,37 @@ pub const MAX_DISCOVERED_SERVICES: usize = 8;
 /// larger service (Sensor Data Service) declares up to 7 characteristics
 /// today (6 unconditional, 1 gated behind `CONFIG_AIR_TEMP_ENABLE`).
 pub const MAX_CHARS_PER_SERVICE: usize = 16;
-/// `StepResult.gatt_activity` (design.md §3 decision 32); provisional, same
-/// placeholder-but-concrete posture as every other constant in this module —
-/// design.md §7 carries the stack-safety risk this size implies for dev-bench.
-pub const MAX_GATT_ACTIVITY_RECORDS: usize = 32;
+/// `Action::GattMonitorSelected`/`GattMonitorSelectedStart.targets`
+/// (design.md §3 decision 53) — how many characteristics one selective
+/// monitor step may name. Sized against the largest real DUT this suite has
+/// walked (`reference-dut-fw`: 10 notify/indicate-capable
+/// characteristics across two services, 7 services in total once an
+/// encrypted link reaches the rest of the table), with headroom. A study
+/// wanting more than this wants `GattMonitorAll`, which is what that action
+/// is for.
+pub const MAX_MONITOR_TARGETS: usize = 16;
+/// `Study.decoders` (design.md §3 decision 52) — named payload layouts one
+/// study resolves out of the firmware repo's `study-structs.toml`. Bounded
+/// by what a study can actually reference: a decoder is only reachable
+/// through a tap's `StreamEncoding::Struct`, and there are at most
+/// [`MAX_STREAMS_PER_STUDY`] taps.
+pub const MAX_DECODERS_PER_STUDY: usize = MAX_STREAMS_PER_STUDY;
+/// `StructLayout.name` (design.md §4.8a) — the name a tap's decoder is
+/// referenced by in `study-structs.toml`.
+pub const MAX_DECODER_NAME_LEN: usize = 24;
+/// `StructLayout.header`/`repeat` (design.md §4.8a) — scalars in one group.
+/// Placeholder-but-concrete, same posture as every other constant here; a
+/// real notification packet's header is a handful of fields and its
+/// repeating element smaller still.
+pub const MAX_STRUCT_FIELDS: usize = 12;
+/// `StructField.name` (design.md §4.8a) — becomes a CSV column header.
+pub const MAX_STRUCT_FIELD_NAME_LEN: usize = 20;
+/// One rendered decoded-struct CSV row's *decoded columns*, and the header
+/// naming them (design.md §4.8a). Bounded by
+/// [`MAX_STRUCT_FIELDS`] × 2 groups × (a name or a rendered scalar), with
+/// room for the separators — not by [`MAX_GATT_CSV_ROW_LEN`], which sizes a
+/// row carrying a whole payload rendered twice.
+pub const MAX_STRUCT_CSV_ROW_LEN: usize = 640;
 /// One rendered `gatt.csv` row (design.md §3 decision 36, §4.3b) — sized to
 /// hold a `MAX_PAYLOAD_LEN` payload rendered *twice* (hex, then a printable-
 /// ASCII column) alongside two hyphenated UUIDs and the fixed columns. Far

@@ -33,19 +33,28 @@ pub struct GattServiceInfo {
     pub characteristics: Vec<GattCharacteristicInfo, MAX_CHARS_PER_SERVICE>,
 }
 
-/// One captured notification/indication from `Action::GattMonitorAll`.
+/// One characteristic a study names explicitly — design.md §3 decision 53.
 ///
-/// `characteristic_index` indexes into that same step's `gatt_services`,
-/// flattened in service-then-characteristic order (service 0's
-/// characteristics first, then service 1's, and so on) — not a repeated
-/// 16-byte UUID per record. `rx_utc_ms` is dev-bench's own capture-time
-/// timestamp, same convention as `Sample.rx_utc_ms` (design.md §4.7).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct GattActivityRecord {
-    pub rx_utc_ms: u64,
-    pub characteristic_index: u16,
-    pub payload: Vec<u8, { crate::limits::MAX_PAYLOAD_LEN }>,
+/// Both UUIDs, not the characteristic's alone: subscribing needs the service
+/// to discover within, exactly as `Action::DataExchange` has always needed
+/// both. It is also the pair a `StreamSource::GattNotify` tap already
+/// carries, so a characteristic named as a monitor target and a
+/// characteristic given its own decoded file are addressed identically.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GattTarget {
+    pub service_uuid: Uuid,
+    pub characteristic_uuid: Uuid,
 }
+
+// `GattActivityRecord` was here and is **retired** by design.md §3 decision
+// 54, along with `StepResult.gatt_activity`. It capped a step's captured
+// notifications at `MAX_GATT_ACTIVITY_RECORDS` (32) inline in `events.json`,
+// which is the wrong shape for the thing it was recording: a capture is
+// unbounded and streamed, and the tap pipeline (§4.8) already writes exactly
+// that, incrementally, to a file. Keeping a second, capped, in-memory copy
+// meant a study could look like it had captured everything while holding 32
+// of several thousand records — the "nothing captured, no error" family of
+// failure this suite has now arrived at from four directions.
 
 /// Which way a transcript entry travelled — design.md §3 decision 36, §4.3b.
 ///
