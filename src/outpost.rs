@@ -29,28 +29,6 @@
 //! then that many records); 0x02 carries an [`OutpostHeader`]. COBS is the
 //! same framing the Core<->dev-bench link uses (§3 decision 10), so the same
 //! shape of code reads both.
-//!
-//! ## The clock is this side's
-//!
-//! **A record carries no timestamp.** Layout 2 took the DUT's
-//! `k_cycle_get_32()` stamp off the wire entirely, because reading it happened
-//! inside the context switch and inside `_isr_wrapper()` — the instrument
-//! charging its cost to the path it measures (`embarch-outpost/design.md` §3
-//! decision 4, reworked 2026-08-26).
-//!
-//! Time now comes from **whoever received the bytes**: Core stamps each frame
-//! with its own receipt time as it arrives, exactly as it already stamps a
-//! sample or a transcript entry (`embarch-core/design.md` §3 decision 30), and
-//! every record in a frame carries that one stamp. Two consequences this
-//! module's callers have to respect, both of them in decision 17:
-//!
-//! - **A frame is the finest interval this wire resolves.** Ordering inside a
-//!   frame is real and its durations are not measurable. Nothing may spread a
-//!   frame's records across an interval to make a nicer picture.
-//! - **A trace can legitimately have no time at all** — nobody stamped it, or
-//!   the stamps did not line up ([`OutpostRecord::to_csv_row`] takes an
-//!   `Option`). An ordered, untimed trace is a real answer; a fabricated one
-//!   is not.
 
 use crc::{Crc, CRC_32_ISO_HDLC};
 use heapless::String as HString;
@@ -63,12 +41,30 @@ const CRC32: Crc<u32> = Crc::<u32>::new(&CRC_32_ISO_HDLC);
 /// which fields moved is exactly the kind of plausible-and-wrong answer the
 /// manifest mechanism exists to prevent.
 ///
-/// - **2** — no timestamps: records are `{kind, a, b}` and the header carries
-///   no cycle rate. The host stamps frames.
-/// - **1** — an absolute `k_cycle_get_32()` in every record, `cycles_per_sec`
-///   in the header. Nothing decodes it any more, deliberately: a layout-1
-///   stream read as layout 2 would take each record's timestamp for its kind.
-pub const RECORD_LAYOUT_VERSION: u8 = 2;
+/// The versions that have existed, and why this is 3 rather than back at 1:
+///
+/// - **1** — `{cycles, kind, a, b}`, an absolute `k_cycle_get_32()` in every
+///   record and `cycles_per_sec` in the header.
+/// - **2** — `{kind, a, b}`. The DUT stopped reading a clock entirely, because
+///   the counter read sat inside the context switch and inside
+///   `_isr_wrapper()`; a record's time became the arrival stamp of the frame
+///   that carried it. Shipped, decoded here, and **withdrawn**.
+/// - **3** — `{cycles, kind, a, b}` again, byte-for-byte what 1 was, plus the
+///   GPIO kinds below. The objection 2 answered was real, and
+///   `embarch-outpost`'s `outpost_time.h` answers it a different way: read the
+///   GRTC SYSCOUNTER's low word directly rather than through
+///   `sys_clock_cycle_get_32()`, which takes two nested `irq_lock`s to hand
+///   back the same 32 bits. That keeps per-record ordering, which a host cannot
+///   reconstruct from frame arrival, and costs no locks in the emit path.
+///
+/// **Reusing 1 would have been wrong even though the wire is identical to 1.**
+/// A version byte exists so a host can say "I decode up to N". Once a
+/// different, mutually-unreadable wire has worn a higher number, going back
+/// makes that sentence unanswerable — two incompatible streams would both
+/// announce `1`, separable only by which build produced them, which is the one
+/// thing the byte is there to settle. So the wire goes back and the number goes
+/// forward.
+pub const RECORD_LAYOUT_VERSION: u8 = 3;
 
 pub const FRAME_RECORDS: u8 = 0x01;
 pub const FRAME_HEADER: u8 = 0x02;
@@ -82,14 +78,15 @@ pub const IRQ_UNKNOWN: u32 = 0xFFFF_FFFF;
 /// (`CONFIG_EMBARCH_OUTPOST_BUILD_ID_MAX`'s own range maximum).
 pub const MAX_BUILD_ID_LEN: usize = 128;
 
-/// One traced event. Fixed shape, **no timestamp**, IDs never strings —
+/// One traced event. Fixed shape, absolute timestamp, IDs never strings —
 /// `embarch-outpost/design.md` §3 decision 4.
-///
-/// The time a record happened is not in the record. It is the arrival stamp of
-/// the frame that carried it, which is why every rendering path here takes a
-/// frame index and a stamp alongside the record itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OutpostRecord {
+    /// `k_cycle_get_32()` at the moment the hook ran. **Absolute and
+    /// 32-bit**: the host unwraps it (see [`Unwrapper`]), and the cost of
+    /// carrying it in full is what makes every record independently
+    /// interpretable after a drop.
+    pub cycles: u32,
     /// [`RecordKind`] as a raw byte. Kept raw rather than as an enum on the
     /// wire type so an unknown future kind decodes and renders as itself
     /// instead of failing the whole frame.
@@ -111,20 +108,35 @@ pub enum RecordKind {
     ThreadCreate = 5,
     ThreadName = 6,
     Marker = 7,
-    /// Records lost to a full ring: `a` is how many. `b` is 0 and reserved —
-    /// it carried the cycle span the losses fell across through layout 1, and
-    /// there is no clock on the DUT side to measure one with any more.
+    /// Records lost to a full ring: `a` is how many, `b` the cycle span they
+    /// were lost across.
     ///
-    /// **Always the first record of its frame**, which is what replaces that
-    /// span: the losses are bounded by the arrival stamp of the previous frame
-    /// and that of the frame carrying the gap. A bound of one frame, and it
-    /// must be presented as a bound.
-    ///
-    /// This also ends layout 1's one ordering anomaly — a gap stamped earlier
-    /// than the records printed after it, which is what broke the host's
-    /// unwrap on the first real capture. With no timestamps there is no unwrap
-    /// left to break.
+    /// **The only record whose `cycles` can precede the records printed around
+    /// it.** It is stamped when the losses started and emitted when the ring
+    /// next had room to report them, and a FIFO ring cannot make those the
+    /// same moment. [`Unwrapper`] is written so that does not read as a
+    /// counter wrap.
     Gap = 8,
+    /// The GPIO driver has begun walking one port's callback list, from that
+    /// port's own interrupt. `a` is the port's `struct device *`.
+    ///
+    /// **`b` is 0 and is not the pin mask.** Zephyr's hook declares its mask
+    /// parameter `gpio_pin_t` — a `u8` — while `gpio_fire_callbacks()` passes
+    /// it a 32-bit `gpio_port_pins_t`, so every pin above 7 is already gone
+    /// before the firmware module sees it. Which pins a dispatch covered is
+    /// recoverable from the masks on the [`RecordKind::GpioCallbackDone`]
+    /// records that follow it.
+    GpioDispatch = 9,
+    /// One GPIO callback handler has **returned**. `a` is the handler function
+    /// pointer, `b` that callback's registered pin mask, full width.
+    ///
+    /// Read the name literally: Zephyr places this hook *after* `cb->handler()`
+    /// returns, not before it. A handler's span therefore runs from the record
+    /// before it — the dispatch, or the previous handler's completion — to this
+    /// one. A host that reads it as an entry marker attributes every handler's
+    /// time to the wrong handler, and the trace stays entirely readable while
+    /// it does.
+    GpioCallbackDone = 10,
 }
 
 impl RecordKind {
@@ -139,6 +151,8 @@ impl RecordKind {
             6 => Self::ThreadName,
             7 => Self::Marker,
             8 => Self::Gap,
+            9 => Self::GpioDispatch,
+            10 => Self::GpioCallbackDone,
             _ => return None,
         })
     }
@@ -154,6 +168,8 @@ impl RecordKind {
             Self::ThreadName => "thread_name",
             Self::Marker => "marker",
             Self::Gap => "gap",
+            Self::GpioDispatch => "gpio_dispatch",
+            Self::GpioCallbackDone => "gpio_callback_done",
         }
     }
 
@@ -187,6 +203,11 @@ pub struct OutpostHeader {
     /// host never has to infer that from the absence of records. See
     /// [`HeaderFlags`].
     pub flags: u8,
+    /// `sys_clock_hw_cycles_per_sec()` **as the running firmware observes
+    /// it**, not `CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC` — that Kconfig
+    /// legitimately defaults to 0 on targets that read their timer frequency
+    /// at runtime.
+    pub cycles_per_sec: u32,
     pub outpost_version: HString<MAX_BUILD_ID_LEN>,
     pub build_id: HString<MAX_BUILD_ID_LEN>,
 }
@@ -258,12 +279,6 @@ impl<'a> Iterator for RecordIter<'a> {
 
 /// Splits a raw capture into the COBS chunks between `0x00` delimiters,
 /// skipping empty ones. Each chunk goes to [`decode_frame`].
-///
-/// **Their enumeration order is the frame index** arrival stamps are keyed by
-/// (`embarch-outpost/design.md` §3 decision 18), so a chunk that later fails
-/// its CRC still consumes an index here. Whoever stamps the bytes counts the
-/// same non-empty runs between delimiters, which is what keeps the two sides
-/// in step without either one decoding for the other.
 pub fn chunks(raw: &[u8]) -> impl Iterator<Item = &[u8]> {
     raw.split(|b| *b == 0).filter(|c| !c.is_empty())
 }
@@ -339,6 +354,45 @@ fn cobs_decode(input: &[u8], out: &mut [u8]) -> Result<usize, DecodeError> {
         }
     }
     Ok(write)
+}
+
+/// Turns the stream's absolute 32-bit cycle counts into a monotonic 64-bit
+/// timeline.
+///
+/// **A wrap is a backwards step of nearly the whole counter, not any backwards
+/// step.** [`RecordKind::Gap`] records are stamped when their losses started
+/// rather than when they were reported, so they legitimately go backwards by a
+/// little; treating that as a wrap throws every later timestamp forward by
+/// 2^32. That is not hypothetical — it is what the first real capture did.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct Unwrapper {
+    last: Option<u32>,
+    wraps: u64,
+}
+
+impl Unwrapper {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn absolute(&mut self, cycles: u32) -> u64 {
+        match self.last {
+            Some(last) if cycles < last => {
+                if (last - cycles) > (1u32 << 31) {
+                    self.wraps += 1;
+                    self.last = Some(cycles);
+                }
+            }
+            _ => self.last = Some(cycles),
+        }
+        self.wraps * (1u64 << 32) + u64::from(cycles)
+    }
+
+    /// How many wraps have been seen. A study long enough to cross one is a
+    /// real correctness question rather than a detail, so it is countable.
+    pub fn wraps(&self) -> u64 {
+        self.wraps
+    }
 }
 
 #[cfg(feature = "alloc")]
@@ -492,41 +546,44 @@ mod render {
 
     /// The column list for a rendered `*.trace.csv`.
     ///
-    /// **`rx_utc_ms` is the row's only clock, and it is the host's** — the same
-    /// wall clock `core_rx_utc_ms` carries on a sample or transcript row
-    /// (`embarch-core/design.md` §3 decision 30), which is what finally makes a
-    /// trace laid alongside a power capture an alignment rather than a guess.
-    /// It is a *frame's* stamp, so consecutive rows repeating one value is the
-    /// normal case, not a defect: see [`OutpostRecord::to_csv_row`].
+    /// **Both clocks, deliberately.** `cycles`/`us` are the DUT's own, read
+    /// per record; `frame_index`/`frame_seq`/`rx_utc_ms` are the host's, and
+    /// belong to the *frame* that carried the record rather than to the record
+    /// itself, so consecutive rows repeating one `rx_utc_ms` is the normal case
+    /// and not a defect.
     ///
-    /// `frame_index` and `frame_seq` are both here because they answer
-    /// different questions. The index is this capture's own frame ordinal —
-    /// monotonic, unbounded, and what an arrival stamp is keyed by (§3 decision
-    /// 17). The seq is the firmware's own wrapping byte, so a reader can see
-    /// frames the wire lost without decoding anything.
+    /// The layout-1 version of this header carried only the DUT's columns, on
+    /// the argument that stamping a host receipt time onto a row "would invite
+    /// exactly the cross-clock comparison the trace exists to avoid". Layout 2
+    /// carried only the host's, having removed the DUT's clock outright. Both
+    /// were narrower than they needed to be: the frame stamp is the only thing
+    /// that places a trace against the rest of a study's streams, and the cycle
+    /// counter is the only thing that orders records *within* a frame. Neither
+    /// substitutes for the other, and naming both columns for what they are is
+    /// a cheaper defence against confusing them than omitting one.
+    ///
+    /// `frame_index` is the enumeration order of [`super::chunks`], not the
+    /// count of successfully decoded frames: a chunk that fails its CRC still
+    /// consumes an index, so that a corrupt frame does not silently shift every
+    /// arrival stamp after it.
     pub fn csv_header() -> &'static str {
-        "frame_index,frame_seq,rx_utc_ms,kind,a,b,name"
+        "frame_index,frame_seq,rx_utc_ms,cycles,us,kind,a,b,name"
     }
 
     impl OutpostRecord {
-        /// One rendered row.
-        ///
-        /// `frame_index`/`frame_seq` identify the frame this record arrived in
-        /// and `rx_utc_ms` is when that whole frame arrived — so **every record
-        /// of a frame renders with the same time**, deliberately. Interpolating
-        /// them across the interval would manufacture a resolution the wire
-        /// does not have (`embarch-outpost/design.md` §3 decision 17).
-        ///
-        /// `rx_utc_ms` is `None` when nobody stamped the capture, or when the
-        /// stamps could not be lined up with the frames; the column is then
-        /// empty rather than filled with something plausible. `manifest` may be
-        /// absent the same way — a trace decodes into structure with no
-        /// manifest at all, it just has no names in it.
+        /// One rendered row. `absolute` comes from [`super::Unwrapper`],
+        /// `rx_utc_ms` is when the host received the frame this record arrived
+        /// in (`None` when nothing stamped it), and `manifest` may be absent —
+        /// a trace decodes into structure with no manifest at all, it just has
+        /// no names in it.
+        #[allow(clippy::too_many_arguments)]
         pub fn to_csv_row(
             &self,
             frame_index: u64,
-            frame_seq: u8,
+            frame_seq: u32,
             rx_utc_ms: Option<u64>,
+            absolute: u64,
+            cycles_per_sec: u32,
             manifest: Option<&OutpostManifest>,
         ) -> String {
             let kind = RecordKind::from_byte(self.kind);
@@ -534,13 +591,18 @@ mod render {
                 Some(k) => String::from(k.as_str()),
                 None => format!("unknown_{}", self.kind),
             };
-            let rx = match rx_utc_ms {
-                Some(ms) => format!("{ms}"),
-                None => String::new(),
+            let us = if cycles_per_sec > 0 {
+                format!(
+                    "{:.3}",
+                    (absolute as f64) * 1_000_000.0 / f64::from(cycles_per_sec)
+                )
+            } else {
+                String::new()
             };
             let name = manifest.map(|m| m.label(kind, self.a)).unwrap_or_default();
+            let rx = rx_utc_ms.map(|v| v.to_string()).unwrap_or_default();
             format!(
-                "{frame_index},{frame_seq},{rx},{kind_name},{},{},{name}",
+                "{frame_index},{frame_seq},{rx},{absolute},{us},{kind_name},{},{},{name}",
                 self.a, self.b
             )
         }
@@ -561,30 +623,11 @@ mod tests {
     /// This is one header frame, taken verbatim from the first native_sim
     /// capture (`embarch-outpost/tests/native_sim_stream`).
     const HEADER_FRAME: &[u8] = &[
-        0x02, 0x02, 0x3d, 0x02, 0x0f, 0x0d, b'd', b'4', b'9', b'0', b'f', b'c', b'3', b'-', b'd',
-        b'i', b'r', b't', b'y', 0x27, b'd', b'4', b'9', b'0', b'f', b'c', b'3', b'-', b'd', b'i',
-        b'r', b't', b'y', b'+', b'o', b'p', b'd', b'4', b'9', b'0', b'f', b'c', b'3', b'-', b'd',
-        b'i', b'r', b't', b'y', b'+', b'm', b'a', b'0', b'b', b'd', b'4', b'8', b'e', b'a', 0x40,
-        0xcc, b'L', 0xfd, 0x00,
-    ];
-
-    /// One **records** frame from the same capture, frame index 2: sixteen
-    /// records in 97 framed bytes, which is the layout-2 record shape as the C
-    /// encoder actually writes it.
-    ///
-    /// Pinned separately from the header because the record is the half that
-    /// changed: a layout-1 decoder pointed at these bytes would read each
-    /// record's `kind` as a timestamp and produce sixteen plausible, wrong
-    /// rows. That is the failure the layout version exists to make impossible,
-    /// and this is the test that would catch it.
-    const RECORDS_FRAME: &[u8] = &[
-        0x09, 0x01, 0x02, 0x10, 0x01, 0xa0, 0xf3, 0x95, 0x40, 0x01, 0x05, 0xa0, 0x81, 0x96,
-        0x40, 0x02, 0x04, 0x01, 0x07, 0x02, 0xff, 0xff, 0xff, 0xff, 0x0f, 0x03, 0x07, 0x02,
-        0x07, 0x03, 0xff, 0xff, 0xff, 0xff, 0x0f, 0x02, 0x04, 0x01, 0x07, 0x02, 0xff, 0xff,
-        0xff, 0xff, 0x0f, 0x03, 0x07, 0x02, 0x07, 0x03, 0xff, 0xff, 0xff, 0xff, 0x0f, 0x06,
-        0x01, 0xa0, 0x81, 0x96, 0x40, 0x01, 0x05, 0xe0, 0x85, 0x96, 0x40, 0x06, 0x01, 0xe0,
-        0x85, 0x96, 0x40, 0x01, 0x05, 0xe0, 0x85, 0x96, 0x40, 0x06, 0x01, 0xe0, 0x85, 0x96,
-        0x40, 0x01, 0x05, 0xa0, 0xf3, 0x95, 0x40, 0x05, 0x2b, 0x54, 0x89, 0x78, 0x00,
+        0x02, 0x02, 0x40, 0x01, 0x0f, 0xc0, 0x84, 0x3d, 0x0d, b'0', b'9', b'0', b'9', b'f', b'd',
+        b'a', b'-', b'd', b'i', b'r', b't', b'y', 0x27, b'0', b'9', b'0', b'9', b'f', b'd', b'a',
+        b'-', b'd', b'i', b'r', b't', b'y', b'+', b'o', b'p', b'0', b'9', b'0', b'9', b'f', b'd',
+        b'a', b'-', b'd', b'i', b'r', b't', b'y', b'+', b'm', b'a', b'0', b'b', b'd', b'4', b'8',
+        b'e', b'a', 0x04, 0x19, 0x12, 0x65, 0x00,
     ];
 
     #[test]
@@ -594,11 +637,22 @@ mod tests {
         match decode_frame(chunk, &mut scratch).expect("decodes") {
             Frame::Header { seq, header } => {
                 assert_eq!(seq, 0);
-                assert_eq!(header.record_layout_version, RECORD_LAYOUT_VERSION);
-                assert_eq!(header.outpost_version.as_str(), "d490fc3-dirty");
+                // The fixture is a real capture from a **layout-1** build,
+                // and it is kept as one rather than regenerated: layout 3's
+                // record wire is byte-for-byte what 1's was, so this frame
+                // still decodes correctly, and that it does is the property
+                // worth pinning. What stops a layout-1 *stream* being consumed
+                // in production is not the frame decoder — it is
+                // `Manifest::check`, which requires manifest, firmware and
+                // decoder to all three agree. See
+                // `a_layout_2_stream_is_refused_rather_than_misread` below for
+                // the case that actually matters.
+                assert_eq!(header.record_layout_version, 1);
+                assert_eq!(header.cycles_per_sec, 1_000_000);
+                assert_eq!(header.outpost_version.as_str(), "0909fda-dirty");
                 assert_eq!(
                     header.build_id.as_str(),
-                    "d490fc3-dirty+opd490fc3-dirty+ma0bd48ea"
+                    "0909fda-dirty+op0909fda-dirty+ma0bd48ea"
                 );
                 // Every hook family compiled in; ISR identify off, because
                 // native_sim is not Cortex-M.
@@ -628,81 +682,76 @@ mod tests {
         );
     }
 
-    /// The layout-2 record shape, against bytes the C encoder wrote.
     #[test]
-    fn a_real_records_frame_decodes_into_untimed_records() {
-        let chunk = chunks(RECORDS_FRAME).next().expect("one chunk");
-        let mut scratch = [0u8; 256];
-        match decode_frame(chunk, &mut scratch).expect("decodes") {
-            Frame::Records { seq, records } => {
-                assert_eq!(seq, 2);
-                // Checked in place rather than collected: this crate is
-                // `no_std` without `alloc` by default, and a wire-format pin
-                // has no business needing an allocator.
-                let mut count = 0usize;
-                for (i, rec) in records.enumerate() {
-                    let rec = rec.expect("every record decodes");
-                    count += 1;
-                    match i {
-                        // A switch out of one thread and into another, both
-                        // carrying nothing but a pointer.
-                        0 => {
-                            assert_eq!(rec.kind, RecordKind::ThreadSwitchOut as u8);
-                            assert_eq!(rec.a, 134_576_544);
-                            assert_eq!(rec.b, 0);
-                        }
-                        1 => {
-                            assert_eq!(rec.kind, RecordKind::ThreadSwitchIn as u8);
-                            assert_eq!(rec.a, 134_578_336);
-                        }
-                        // native_sim cannot name its active vector, and the
-                        // firmware says so rather than reporting a number it
-                        // guessed.
-                        3 => {
-                            assert_eq!(rec.kind, RecordKind::IsrEnter as u8);
-                            assert_eq!(rec.a, IRQ_UNKNOWN);
-                        }
-                        4 => {
-                            assert_eq!(rec.kind, RecordKind::Marker as u8);
-                            assert_eq!(rec.a, 2);
-                        }
-                        _ => {}
-                    }
-                }
-                assert_eq!(count, 16);
-            }
-            other => panic!("expected a records frame, got {other:?}"),
-        }
+    fn a_gap_going_backwards_is_not_a_wrap() {
+        let mut u = Unwrapper::new();
+        assert_eq!(u.absolute(1_000), 1_000);
+        assert_eq!(u.absolute(2_000), 2_000);
+        // A gap record stamped when its losses started.
+        assert_eq!(u.absolute(1_500), 1_500);
+        assert_eq!(u.wraps(), 0, "a small backwards step is not a wrap");
+        assert_eq!(u.absolute(2_100), 2_100);
     }
 
-    /// A frame's stamp lands on every record in it, and an unstamped capture
-    /// renders an empty column rather than a fabricated time.
-    ///
-    /// `alloc`-gated because the rendering half is: a `no_std` consumer of this
-    /// crate decodes the wire and never formats a CSV row.
-    #[cfg(feature = "alloc")]
     #[test]
-    fn a_frames_stamp_is_every_row_in_it() {
-        let rec = OutpostRecord { kind: RecordKind::Marker as u8, a: 3, b: 77 };
-        assert_eq!(
-            rec.to_csv_row(9, 41, Some(1_700_000_000_123), None),
-            "9,41,1700000000123,marker,3,77,"
-        );
-        assert_eq!(rec.to_csv_row(9, 41, None, None), "9,41,,marker,3,77,");
-        assert_eq!(
-            csv_header(),
-            "frame_index,frame_seq,rx_utc_ms,kind,a,b,name",
-            "the column list is the contract embarch-ui refuses to guess at"
-        );
+    fn a_real_wrap_is_a_wrap() {
+        let mut u = Unwrapper::new();
+        assert_eq!(u.absolute(0xFFFF_FF00), 0xFFFF_FF00);
+        assert_eq!(u.absolute(0x0000_0100), (1u64 << 32) + 0x100);
+        assert_eq!(u.wraps(), 1);
     }
 
     #[test]
     fn record_kinds_round_trip_their_bytes() {
-        for b in 0u8..=8 {
+        for b in 0u8..=10 {
             let k = RecordKind::from_byte(b).expect("known kind");
             assert_eq!(k as u8, b);
             assert!(!k.as_str().is_empty());
         }
-        assert!(RecordKind::from_byte(9).is_none());
+        // The first byte past the set. Kept as an explicit assertion rather
+        // than a loop bound so that appending a kind has to touch this test:
+        // an unknown kind must stay `None` (the caller skips the record) and
+        // must never start decoding as some neighbour's shape.
+        assert!(RecordKind::from_byte(11).is_none());
+    }
+
+    /// A layout-2 stream must be **refused**, not decoded.
+    ///
+    /// This is the case the renumber exists for. Layout 2's record is
+    /// `{kind, a, b}` and layout 3's is `{cycles, kind, a, b}`, so a layout-2
+    /// stream read by this decoder takes each record's `kind` for its `cycles`
+    /// and the following field for its `kind` — producing a trace that is
+    /// entirely readable and entirely wrong, which is the exact failure mode
+    /// the layout byte was introduced to prevent.
+    ///
+    /// It is also why the wire could not simply go back to announcing `1`:
+    /// were it 1 again, a layout-2 build and a layout-3 build would be
+    /// distinguishable only by their build IDs, and `check` would have to
+    /// treat a version *equal* to its own as unsafe — which is not a thing a
+    /// version byte can express.
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn a_layout_2_stream_is_refused_rather_than_misread() {
+        let manifest = OutpostManifest {
+            build_id: "abc123".to_string(),
+            record_layout_version: 2,
+            ..Default::default()
+        };
+        let refusal = manifest
+            .check("abc123", 2)
+            .expect_err("a layout-2 firmware must not be decoded by a layout-3 decoder");
+        assert_eq!(
+            refusal,
+            ManifestRefusal::LayoutVersion { manifest: 2, firmware: 2, decoder: 3 }
+        );
+
+        // And the agreeing case still passes, so the refusal above is about
+        // the version and not about the manifest being rejected wholesale.
+        let ok = OutpostManifest {
+            build_id: "abc123".to_string(),
+            record_layout_version: RECORD_LAYOUT_VERSION,
+            ..Default::default()
+        };
+        ok.check("abc123", RECORD_LAYOUT_VERSION).expect("agreeing versions decode");
     }
 }
