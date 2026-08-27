@@ -148,6 +148,96 @@ impl ScalarType {
     /// an `f32` first** — a `u64` sample counter round-tripped through `f32`
     /// loses its low bits, which is precisely the kind of plausible-but-wrong
     /// number this crate keeps refusing to produce.
+    /// Read this field as a signed 64-bit integer, or `None` if it is one
+    /// of the two float widths.
+    ///
+    /// Added for `.eap` guard evaluation (design.md §3 decisions 59/60),
+    /// which is integer-only: [`crate::eap::Operand::Literal`] is an `i64`,
+    /// so a float field has nothing it could be compared against. Returning
+    /// `None` rather than lossily converting is the same refusal decision 52
+    /// already makes about `SampleLayout` — "integers render as integers,
+    /// because a `u64` round-tripped through an `f32` is a plausible, wrong
+    /// number."
+    ///
+    /// `u64` values above `i64::MAX` saturate rather than wrapping negative.
+    /// A DUT counter that large is not a real value this suite will compare,
+    /// and a silently negative one would be the plausible-wrong-number
+    /// failure again.
+    pub fn read_i64(self, bytes: &[u8]) -> Option<i64> {
+        if bytes.len() < self.width() {
+            return None;
+        }
+        macro_rules! int {
+            ($ty:ty, $n:expr, $be:expr) => {{
+                let mut buf = [0u8; $n];
+                buf.copy_from_slice(&bytes[..$n]);
+                let v = if $be { <$ty>::from_be_bytes(buf) } else { <$ty>::from_le_bytes(buf) };
+                v as i64
+            }};
+        }
+        Some(match self {
+            ScalarType::U8 => bytes[0] as i64,
+            ScalarType::I8 => bytes[0] as i8 as i64,
+            ScalarType::U16Le => int!(u16, 2, false),
+            ScalarType::U16Be => int!(u16, 2, true),
+            ScalarType::I16Le => int!(i16, 2, false),
+            ScalarType::I16Be => int!(i16, 2, true),
+            ScalarType::U32Le => int!(u32, 4, false),
+            ScalarType::U32Be => int!(u32, 4, true),
+            ScalarType::I32Le => int!(i32, 4, false),
+            ScalarType::I32Be => int!(i32, 4, true),
+            ScalarType::U64Le => {
+                let mut b = [0u8; 8];
+                b.copy_from_slice(&bytes[..8]);
+                u64::from_le_bytes(b).min(i64::MAX as u64) as i64
+            }
+            ScalarType::U64Be => {
+                let mut b = [0u8; 8];
+                b.copy_from_slice(&bytes[..8]);
+                u64::from_be_bytes(b).min(i64::MAX as u64) as i64
+            }
+            ScalarType::I64Le => int!(i64, 8, false),
+            ScalarType::I64Be => int!(i64, 8, true),
+            ScalarType::F32Le | ScalarType::F32Be | ScalarType::F64Le | ScalarType::F64Be => {
+                return None
+            }
+        })
+    }
+
+    /// Whether this width carries an integer — the `.eap` grammar's own
+    /// admission test for a `select_if`-reachable field.
+    pub const fn is_integer(self) -> bool {
+        !matches!(
+            self,
+            ScalarType::F32Le | ScalarType::F32Be | ScalarType::F64Le | ScalarType::F64Be
+        )
+    }
+
+    /// Write an integer into `out` in this field's width and byte order,
+    /// truncating to the width. Used to assemble a `write` payload
+    /// (design.md §3 decision 61) from the same vocabulary decode reads.
+    ///
+    /// Returns `None` for a float width, matching [`read_i64`](Self::read_i64).
+    pub fn write_i64(self, value: i64, out: &mut [u8]) -> Option<usize> {
+        let w = self.width();
+        if out.len() < w || !self.is_integer() {
+            return None;
+        }
+        let raw = (value as u64).to_le_bytes();
+        // Little-endian source, reversed for the big-endian widths. A
+        // truncating write is deliberate and matches what a C firmware
+        // assembling the same packet would do with a cast.
+        let be = matches!(
+            self,
+            ScalarType::U16Be | ScalarType::I16Be | ScalarType::U32Be
+                | ScalarType::I32Be | ScalarType::U64Be | ScalarType::I64Be
+        );
+        for i in 0..w {
+            out[i] = if be { raw[w - 1 - i] } else { raw[i] };
+        }
+        Some(w)
+    }
+
     fn render(self, bytes: &[u8], out: &mut String<MAX_STRUCT_CSV_ROW_LEN>) -> core::fmt::Result {
         use core::fmt::Write;
         macro_rules! le_be {

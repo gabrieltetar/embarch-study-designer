@@ -13,7 +13,8 @@ use crate::gatt::GattTarget;
 use crate::ids::{BleAddress, Uuid};
 use crate::limits::{
     MAX_DECODERS_PER_STUDY, MAX_FIRMWARE_VERSION_LEN, MAX_LOCAL_NAME_LEN, MAX_MONITOR_TARGETS,
-    MAX_NAME_LEN, MAX_PAYLOAD_LEN, MAX_SERVICE_UUIDS, MAX_STREAMS_PER_STUDY, MAX_STUDY_NAME_LEN,
+    MAX_NAME_LEN, MAX_PAYLOAD_LEN, MAX_PROTOCOLS_PER_STUDY, MAX_SERVICE_UUIDS,
+    MAX_STREAMS_PER_STUDY, MAX_STUDY_NAME_LEN,
 };
 use crate::streams::StreamTap;
 
@@ -138,6 +139,42 @@ pub struct Study {
     /// (`embarch-api/design.md` §3 decision 26).
     #[serde(default)]
     pub streams_crc: u32,
+    /// `.eap` protocol manifests resolved into this study at build time
+    /// (design.md §3 decision 58, §4.9), reachable only through an
+    /// [`Action::RunProtocol`] step.
+    ///
+    /// **Resolved, not referenced** — the posture §3 decision 52 settled for
+    /// payload layouts, adopted here for the same reason and not by analogy:
+    /// Core cannot read the firmware repo, so a study naming an `.eap` file
+    /// rather than carrying it would run on its author's machine and nowhere
+    /// else, and would run *differently* after an unrelated edit to that
+    /// file. The draft this decision came from bound the manifest by a CRC
+    /// instead; that is the write-ahead staleness pattern
+    /// `embarch-topology/design.md` §3 decision 3 exists to eliminate, and
+    /// the one `StreamEncoding::OutpostTrace` was corrected for
+    /// (`embarch-decision-reversals.md` row 37).
+    ///
+    /// **Where this parts company with `decoders`, and why:** `Study.decoders`
+    /// is host-only and unsealed, because a layout only decides how the host
+    /// *renders* a captured byte. A protocol decides what dev-bench
+    /// *executes*, so it crosses the wire like `steps` — and therefore gets
+    /// a seal like `steps`, [`Study::protocols_crc`].
+    #[serde(default)]
+    pub protocols: crate::bounded::Bounded<crate::eap::ProtocolDef, MAX_PROTOCOLS_PER_STUDY>,
+    /// CRC-32 over `protocols` (design.md §3 decision 58) — the study's
+    /// third seal, computed via [`crate::crc::protocols_crc`].
+    ///
+    /// A **sibling** of `steps_crc`/`streams_crc` rather than a widening of
+    /// either, for the structural reason §3 decision 39's amendment already
+    /// settled: each seal is carried immediately after the one contiguous
+    /// span it covers, so dev-bench's hand-written C digests one run of
+    /// bytes per seal and a mismatch names which of the three is corrupt.
+    ///
+    /// `#[serde(default)]` — and correct rather than permissive, as with
+    /// `streams_crc`: a study authored before protocols existed has none,
+    /// and `0` is the genuine CRC-32/ISO-HDLC of zero bytes.
+    #[serde(default)]
+    pub protocols_crc: u32,
     /// How loud dev-bench's firmware should be while this study runs
     /// (`embarch-dev-bench/design.md` §3 decision 39). Crosses the wire to
     /// dev-bench on `DevBenchMessage::StudyStart`, unlike `requires`, because
@@ -454,6 +491,26 @@ pub enum Action {
     /// regardless of how many characteristics it armed, and a second stop
     /// action would be two names for one thing.
     GattMonitorSelectedStart { targets: Bounded<GattTarget, MAX_MONITOR_TARGETS> },
+    /// Hand the link to a declared protocol state machine for the length of
+    /// this step (design.md §3 decision 60, §4.9).
+    ///
+    /// **This is the write direction §3 decision 39 left open**, and the
+    /// thing its own rejected `StreamSend`/`StreamExpect` proposal was
+    /// reaching for. That proposal was turned down as premature because
+    /// nothing in the model had conditional logic, branching or multi-step
+    /// state; a handshake is mostly those three. `RunProtocol` spans steps
+    /// the way `GattMonitorStart`/`GattMonitorStop` (§3 decision 36) does,
+    /// but where that pair opens a time window, this one runs a machine.
+    ///
+    /// **Both fields are indices, not names.** `protocol` indexes
+    /// [`Study::protocols`] — the same shape
+    /// `StreamEncoding::Struct { decoder }` uses against `Study.decoders`
+    /// (§3 decision 52) — and `entry_state` indexes that protocol's own
+    /// `states`, so one manifest can be entered at more than one point
+    /// without a firmware comparing strings. Both are range-checked by
+    /// [`crate::eap::validate_protocol`] and by Core's pre-flight, before
+    /// either reaches a hand-written C array subscript.
+    RunProtocol { protocol: u8, entry_state: u8 },
 }
 
 /// LE security mode 1's levels, as [`Action::BleSecurity`] asks for one and

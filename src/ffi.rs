@@ -325,6 +325,8 @@ mod tests {
         let steps_crc = crate::crc::steps_crc(&steps).unwrap();
 
         let good = Study {
+            protocols: Default::default(),
+            protocols_crc: 0,
             decoders: Default::default(),
             name: String::try_from("t").unwrap(),
             requires: crate::study::Requirements::any(),
@@ -380,6 +382,8 @@ mod tests {
         let steps_crc = crate::crc::steps_crc(&steps).unwrap();
 
         Study {
+            protocols: Default::default(),
+            protocols_crc: 0,
 
             decoders: Default::default(),
             name: String::try_from("ble-advertise-study").unwrap(),
@@ -450,6 +454,8 @@ mod tests {
             .unwrap();
         let steps_crc = crate::crc::steps_crc(&steps).unwrap();
         let study = Study {
+            protocols: Default::default(),
+            protocols_crc: 0,
             decoders: Default::default(),
             name: String::try_from("t").unwrap(),
             requires: crate::study::Requirements::any(),

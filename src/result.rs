@@ -6,7 +6,8 @@ use serde::{Deserialize, Serialize};
 use crate::gatt::GattServiceInfo;
 use crate::limits::{
     MAX_DISCOVERED_SERVICES, MAX_FAIL_REASON_LEN, MAX_FIRMWARE_VERSION_LEN, MAX_NAME_LEN,
-    MAX_PAYLOAD_LEN, MAX_STEPS_PER_STUDY, MAX_STREAMS_PER_STUDY, MAX_STUDY_NAME_LEN,
+    MAX_PAYLOAD_LEN, MAX_STATE_NAME_LEN, MAX_STEPS_PER_STUDY, MAX_STREAMS_PER_STUDY,
+    MAX_STUDY_NAME_LEN,
     MAX_VERSION_OVERRIDES,
 };
 use crate::streams::StreamRef;
@@ -204,7 +205,52 @@ pub struct StepResult {
     /// change all the same — hence v12 in [`crate::schema_version`].
     #[serde(default)]
     pub security_level: Option<crate::study::BleSecurityLevel>,
+    /// What an [`Action::RunProtocol`](crate::study::Action::RunProtocol)
+    /// step's state machine did (design.md §3 decision 62). `None` for every
+    /// other action kind, which is every action that existed before it.
+    ///
+    /// **Appended last on purpose.** postcard encodes a struct's fields in
+    /// declaration order with no tags, so inserting one mid-struct shifts
+    /// every byte after it; appending makes the change a pure suffix that
+    /// dev-bench's hand-written C decoder can adopt by reading one more
+    /// `Option` at the end rather than by re-walking the message. The
+    /// schema bump and the reflash are owed either way (§3 decision 36), but
+    /// the diff a human has to check is a byte instead of a message.
+    #[serde(default)]
+    pub protocol: Option<ProtocolOutcome>,
 }
+
+/// What one protocol run ended as — design.md §3 decision 62.
+///
+/// **Two fields, and the draft's third is deliberately absent.** That draft
+/// had this carrying a bounded `heapless::Vec` of every decoded field the run
+/// saw, addressable by path. That is the exact shape §3 decision 54 retired
+/// `StepResult.gatt_activity` for one week earlier: a bounded, in-memory copy
+/// of something unbounded and streamed, which lets a result *look* complete
+/// while holding a fraction of what arrived. Decoded values reach a reader the
+/// way every other captured byte does — through the tap the study declared,
+/// rendered host-side (§3 decision 52). This type says only what the tap
+/// cannot: which state the machine stopped in.
+///
+/// Keeping `outcome` alongside `StepResult.outcome` is not redundancy. The
+/// step's outcome can be `Fail` for a reason the machine never saw — a
+/// dropped link, an exhausted step timeout — and telling "the protocol
+/// reached its `failed` state" apart from "the protocol never finished" is
+/// the whole diagnostic value of recording a final state at all.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProtocolOutcome {
+    /// The state the machine was in when the run ended: a terminal state on
+    /// a normal finish, whatever it was sitting in otherwise. Whether it was
+    /// terminal is not stored — it is a lookup in the `ProtocolDef` the
+    /// `Study` already carries, and a stored copy could disagree with it.
+    pub final_state: heapless::String<MAX_STATE_NAME_LEN>,
+    /// The [`Outcome`] the run produced. A terminal state's declared
+    /// [`TerminalOutcome`](crate::eap::TerminalOutcome) becomes `Pass` or
+    /// `Fail`; a run that never reached one reports `TimedOut`, which no
+    /// manifest can declare and only a run can produce.
+    pub outcome: Outcome,
+}
+
 
 /// The only on-device validation signal — did the action complete without a
 /// protocol-level error or timeout. Whether the *content* was correct is a

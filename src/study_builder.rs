@@ -337,6 +337,8 @@ pub fn build_study(
     }
 
     Ok(Study {
+        protocols: Default::default(),
+        protocols_crc: 0,
         name: heapless_string::<MAX_STUDY_NAME_LEN>(study_name, "study name")?,
         // Taken from the caller rather than defaulted here on purpose
         // (design.md §3 decision 40): "any build" is a legitimate answer that

@@ -1,0 +1,63 @@
+# A BDS-batch-download-shaped handshake: request -> chunked pump loop with
+# flow control -> consume. Structurally the state machine of the real Batch
+# Data Service on `reference-dut-fw` (lib/bds/bds.c's `sensor_bds`),
+# which embarch-study-designer/design.md §3 decision 57 made extractable.
+#
+# This is a TEST FIXTURE, not a description of that firmware's real opcodes.
+# It exists to prove the primitive set is sufficient for a flow-controlled
+# download, which is what §4.9 chose it for.
+
+protocol bds_batch_download {
+    source ctrl   = characteristic(service: "00000020-1234-5678-9abc-def012345678", char: "0021")
+    source status = characteristic(service: "00000020-1234-5678-9abc-def012345678", char: "0022")
+    source data   = characteristic(service: "00000020-1234-5678-9abc-def012345678", char: "0023")
+
+    frame progress on status select_if { offset: 0, len: 1, eq: 0x02 } {
+        u8    msg_type @ 0
+        u32be offset   @ 1
+        u32be total    @ 5
+    }
+
+    frame chunk on data {
+        bytes payload @ 0..len
+    }
+
+    session {
+        var received:     u32 = 0
+        var expect_total: u32 = 0
+    }
+
+    state start {
+        on_enter: write ctrl { u8: 0x01 } with_response      # REQUEST_OLDEST
+        on_event progress:
+            remember expect_total = progress.total
+            goto pumping
+        on_timeout 2000ms retry 2: goto failed
+    }
+
+    state pumping {
+        on_enter: write ctrl { u8: 0x02 }                    # NEXT_CHUNK, no response
+        on_event chunk:
+            remember received = received + len(chunk.payload)
+            when received >= expect_total: goto consuming
+            otherwise: goto pumping                          # re-send NEXT_CHUNK
+        on_timeout 1500ms retry 0: goto aborting             # stall watchdog
+    }
+
+    state consuming {
+        on_enter: write ctrl { u8: 0x03 } with_response      # CONSUME_OLDEST
+        on_event progress: goto done
+        on_timeout 2000ms retry 1: goto aborting
+    }
+
+    state aborting {
+        # ABORT is always with_response: the firmware's transfer state must
+        # not be left wedged.
+        on_enter: write ctrl { u8: 0x04 } with_response
+        on_event progress: goto failed
+        on_timeout 2000ms: goto failed
+    }
+
+    state done   outcome: pass
+    state failed outcome: fail
+}
