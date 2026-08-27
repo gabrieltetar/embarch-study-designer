@@ -222,6 +222,23 @@ impl HeaderFlags {
     pub const TRACE_MARKERS: u8 = 1 << 3;
     pub const ISR_IDENTIFY: u8 = 1 << 4;
     pub const OVERFLOW_BLOCK: u8 = 1 << 5;
+    /// Added 2026-08-27, and it had been on the wire since layout 3's GPIO
+    /// record kinds shipped the day before without ever being mirrored here —
+    /// nothing read it, so nothing noticed.
+    pub const TRACE_GPIO: u8 = 1 << 6;
+    /// **The one flag whose *clear* state is the interesting one.** Clear means
+    /// the trace deliberately carries no record of the outpost's own drain
+    /// thread or its own UART's interrupt
+    /// (`CONFIG_EMBARCH_OUTPOST_TRACE_SELF=n`, the default), so the timeline is
+    /// not an account of everything the CPU did and a host must not present it
+    /// as one — what it will see instead is intervals no lane covers.
+    ///
+    /// It is on the wire because an absence of records is indistinguishable
+    /// from an idle subject: a host inferring self-exclusion from "the drain
+    /// thread never ran" would be deriving a firmware build option from a
+    /// measurement, which is the class of thing
+    /// `embarch-study-designer/design.md` §3 decision 35 forbids.
+    pub const TRACE_SELF: u8 = 1 << 7;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
