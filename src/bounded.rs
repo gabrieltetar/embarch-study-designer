@@ -334,9 +334,23 @@ mod tests {
     #[cfg(not(feature = "alloc"))]
     #[test]
     fn the_no_std_build_keeps_its_fixed_capacity_arrays() {
+        // Asserted on `Bounded` itself rather than on a `StepResult`
+        // magnitude. It used to read `size_of::<StepResult>() > 4_096`,
+        // which held only because `gatt_activity` inlined 32 × 536-byte
+        // records — so retiring that field (design.md §3 decision 54) made a
+        // passing test fail for a reason that had nothing to do with what it
+        // was checking. The claim is "no allocator on this build", and the
+        // element count times the element size is that claim directly.
+        type Inline = Bounded<crate::gatt::GattServiceInfo, { crate::limits::MAX_DISCOVERED_SERVICES }>;
         assert!(
-            core::mem::size_of::<crate::result::StepResult>() > 4_096,
+            core::mem::size_of::<Inline>()
+                >= crate::limits::MAX_DISCOVERED_SERVICES
+                    * core::mem::size_of::<crate::gatt::GattServiceInfo>(),
             "the no_std shape must still inline its arrays"
+        );
+        assert!(
+            core::mem::size_of::<Inline>() > core::mem::size_of::<usize>() * 4,
+            "an inline array is not a heap Vec's pointer/len/capacity"
         );
     }
 

@@ -3,11 +3,10 @@
 use heapless::{String, Vec};
 use serde::{Deserialize, Serialize};
 
-use crate::gatt::{GattActivityRecord, GattServiceInfo};
+use crate::gatt::GattServiceInfo;
 use crate::limits::{
-    MAX_DISCOVERED_SERVICES, MAX_FAIL_REASON_LEN, MAX_FIRMWARE_VERSION_LEN,
-    MAX_GATT_ACTIVITY_RECORDS, MAX_NAME_LEN, MAX_PAYLOAD_LEN, MAX_STEPS_PER_STUDY,
-    MAX_STREAMS_PER_STUDY, MAX_STUDY_NAME_LEN,
+    MAX_DISCOVERED_SERVICES, MAX_FAIL_REASON_LEN, MAX_FIRMWARE_VERSION_LEN, MAX_NAME_LEN,
+    MAX_PAYLOAD_LEN, MAX_STEPS_PER_STUDY, MAX_STREAMS_PER_STUDY, MAX_STUDY_NAME_LEN,
     MAX_VERSION_OVERRIDES,
 };
 use crate::streams::StreamRef;
@@ -166,8 +165,9 @@ pub struct StepResult {
     // once as `StudyResult::streams` rather than as two optional
     // per-step file references that no tap outliving a single step could
     // ever have filled in correctly.
-    /// Populated by `Action::GattDiscover` and `Action::GattMonitorAll`
-    /// (design.md §3 decisions 31/32, §4.3a). Landing inline in
+    /// Populated by every discovering action — `GattDiscover`,
+    /// `GattMonitorAll`/`GattMonitorStart` and their selective counterparts
+    /// (design.md §3 decisions 31/32/53, §4.3a). Landing inline in
     /// `events.json` like `captured_data` rather than as a CSV-file
     /// reference, since both are bounded and small enough to stay
     /// JSON-friendly (unlike the high-rate power/waveform channels).
@@ -175,9 +175,15 @@ pub struct StepResult {
     /// field still deserializes.
     #[serde(default)]
     pub gatt_services: Option<crate::bounded::Bounded<GattServiceInfo, MAX_DISCOVERED_SERVICES>>,
-    /// Populated only by `Action::GattMonitorAll` (design.md §3 decision 32).
-    #[serde(default)]
-    pub gatt_activity: Option<crate::bounded::Bounded<GattActivityRecord, MAX_GATT_ACTIVITY_RECORDS>>,
+    // `gatt_activity` was here and is **retired** by design.md §3 decision
+    // 54. It held at most `MAX_GATT_ACTIVITY_RECORDS` (32) captured
+    // notifications per step, inline in `events.json` — a bounded, in-memory
+    // copy of something unbounded and streamed. The tap pipeline (§4.8)
+    // already writes every record incrementally to a file, so the capped
+    // copy's only remaining effect was to let a study *look* complete while
+    // holding 32 of several thousand records. A study with a monitor step
+    // now gets an auto-declared `GattTranscript` tap instead
+    // (`embarch-ui/design.md` §3 decision 15), and the file is the answer.
     /// The BLE security level the link was actually sitting at when this
     /// step finished (design.md §3 decision 50) — `None` when there was no
     /// connection to ask about.

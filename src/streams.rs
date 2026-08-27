@@ -217,6 +217,25 @@ pub enum StreamEncoding {
     /// that bound it and verified by the build ID in the stream's own header.
     /// The tap declares only what the bytes *are*.
     OutpostTrace,
+    /// Each record's bytes are one instance of an engineer-declared payload
+    /// layout — design.md §3 decision 52, [`crate::decoder`]. `decoder`
+    /// indexes into `Study.decoders`.
+    ///
+    /// **An index, not the layout itself, and that is the whole design.** A
+    /// tap's encoding crosses the wire inside `StudyStart`, where dev-bench
+    /// has to walk past it to reach `scope`; a variable-length struct
+    /// definition there would cost a nested walker in hand-written C for a
+    /// value dev-bench must never act on. The layouts live in
+    /// `Study.decoders` instead — a **host-only** field, like
+    /// `Study.requires`, that never crosses that hop at all. So this variant
+    /// costs the C decoder one `u8` read, and what a payload *means* stays
+    /// exactly as far away from dev-bench as decision 39 put it.
+    ///
+    /// [`crate::streams::StreamEncoding::Samples`] is not replaced. It says
+    /// "packed scalars of one type, all one column"; this says "these named
+    /// fields, then this repeating group" and renders named columns. A power
+    /// front end wants the first; a notification packet wants the second.
+    Struct { decoder: u8 },
 }
 
 /// How to read scalar elements out of a [`StreamEncoding::Samples`] payload
@@ -342,6 +361,10 @@ pub enum StreamTapError {
     InvertedStepRange { index: usize },
     /// A `Steps` scope referencing a step the study doesn't have.
     StepRangeOutOfBounds { index: usize, step_count: u32 },
+    /// A `StreamEncoding::Struct` naming a `Study.decoders` entry that isn't
+    /// there. Caught here rather than at render time, where it would surface
+    /// as a study that ran, captured, and produced no CSV.
+    UnknownDecoder { index: usize, decoder: u8, decoder_count: usize },
 }
 
 impl core::fmt::Display for StreamTapError {
@@ -374,6 +397,11 @@ impl core::fmt::Display for StreamTapError {
                 f,
                 "streams[{index}] declares a step range outside this study's {step_count} step(s)"
             ),
+            StreamTapError::UnknownDecoder { index, decoder, decoder_count } => write!(
+                f,
+                "streams[{index}] decodes with Study.decoders[{decoder}], but this study declares \
+                 {decoder_count} decoder(s)"
+            ),
         }
     }
 }
@@ -390,6 +418,7 @@ impl std::error::Error for StreamTapError {}
 pub fn validate_taps(
     taps: &Vec<StreamTap, MAX_STREAMS_PER_STUDY>,
     step_count: u32,
+    decoder_count: usize,
 ) -> Result<(), StreamTapError> {
     for (index, tap) in taps.iter().enumerate() {
         if usize::from(tap.id) != index {
@@ -410,6 +439,15 @@ pub fn validate_taps(
             }
             if to >= step_count {
                 return Err(StreamTapError::StepRangeOutOfBounds { index, step_count });
+            }
+        }
+        if let StreamEncoding::Struct { decoder } = tap.encoding {
+            if usize::from(decoder) >= decoder_count {
+                return Err(StreamTapError::UnknownDecoder {
+                    index,
+                    decoder,
+                    decoder_count,
+                });
             }
         }
     }
@@ -512,7 +550,7 @@ mod tests {
             tap(0, "gatt", StreamScope::WholeStudy),
             tap(1, "outpost", StreamScope::Steps { from: 0, to: 3 }),
         ]);
-        assert_eq!(validate_taps(&list, 4), Ok(()));
+        assert_eq!(validate_taps(&list, 4, 0), Ok(()));
     }
 
     #[test]
@@ -522,7 +560,7 @@ mod tests {
         // Study.streams would route a capture into the wrong file.
         let list = taps(&[tap(1, "gatt", StreamScope::WholeStudy)]);
         assert_eq!(
-            validate_taps(&list, 1),
+            validate_taps(&list, 1, 0),
             Err(StreamTapError::IdIsNotItsIndex { index: 0, id: 1 })
         );
     }
@@ -530,20 +568,20 @@ mod tests {
     #[test]
     fn the_reserved_dev_bench_name_is_rejected() {
         let list = taps(&[tap(0, RESERVED_DEV_BENCH_STREAM_NAME, StreamScope::WholeStudy)]);
-        assert_eq!(validate_taps(&list, 1), Err(StreamTapError::ReservedName { index: 0 }));
+        assert_eq!(validate_taps(&list, 1, 0), Err(StreamTapError::ReservedName { index: 0 }));
     }
 
     #[test]
     fn a_blank_or_repeated_name_is_rejected() {
         assert_eq!(
-            validate_taps(&taps(&[tap(0, "   ", StreamScope::WholeStudy)]), 1),
+            validate_taps(&taps(&[tap(0, "   ", StreamScope::WholeStudy)]), 1, 0),
             Err(StreamTapError::EmptyName { index: 0 })
         );
         let dup = taps(&[
             tap(0, "trace", StreamScope::WholeStudy),
             tap(1, "trace", StreamScope::WholeStudy),
         ]);
-        assert_eq!(validate_taps(&dup, 1), Err(StreamTapError::DuplicateName { index: 1 }));
+        assert_eq!(validate_taps(&dup, 1, 0), Err(StreamTapError::DuplicateName { index: 1 }));
     }
 
     #[test]
@@ -551,13 +589,27 @@ mod tests {
         // Both of these produce a capture that is silently empty, which is
         // the exact failure decisions 34 and 36 were each opened by.
         assert_eq!(
-            validate_taps(&taps(&[tap(0, "power", StreamScope::Steps { from: 3, to: 1 })]), 8),
+            validate_taps(&taps(&[tap(0, "power", StreamScope::Steps { from: 3, to: 1 })]), 8, 0),
             Err(StreamTapError::InvertedStepRange { index: 0 })
         );
         assert_eq!(
-            validate_taps(&taps(&[tap(0, "power", StreamScope::Steps { from: 0, to: 9 })]), 4),
+            validate_taps(&taps(&[tap(0, "power", StreamScope::Steps { from: 0, to: 9 })]), 4, 0),
             Err(StreamTapError::StepRangeOutOfBounds { index: 0, step_count: 4 })
         );
+    }
+
+    #[test]
+    fn a_struct_encoding_naming_a_decoder_the_study_lacks_is_rejected() {
+        // Caught at submit, where the author can fix it. Left to render
+        // time it is a study that ran, captured, and produced no CSV —
+        // "nothing captured, no error" again, one layer up.
+        let mut list = taps(&[tap(0, "ppg", StreamScope::WholeStudy)]);
+        list[0].encoding = StreamEncoding::Struct { decoder: 2 };
+        assert_eq!(
+            validate_taps(&list, 1, 2),
+            Err(StreamTapError::UnknownDecoder { index: 0, decoder: 2, decoder_count: 2 })
+        );
+        assert_eq!(validate_taps(&list, 1, 3), Ok(()));
     }
 
     #[test]
@@ -605,7 +657,7 @@ mod tests {
             .unwrap();
             full.push(t).unwrap();
         }
-        assert_eq!(validate_taps(&full, 1), Ok(()));
+        assert_eq!(validate_taps(&full, 1, 0), Ok(()));
         let reserved = dev_bench_log_tap(&full);
         assert_eq!(usize::from(reserved.id), MAX_STREAMS_PER_STUDY);
         assert!(
@@ -619,7 +671,7 @@ mod tests {
         // The synthesized tap and validate_taps' rejection are two halves of
         // one rule: exactly one producer for that name.
         let list = taps(&[tap(0, RESERVED_DEV_BENCH_STREAM_NAME, StreamScope::WholeStudy)]);
-        assert_eq!(validate_taps(&list, 1), Err(StreamTapError::ReservedName { index: 0 }));
+        assert_eq!(validate_taps(&list, 1, 0), Err(StreamTapError::ReservedName { index: 0 }));
         let none: Vec<StreamTap, MAX_STREAMS_PER_STUDY> = Vec::new();
         assert_eq!(dev_bench_log_tap(&none).name.as_str(), RESERVED_DEV_BENCH_STREAM_NAME);
     }
