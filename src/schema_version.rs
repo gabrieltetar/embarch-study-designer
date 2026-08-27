@@ -210,6 +210,28 @@
 ///   that makes this unambiguously a wire bump rather than a host-only one —
 ///   a removal in the middle of a hand-encoded struct is exactly the drift
 ///   this handshake exists to refuse.
+/// - **v15** (§3 decisions 58-62, and `embarch-dev-bench/design.md` §3
+///   decision 41) — `.eap` protocol manifests, taken as one bump the way v4
+///   and v14 each took a related group. `StudyStart` gains `protocols` and
+///   `protocols_crc`, appended after `dev_bench_log_level`;
+///   `Action::RunProtocol` takes discriminant 11; and `StepResult` gains a
+///   trailing `protocol: Option<ProtocolOutcome>`. dev-bench parses the first
+///   two and emits the third, so this is a wire bump by the plainest reading
+///   of the rule above.
+///
+///   **The design pass and the implementation pass are one version, not
+///   two**, and that is deliberate rather than an oversight. Decisions 58-62
+///   moved this constant to 15 while leaving `StudyStart` one field short of
+///   carrying a manifest at all ([embarch-decision-reversals.md] row 68), so
+///   v15 as first written described a wire nothing could run. It was extended
+///   inside the same design pass, before any firmware carrying it had been
+///   built or flashed — the live bench was on v14 throughout — so there was
+///   no peer for the intermediate shape to drift from. Renumbering to 16
+///   would have spent a version on a state that never existed anywhere but in
+///   this file, which is the ambiguity this module's own doc comment refuses
+///   from the opposite direction.
+///
+/// [embarch-decision-reversals.md]: https://github.com/gabrieltetar/embarch-doc/blob/main/embarch-decision-reversals.md
 pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 15;
 
 /// Served by `embarch-core`'s `GET /status` and compared by `embarch-api`
@@ -288,6 +310,11 @@ pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 15;
 ///   `Study.decoders` those taps resolve against (design.md §3 decision 52),
 ///   which crosses `embarch-api` -> `embarch-core` as JSON and reaches
 ///   dev-bench never. Follows by the superset rule either way.
+/// - **v17** — a wire bump (v15's `.eap` protocol manifests), so this follows
+///   by the superset rule rather than by judgement. Nothing in that pass is
+///   host-only: `Study.protocols`/`protocols_crc` cross `embarch-api` ->
+///   `embarch-core` as JSON *and* cross to dev-bench, which is the whole
+///   difference between a protocol and a decoder (§3 decision 58).
 pub const HOST_TYPE_SCHEMA_VERSION: u32 = 17;
 
 /// [`HOST_TYPE_SCHEMA_VERSION`]'s triggers are a strict superset of
