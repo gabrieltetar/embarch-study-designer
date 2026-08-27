@@ -37,6 +37,10 @@ pub mod ffi;
 pub mod gatt;
 #[cfg(feature = "gatt-extract")]
 pub mod gatt_extract;
+/// Characteristic display names (§3 decision 56) — `std`-only, so a
+/// dev-bench firmware build never carries it.
+#[cfg(feature = "std")]
+pub mod gatt_names;
 pub mod ids;
 pub mod limits;
 pub mod outpost;
@@ -62,7 +66,12 @@ pub use gatt::{
     GattTranscriptEntry,
 };
 #[cfg(feature = "gatt-extract")]
-pub use gatt_extract::{ZephyrBleDefExtractor, ExtractError, GattConfigExtractor};
+pub use gatt_extract::{
+    CharacteristicSymbol, ZephyrBleDefExtractor, ExtractError, ExtractedGatt,
+    GattConfigExtractor,
+};
+#[cfg(feature = "std")]
+pub use gatt_names::{label_from_symbol, GattName, GattNameBook, GattNameSource};
 pub use ids::{BleAddress, BleAddressKind, Uuid};
 #[cfg(feature = "study-ui")]
 pub use merged_actions::{merge_actions, BuiltInAction, DiscoverySources, MergedAction};

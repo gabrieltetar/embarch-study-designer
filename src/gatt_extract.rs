@@ -74,6 +74,50 @@ impl core::fmt::Display for ExtractError {
 
 impl std::error::Error for ExtractError {}
 
+/// The C identifier a characteristic was declared under, paired with the
+/// UUID it resolved to — design.md §3 decision 56.
+///
+/// **A label, not semantics.** `sds_hrm_rrm_char_uuid` says what the
+/// firmware's authors called this characteristic in their own source; it says
+/// nothing about what its bytes mean, when it notifies, or what writing to it
+/// does. Those remain knowledge only that repo's engineers have, supplied
+/// through [`crate::registry`] and [`crate::decoder`]. This module's entire
+/// claim is "the declaration you are looking at is spelled this way", which
+/// is a fact about the text it just scanned rather than an inference about
+/// the device.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CharacteristicSymbol {
+    pub uuid: Uuid,
+    /// Verbatim, including whatever suffix convention the repo uses —
+    /// trimming it for display is [`crate::gatt_names`]'s job, and the
+    /// untrimmed form stays available so a UI can show exactly what is in
+    /// the source.
+    pub identifier: String,
+}
+
+/// What an extraction produced: the wire-shaped GATT table, plus the source
+/// identifiers behind it (§3 decision 56).
+///
+/// Two fields rather than a name field on [`GattCharacteristicInfo`]: that
+/// type is the `no_std`, `heapless`, wire-comparable shape a *live*
+/// `GattDiscover` fills in from an ATT response, and an ATT response carries
+/// no names. Hanging a source-only field off it would put a field on the
+/// wire that hardware can never populate, and break the byte-for-byte
+/// comparability between a static extraction and a live discovery that
+/// decision 33 exists to provide.
+// No `Eq`: `GattServiceInfo` is only `PartialEq`, matching every other
+// wire type in this crate.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ExtractedGatt {
+    pub services: heapless::Vec<GattServiceInfo, MAX_DISCOVERED_SERVICES>,
+    /// One entry per characteristic whose declaring identifier was
+    /// recovered, in extraction order. Not necessarily one per
+    /// characteristic in `services`: an extractor that can't recover names
+    /// leaves this empty, and every consumer treats a missing name as
+    /// "unnamed" rather than as an error.
+    pub symbols: Vec<CharacteristicSymbol>,
+}
+
 /// Extracts a DUT firmware's GATT table from its source, ahead of ever
 /// connecting to real hardware (design.md §3 decision 33). Generic at the
 /// trait boundary, narrow at the implementation, per the user's explicit
@@ -82,13 +126,28 @@ impl std::error::Error for ExtractError {}
 /// shape.
 pub trait GattConfigExtractor {
     /// `repo_root` is the checked-out firmware repo's root directory.
-    /// Returns the same [`GattServiceInfo`] shape a live
-    /// `Action::GattDiscover`/`Action::GattMonitorAll` result uses, so a
-    /// static extraction and a live discovery are byte-for-byte comparable.
+    ///
+    /// [`ExtractedGatt::services`] is the same [`GattServiceInfo`] shape a
+    /// live `Action::GattDiscover`/`Action::GattMonitorAll` result uses, so a
+    /// static extraction and a live discovery are byte-for-byte comparable;
+    /// [`ExtractedGatt::symbols`] carries what only source can know
+    /// (§3 decision 56).
+    ///
+    /// This is the required method rather than [`Self::extract`] because a
+    /// single text-scan produces both halves — an extractor asked for the
+    /// table and then for the names would read and re-parse the same files
+    /// twice to answer one request.
+    fn extract_labeled(&self, repo_root: &Path) -> Result<ExtractedGatt, ExtractError>;
+
+    /// The table alone, for a caller that has no use for the names.
+    /// Provided in terms of [`Self::extract_labeled`] — every existing
+    /// caller predates decision 56 and keeps compiling unchanged.
     fn extract(
         &self,
         repo_root: &Path,
-    ) -> Result<heapless::Vec<GattServiceInfo, MAX_DISCOVERED_SERVICES>, ExtractError>;
+    ) -> Result<heapless::Vec<GattServiceInfo, MAX_DISCOVERED_SERVICES>, ExtractError> {
+        self.extract_labeled(repo_root).map(|extracted| extracted.services)
+    }
 }
 
 /// Scoped narrowly to `reference-dut-fw`'s actual conventions
@@ -101,10 +160,7 @@ pub trait GattConfigExtractor {
 pub struct ZephyrBleDefExtractor;
 
 impl GattConfigExtractor for ZephyrBleDefExtractor {
-    fn extract(
-        &self,
-        repo_root: &Path,
-    ) -> Result<heapless::Vec<GattServiceInfo, MAX_DISCOVERED_SERVICES>, ExtractError> {
+    fn extract_labeled(&self, repo_root: &Path) -> Result<ExtractedGatt, ExtractError> {
         let def_path = repo_root.join("lib/ble/ble_def.h");
         let def_src = std::fs::read_to_string(&def_path)
             .map_err(|_| ExtractError::FileNotFound(def_path))?;
@@ -119,10 +175,7 @@ impl GattConfigExtractor for ZephyrBleDefExtractor {
 /// The pure, file-I/O-free core of [`ZephyrBleDefExtractor::extract`] —
 /// split out so this crate's own tests can exercise the text-scan against
 /// literal fixture strings without touching the filesystem.
-fn extract_from_sources(
-    def_src: &str,
-    c_src: &str,
-) -> Result<heapless::Vec<GattServiceInfo, MAX_DISCOVERED_SERVICES>, ExtractError> {
+fn extract_from_sources(def_src: &str, c_src: &str) -> Result<ExtractedGatt, ExtractError> {
     let consts = parse_scalar_constants(def_src);
     let uuid_macros = parse_uuid_macros(def_src, &consts)?;
     let var_uuids = parse_uuid_vars(c_src, &uuid_macros)?;
@@ -227,16 +280,19 @@ fn parse_uuid_vars(
 /// Every `BT_GATT_SERVICE_DEFINE(...)` block in `c_src`, each producing one
 /// [`GattServiceInfo`] (design.md §4.3a) — services/characteristics in
 /// source (== discovery) order, matching a live `GattDiscover`'s own
-/// ordering convention.
+/// ordering convention. Also returns the C identifier each characteristic
+/// was declared under (§3 decision 56): `char_var` is already in hand here
+/// to resolve the UUID at all, and it used to be dropped on the floor.
 fn parse_gatt_services(
     c_src: &str,
     var_uuids: &HashMap<String, [u8; 16]>,
-) -> Result<heapless::Vec<GattServiceInfo, MAX_DISCOVERED_SERVICES>, ExtractError> {
+) -> Result<ExtractedGatt, ExtractError> {
     let primary_re = Regex::new(r"BT_GATT_PRIMARY_SERVICE\(\s*&(\w+)\s*\)").unwrap();
     let chrc_re =
         Regex::new(r"BT_GATT_CHARACTERISTIC\(\s*&(\w+)(?:\.uuid)?\s*,\s*([^,]+),").unwrap();
 
     let mut services: heapless::Vec<GattServiceInfo, MAX_DISCOVERED_SERVICES> = heapless::Vec::new();
+    let mut symbols: Vec<CharacteristicSymbol> = Vec::new();
     let marker = "BT_GATT_SERVICE_DEFINE(";
     let mut search_from = 0usize;
     while let Some(rel_idx) = c_src[search_from..].find(marker) {
@@ -273,6 +329,10 @@ fn parse_gatt_services(
             characteristics
                 .push(GattCharacteristicInfo { uuid: Uuid(uuid), properties })
                 .map_err(|_| ExtractError::CapacityExceeded("MAX_CHARS_PER_SERVICE"))?;
+            // Uncapped `Vec`, unlike the `heapless` table beside it: symbols
+            // are host-only display data that never crosses the wire, so
+            // there is no buffer on the far end for them to have to fit.
+            symbols.push(CharacteristicSymbol { uuid: Uuid(uuid), identifier: char_var });
         }
 
         services
@@ -280,7 +340,7 @@ fn parse_gatt_services(
             .map_err(|_| ExtractError::CapacityExceeded("MAX_DISCOVERED_SERVICES"))?;
     }
 
-    Ok(services)
+    Ok(ExtractedGatt { services, symbols })
 }
 
 /// Bluetooth Core Spec characteristic-properties bits — the same encoding
@@ -411,7 +471,7 @@ BT_GATT_SERVICE_DEFINE(s11_dms,
 
     #[test]
     fn extracts_expected_services_and_uuids_from_fixture() {
-        let services = extract_from_sources(FIXTURE_DEF_H, FIXTURE_BLE_C).unwrap();
+        let services = extract_from_sources(FIXTURE_DEF_H, FIXTURE_BLE_C).unwrap().services;
         assert_eq!(services.len(), 2);
 
         let sds = &services[0];
@@ -425,6 +485,38 @@ BT_GATT_SERVICE_DEFINE(s11_dms,
         let dms = &services[1];
         assert_eq!(dms.characteristics.len(), 1);
         assert_eq!(dms.characteristics[0].properties, 0x02 | 0x08 | 0x10); // READ|WRITE|NOTIFY
+    }
+
+    /// §3 decision 56: the C identifier each characteristic was declared
+    /// under comes back paired with the UUID it resolved to, in extraction
+    /// order — and the UUID it is paired with is the *same* one the table
+    /// carries, so a UI looking a name up by UUID can't miss.
+    #[test]
+    fn extraction_recovers_the_declaring_c_identifiers() {
+        let extracted = extract_from_sources(FIXTURE_DEF_H, FIXTURE_BLE_C).unwrap();
+        let identifiers: Vec<&str> =
+            extracted.symbols.iter().map(|s| s.identifier.as_str()).collect();
+        assert_eq!(identifiers, ["sds_hrm_rrm_char_uuid", "dms_sensor_cfg_uuid"]);
+        assert_eq!(extracted.symbols[0].uuid, extracted.services[0].characteristics[0].uuid);
+        assert_eq!(extracted.symbols[1].uuid, extracted.services[1].characteristics[0].uuid);
+    }
+
+    /// `extract` is a provided method now, so a second extractor — the
+    /// exact thing this trait's doc comment says a new firmware project
+    /// adds — implements one method and gets the other. Asserted against a
+    /// stub rather than against `ZephyrBleDefExtractor`, since the
+    /// provided method is the trait's behavior, not that impl's.
+    #[test]
+    fn a_new_impl_only_writes_extract_labeled() {
+        struct Stub;
+        impl GattConfigExtractor for Stub {
+            fn extract_labeled(&self, _repo_root: &Path) -> Result<ExtractedGatt, ExtractError> {
+                extract_from_sources(FIXTURE_DEF_H, FIXTURE_BLE_C)
+            }
+        }
+        let services = Stub.extract(Path::new("/does/not/matter")).unwrap();
+        assert_eq!(services, Stub.extract_labeled(Path::new("/does/not/matter")).unwrap().services);
+        assert_eq!(services.len(), 2);
     }
 
     #[test]

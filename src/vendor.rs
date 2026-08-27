@@ -55,6 +55,11 @@ pub struct VendorCharacteristic {
     pub id: &'static str,
     /// The vendor's own name for it, for display.
     pub name: &'static str,
+    /// The same identity in the few characters a picker's label has room for
+    /// (design.md §3 decision 56). A separate field rather than a truncation
+    /// of [`name`](Self::name): `name` is the vendor's full sentence, and the
+    /// place to decide what its short form is, is the table that knows both.
+    pub short_name: &'static str,
     pub uuid: Uuid,
     /// The ATT characteristic-properties byte the vendor declares. Same bit
     /// layout as `GattCharacteristicInfo::properties`, so a UI can render
@@ -121,6 +126,7 @@ pub const NORDIC_UART_SERVICE: VendorService = VendorService {
         VendorCharacteristic {
             id: "rx",
             name: "RX — written by the central, received by the peripheral",
+            short_name: "NUS RX",
             uuid: Uuid([
                 0x6e, 0x40, 0x00, 0x02, 0xb5, 0xa3, 0xf3, 0x93, 0xe0, 0xa9, 0xe5, 0x0e, 0x24, 0xdc,
                 0xca, 0x9e,
@@ -130,6 +136,7 @@ pub const NORDIC_UART_SERVICE: VendorService = VendorService {
         VendorCharacteristic {
             id: "tx",
             name: "TX — notified by the peripheral, received by the central",
+            short_name: "NUS TX",
             uuid: Uuid([
                 0x6e, 0x40, 0x00, 0x03, 0xb5, 0xa3, 0xf3, 0x93, 0xe0, 0xa9, 0xe5, 0x0e, 0x24, 0xdc,
                 0xca, 0x9e,
@@ -158,6 +165,28 @@ pub fn find_characteristic(
     let service = find(service_id)?;
     let characteristic = service.characteristic(characteristic_id)?;
     Some((service, characteristic))
+}
+
+/// The `(service, characteristic)` pair a **UUID** belongs to, or `None`.
+///
+/// The lookup direction [`find_characteristic`] doesn't cover: that one
+/// resolves a UI selection an engineer made *by name*, this one names a
+/// characteristic something else already found *by UUID* — a live
+/// `GattDiscover` result, or a static extraction. Matching on the
+/// characteristic UUID alone rather than on the pair: a UUID this table
+/// defines is globally unique by construction, so a device exposing NUS TX
+/// under some other service is still exposing NUS TX, and saying so is more
+/// useful than declining to name it.
+pub fn find_by_uuid(
+    characteristic_uuid: Uuid,
+) -> Option<(&'static VendorService, &'static VendorCharacteristic)> {
+    ALL.iter().find_map(|service| {
+        service
+            .characteristics
+            .iter()
+            .find(|c| c.uuid == characteristic_uuid)
+            .map(|c| (service, c))
+    })
 }
 
 #[cfg(test)]
@@ -191,6 +220,17 @@ mod tests {
             NORDIC_UART_SERVICE.uuid,
             Uuid::parse("6e400001-b5a3-f393-e0a9-e50e24dcca9e").unwrap()
         );
+    }
+
+    #[test]
+    fn a_uuid_lookup_names_the_characteristic_it_belongs_to() {
+        let uuid = Uuid::parse("6e400003-b5a3-f393-e0a9-e50e24dcca9e").unwrap();
+        let (service, chrc) = find_by_uuid(uuid).expect("NUS TX is in the table");
+        assert_eq!(service.id, "nordic-uart");
+        assert_eq!(chrc.id, "tx");
+        // A custom UUID belongs to no vendor here, and this table says so
+        // rather than guessing — the whole point of it being identity-only.
+        assert!(find_by_uuid(Uuid::parse("00000002-853f-4a00-8000-e58100000000").unwrap()).is_none());
     }
 
     #[test]
