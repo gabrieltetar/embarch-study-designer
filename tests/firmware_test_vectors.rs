@@ -135,6 +135,8 @@ fn dump_study_start_wire_bytes() {
         // dev-bench's decode of it cannot hide behind a value that happens to
         // match whatever the C side left in the struct. `Debug` is 4.
         dev_bench_log_level: embarch_study_designer::DevBenchLogLevel::Debug,
+        protocols: Default::default(),
+        protocols_crc: 0,
     };
     let mut buf = [0u8; 4096];
     let encoded = postcard::to_slice(&msg, &mut buf).unwrap();
@@ -220,6 +222,8 @@ fn dump_study_start_with_taps_wire_bytes() {
         // dev-bench's decode of it cannot hide behind a value that happens to
         // match whatever the C side left in the struct. `Debug` is 4.
         dev_bench_log_level: embarch_study_designer::DevBenchLogLevel::Debug,
+        protocols: Default::default(),
+        protocols_crc: 0,
     };
     let mut buf = [0u8; 4096];
     let encoded = postcard::to_slice(&msg, &mut buf).unwrap();
@@ -335,6 +339,8 @@ fn dump_study_start_with_security_wire_bytes() {
         // dev-bench's decode of it cannot hide behind a value that happens to
         // match whatever the C side left in the struct. `Debug` is 4.
         dev_bench_log_level: embarch_study_designer::DevBenchLogLevel::Debug,
+        protocols: Default::default(),
+        protocols_crc: 0,
     };
     let mut buf = [0u8; 4096];
     let encoded = postcard::to_slice(&msg, &mut buf).unwrap();
@@ -461,11 +467,147 @@ fn dump_study_start_with_selective_monitor_wire_bytes() {
         streams,
         streams_crc: streams_crc_value,
         dev_bench_log_level: embarch_study_designer::DevBenchLogLevel::Debug,
+        protocols: Default::default(),
+        protocols_crc: 0,
     };
     let mut buf = [0u8; 4096];
     let encoded = postcard::to_slice(&msg, &mut buf).unwrap();
     println!("steps_crc = {crc:#010x}");
     println!("streams_crc = {streams_crc_value:#010x}");
+    println!("len = {}", encoded.len());
+    let hex: std::vec::Vec<std::string::String> =
+        encoded.iter().map(|b| std::format!("0x{b:02x}")).collect();
+    println!("{}", hex.join(", "));
+}
+
+/// Dumps a `StudyStart` carrying an `.eap` protocol manifest and an
+/// `Action::RunProtocol` step — schema v15's two appended `StudyStart`
+/// fields (`protocols`, `protocols_crc`), the new action tag, and the
+/// **third seal** dev-bench checks independently of the other two
+/// (design.md §3 decision 58, §4.9).
+///
+/// **The protocol is the real worked one**, resolved out of
+/// `tests/fixtures/bds_batch_download.eap` rather than hand-built here, and
+/// that is the point: a C decoder pinned against a purpose-shrunk protocol
+/// would prove it can walk a shape nobody authors. This one carries three
+/// sources, a `select_if` frame *and* an unguarded one, a span, two session
+/// variables, both write forms, a `remember` over `len(...)`, a guarded
+/// `goto`, a self-transitioning `otherwise`, a `retry` timeout, a
+/// zero-retry stall watchdog, and both terminal outcomes — every branch the
+/// hand-written C walker has.
+///
+/// Gated on `eap-parse` because resolving a manifest is a host-side,
+/// `std`-only step (§4.9): the *bytes* it produces are what crosses the
+/// wire, and the crate that produces them is the definition.
+///
+/// Run with: cargo test --features eap-parse --test firmware_test_vectors -- --nocapture dump_study_start_with_protocol
+#[test]
+#[cfg(feature = "eap-parse")]
+fn dump_study_start_with_protocol_wire_bytes() {
+    use embarch_study_designer::eap_parse::{parse, resolve};
+    use embarch_study_designer::protocol::DevBenchMessage;
+    use embarch_study_designer::protocols_crc;
+
+    let src = include_str!("fixtures/bds_batch_download.eap");
+    let file = parse(src).expect("the worked BDS protocol parses");
+    let resolved = resolve(&file.protocols[0]).expect("the worked BDS protocol resolves");
+
+    let mut protocols = embarch_study_designer::bounded::Bounded::<
+        embarch_study_designer::eap::ProtocolDef,
+        { embarch_study_designer::limits::MAX_PROTOCOLS_PER_STUDY },
+    >::new();
+    protocols.push(resolved.def).unwrap();
+
+    // `entry_state` is deliberately **not** 0: a C decoder that read the
+    // protocol index twice, or dropped this byte, would still produce a
+    // runnable-looking step if both were zero.
+    let entry = protocols[0]
+        .states
+        .iter()
+        .position(|s| s.name.as_str() == "start")
+        .expect("the worked protocol has a `start` state") as u8;
+    assert_eq!(entry, 0, "the fixture declares `start` first; the vector's own note assumes it");
+
+    let mut steps = embarch_study_designer::bounded::StepList::new();
+    steps
+        .push(Step {
+            name: heapless::String::try_from("download").unwrap(),
+            action: Action::RunProtocol { protocol: 0, entry_state: entry },
+            timeout_ms: 30_000,
+            continue_on_fail: false,
+            delay_before_ms: 0,
+        })
+        .unwrap();
+
+    let crc = steps_crc(&steps).unwrap();
+    let streams: Vec<embarch_study_designer::StreamTap, MAX_STREAMS_PER_STUDY> = Vec::new();
+    let streams_crc_value = streams_crc(&streams).unwrap();
+    let protocols_crc_value = protocols_crc(&protocols).unwrap();
+    let msg = DevBenchMessage::StudyStart {
+        steps,
+        steps_crc: crc,
+        streams,
+        streams_crc: streams_crc_value,
+        dev_bench_log_level: embarch_study_designer::DevBenchLogLevel::Debug,
+        protocols,
+        protocols_crc: protocols_crc_value,
+    };
+    let mut buf = [0u8; 8192];
+    let encoded = postcard::to_slice(&msg, &mut buf).unwrap();
+    println!("steps_crc = {crc:#010x}");
+    println!("streams_crc = {streams_crc_value:#010x}");
+    println!("protocols_crc = {protocols_crc_value:#010x}");
+    println!("len = {}", encoded.len());
+    let hex: std::vec::Vec<std::string::String> =
+        encoded.iter().map(|b| std::format!("0x{b:02x}")).collect();
+    println!("{}", hex.join(", "));
+}
+
+/// Dumps a `StepResult` carrying a `ProtocolOutcome` — schema v15's trailing
+/// `StepResult.protocol` field (design.md §3 decision 62), populated.
+///
+/// The all-`None` vector above already pins the one appended `0x00` byte a
+/// non-`RunProtocol` step writes, which is every step this firmware has ever
+/// produced. This one is the other half, and it is the one that catches an
+/// encoder writing the Option byte and nothing after it: a `final_state`
+/// string, then an `Outcome` that is deliberately `Fail` **with a reason**,
+/// so its own length prefix and bytes are on the wire too.
+///
+/// `Fail` rather than `Pass` on purpose. A protocol that reached its declared
+/// `failed` state is exactly the case where the step's outcome and the
+/// protocol's have to be read as two separate facts, and a vector where both
+/// were `Pass` would encode the same bytes whichever field an encoder filled
+/// in.
+///
+/// Run with: cargo test --test firmware_test_vectors -- --nocapture dump_step_result_with_protocol
+#[test]
+fn dump_step_result_with_protocol_wire_bytes() {
+    use embarch_study_designer::protocol::DevBenchMessage;
+    use embarch_study_designer::result::ProtocolOutcome;
+    use embarch_study_designer::{Outcome, StepResult};
+
+    let msg = DevBenchMessage::StepResult {
+        step_index: 1,
+        result: StepResult {
+            step_name: heapless::String::try_from("download").unwrap(),
+            // The *step's* outcome, which a `continue_on_fail` study would
+            // read on its own terms — deliberately not equal to the
+            // protocol's, so a decoder that filled one from the other fails.
+            outcome: Outcome::TimedOut,
+            captured_data: None,
+            gatt_services: None,
+            security_level: None,
+            protocol: Some(ProtocolOutcome {
+                final_state: heapless::String::try_from("aborting").unwrap(),
+                outcome: Outcome::Fail {
+                    reason: heapless::String::try_from("protocol reached terminal state aborting")
+                        .unwrap(),
+                },
+            }),
+        },
+    };
+    let mut buf = [0u8; 1024];
+    let encoded = postcard::to_slice(&msg, &mut buf).unwrap();
     println!("len = {}", encoded.len());
     let hex: std::vec::Vec<std::string::String> =
         encoded.iter().map(|b| std::format!("0x{b:02x}")).collect();

@@ -249,6 +249,8 @@ mod tests {
             streams: study.streams.clone(),
             streams_crc: study.streams_crc,
             dev_bench_log_level: study.dev_bench_log_level,
+            protocols: study.protocols.clone(),
+            protocols_crc: study.protocols_crc,
         });
         assert_round_trips(&DevBenchMessage::StepResult {
             step_index: 0,
@@ -290,6 +292,8 @@ mod tests {
                 streams: study.streams.clone(),
                 streams_crc: study.streams_crc,
                 dev_bench_log_level: study.dev_bench_log_level,
+                protocols: study.protocols.clone(),
+                protocols_crc: study.protocols_crc,
             };
             postcard::to_slice(&msg, into).unwrap().len()
         }

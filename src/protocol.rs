@@ -10,8 +10,8 @@ use heapless::{String, Vec};
 use serde::{Deserialize, Serialize};
 
 use crate::limits::{
-    MAX_FIRMWARE_VERSION_LEN, MAX_HARDWARE_ID_LEN, MAX_LOG_LINE_LEN, MAX_STREAMS_PER_STUDY,
-    MAX_STREAM_RECORDS_PER_BATCH,
+    MAX_FIRMWARE_VERSION_LEN, MAX_HARDWARE_ID_LEN, MAX_LOG_LINE_LEN, MAX_PROTOCOLS_PER_STUDY,
+    MAX_STREAMS_PER_STUDY, MAX_STREAM_RECORDS_PER_BATCH,
 };
 use crate::result::StepResult;
 use crate::streams::{StreamRecord, StreamTap};
@@ -140,6 +140,34 @@ pub enum DevBenchMessage {
         /// (§4.8), and "how verbose is the bench" is a property of the run,
         /// not of one capture channel.
         dev_bench_log_level: crate::study::DevBenchLogLevel,
+        /// The `.eap` protocol manifests this study resolved at build time
+        /// (design.md §3 decision 58, §4.9), and the third seal over them.
+        ///
+        /// **This is the field that makes decision 60 real.** Decision 60
+        /// put the interpreter on dev-bench rather than in Core, and the
+        /// whole cost it accepted was that a manifest crosses this hop —
+        /// what a payload *means* now reaches the bench, which is knowledge
+        /// decision 39 took away from it. Until this field existed the
+        /// manifest stopped at `Study.protocols`, so an
+        /// [`Action::RunProtocol`](crate::study::Action::RunProtocol) step
+        /// named an index into something dev-bench had never been sent.
+        ///
+        /// **Appended after `dev_bench_log_level`, not inserted beside
+        /// `streams_crc`.** postcard is positional, and this file's rule is
+        /// that a new field goes on the end so the wire diff a human checks
+        /// is a suffix. The structural rule decision 39's amendment set —
+        /// each seal immediately follows the one contiguous span it covers —
+        /// is satisfied by `protocols_crc` sitting right after `protocols`,
+        /// which is a property of this pair, not of where the pair sits.
+        ///
+        /// `Study.decoders` still does **not** cross this hop and never
+        /// will: a layout decides how the host renders a byte that was
+        /// already captured, and dev-bench renders nothing (§3 decision 52).
+        protocols: crate::bounded::Bounded<crate::eap::ProtocolDef, MAX_PROTOCOLS_PER_STUDY>,
+        /// CRC-32 over `protocols` — [`crate::crc::protocols_crc`], checked
+        /// on arrival independently of the other two exactly as they are of
+        /// each other, so a mismatch names which of the three is corrupt.
+        protocols_crc: u32,
     },
     /// Sent by dev-bench as each step completes, streaming results back
     /// incrementally rather than batched at the end (design.md §3 decision
