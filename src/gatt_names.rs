@@ -77,6 +77,12 @@ pub struct GattName {
 #[derive(Debug, Clone, Default)]
 pub struct GattNameBook {
     symbols: HashMap<Uuid, String>,
+    /// Kept apart from `symbols` rather than merged into it: naming a
+    /// service resolves against a different half of [`crate::vendor`]'s
+    /// table ([`crate::vendor::find_service_by_uuid`], not
+    /// [`crate::vendor::find_by_uuid`]), so one map would have to guess
+    /// which lookup a UUID wanted (§3 decision 57).
+    service_symbols: HashMap<Uuid, String>,
 }
 
 impl GattNameBook {
@@ -101,6 +107,38 @@ impl GattNameBook {
             self.symbols.entry(uuid).or_insert(identifier);
         }
         self
+    }
+
+    /// Adds the service identifiers an extraction recovered
+    /// ([`crate::gatt_extract::ExtractedGatt::service_symbols`]).
+    ///
+    /// Same first-writer-wins rule as [`Self::with_symbols`].
+    pub fn with_service_symbols(
+        mut self,
+        symbols: impl IntoIterator<Item = (Uuid, String)>,
+    ) -> GattNameBook {
+        for (uuid, identifier) in symbols {
+            self.service_symbols.entry(uuid).or_insert(identifier);
+        }
+        self
+    }
+
+    /// This *service*'s name, or `None` — the group-header counterpart to
+    /// [`Self::get`] (§3 decision 57). Same two sources, same precedence:
+    /// a vendor-published service name beats one repo's spelling of it.
+    pub fn service(&self, service_uuid: Uuid) -> Option<GattName> {
+        if let Some(service) = crate::vendor::find_service_by_uuid(service_uuid) {
+            return Some(GattName {
+                label: service.name.to_string(),
+                source: GattNameSource::Vendor,
+                origin: service.name.to_string(),
+            });
+        }
+        self.service_symbols.get(&service_uuid).map(|identifier| GattName {
+            label: label_from_service_symbol(identifier),
+            source: GattNameSource::FirmwareSymbol,
+            origin: identifier.clone(),
+        })
     }
 
     /// This characteristic's name, or `None` when neither source knows one —
@@ -149,6 +187,22 @@ pub fn label_from_symbol(identifier: &str) -> String {
         }
     }
     trimmed.to_string()
+}
+
+/// Trims the suffix a service's C identifier carries because it names a
+/// *variable*: `sds_service_uuid` -> `sds_service`, `bds_service_uuid` ->
+/// `bds_service`.
+///
+/// Same deliberately-minimal rule as [`label_from_symbol`], with `_service`
+/// deliberately **kept**: a group header reading `sds_service` says what it
+/// is, and stripping it to `sds` would be this crate deciding that `sds`
+/// means something on its own.
+pub fn label_from_service_symbol(identifier: &str) -> String {
+    let trimmed = identifier.trim();
+    match trimmed.strip_suffix("_uuid") {
+        Some(stem) if !stem.is_empty() => stem.to_string(),
+        _ => trimmed.to_string(),
+    }
 }
 
 #[cfg(test)]
@@ -211,6 +265,44 @@ mod tests {
     #[test]
     fn an_unknown_characteristic_has_no_name_rather_than_a_made_up_one() {
         assert!(GattNameBook::new().get(uuid("0000dead-0000-1000-8000-00805f9b34fb")).is_none());
+    }
+
+    /// §3 decision 57: a service gets a name the same way a characteristic
+    /// does, from the identifier `parse_gatt_services` already had in hand.
+    #[test]
+    fn a_service_is_named_from_its_declaring_identifier() {
+        let svc = uuid("00000020-853f-4a00-8000-e58100000000");
+        let book = GattNameBook::new()
+            .with_service_symbols([(svc, "bds_service_uuid".to_string())]);
+        let name = book.service(svc).unwrap();
+        // `_service` survives the trim — `bds` alone would be this crate
+        // deciding what the abbreviation stands for.
+        assert_eq!(name.label, "bds_service");
+        assert_eq!(name.source, GattNameSource::FirmwareSymbol);
+        assert_eq!(name.origin, "bds_service_uuid");
+    }
+
+    /// A vendor-published service beats one repo's spelling of it, exactly
+    /// as it does one level down.
+    #[test]
+    fn vendor_wins_for_a_service_too() {
+        let nus = uuid("6e400001-b5a3-f393-e0a9-e50e24dcca9e");
+        let book = GattNameBook::new()
+            .with_service_symbols([(nus, "local_nus_alias_uuid".to_string())]);
+        let name = book.service(nus).unwrap();
+        assert_eq!(name.source, GattNameSource::Vendor);
+        assert_eq!(name.label, crate::vendor::find_service_by_uuid(nus).unwrap().name);
+    }
+
+    /// Service and characteristic names live in separate maps: a
+    /// characteristic symbol must not turn up as a service name, or a
+    /// grouped picker would invent a group.
+    #[test]
+    fn a_characteristic_symbol_does_not_name_a_service() {
+        let u = uuid("00000021-853f-4a00-8000-e58100000000");
+        let book = GattNameBook::new().with_symbols([(u, "bds_data_char_uuid".to_string())]);
+        assert!(book.get(u).is_some());
+        assert!(book.service(u).is_none());
     }
 
     #[test]
