@@ -600,7 +600,11 @@ mod render {
                 String::new()
             };
             let name = manifest.map(|m| m.label(kind, self.a)).unwrap_or_default();
-            let rx = rx_utc_ms.map(|v| v.to_string()).unwrap_or_default();
+            // `format!` rather than `to_string()`: this module is compiled
+            // under `alloc` without `std`, where `ToString` is not in the
+            // prelude. Core builds with `std` and so never saw it; embarch-api
+            // did, immediately.
+            let rx = rx_utc_ms.map(|v| format!("{v}")).unwrap_or_default();
             format!(
                 "{frame_index},{frame_seq},{rx},{absolute},{us},{kind_name},{},{},{name}",
                 self.a, self.b
