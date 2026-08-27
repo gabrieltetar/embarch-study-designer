@@ -189,6 +189,16 @@ pub fn find_by_uuid(
     })
 }
 
+/// The **service** a UUID names, or `None` (§3 decision 57).
+///
+/// The service-level counterpart to [`find_by_uuid`], added when service
+/// identifiers stopped being thrown away: a picker that groups
+/// characteristics by service needs a name for the group header, and the
+/// same "vendor wins over one repo's spelling" rule applies one level up.
+pub fn find_service_by_uuid(service_uuid: Uuid) -> Option<&'static VendorService> {
+    ALL.iter().find(|service| service.uuid == service_uuid)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
