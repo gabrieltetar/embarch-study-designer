@@ -124,3 +124,90 @@ pub const MAX_STRUCT_CSV_ROW_LEN: usize = 640;
 /// payload, where a `Sample` row carries one `f32`; the two file formats are
 /// deliberately not sized against the same constant.
 pub const MAX_GATT_CSV_ROW_LEN: usize = 1792;
+
+// --- `.eap` protocol manifests (design.md §3 decisions 58-62) ------------
+//
+// **These bound a value dev-bench executes, not one it walks past.** A
+// `ProtocolDef` is the compiled, guard-reachable half of an `.eap` manifest
+// (§3 decision 59's split) and rides in `Study.protocols` all the way to the
+// firmware, so every constant below costs real ESP32-C5 SRAM in
+// `struct dev_bench_message`'s union. They are sized against the two worked
+// protocols in §4.9 with headroom, deliberately *not* against the generous
+// ceilings the host-side constants use — and dev-bench remains free to cap
+// tighter still with its own internal limit, exactly as
+// `DBM_MAX_STEPS_PER_STUDY` already does at 16 against
+// [`MAX_STEPS_PER_STUDY`]'s 64 (`embarch-dev-bench/design.md` §3 decision 27).
+//
+// **The SRAM cost has not been measured.** These are placeholder-but-concrete
+// in the same posture as every other constant here; the real number comes
+// from a `west build` ram_report, which is `embarch-dev-bench`'s own scope
+// along with the interpreter itself.
+
+/// `Study.protocols` (design.md §3 decision 58) — `.eap` protocol blocks
+/// resolved into one study at build time. A protocol is only reachable
+/// through an [`crate::study::Action::RunProtocol`] step, and a study
+/// running more than a couple of distinct handshakes is describing two
+/// studies.
+pub const MAX_PROTOCOLS_PER_STUDY: usize = 2;
+/// `ProtocolDef.name` — the `protocol <name> { … }` identifier, which is
+/// also how a `.eap` file's blocks are told apart.
+pub const MAX_PROTOCOL_NAME_LEN: usize = 32;
+/// `ProtocolDef.sources` (design.md §3 decision 58) — characteristic
+/// aliases one protocol block declares for itself. Sized against the real
+/// BDS download's three (`ctrl`/`status`/`data`, `embarch-study-designer/design.md`
+/// §3 decision 57) with room for a protocol spanning two services.
+pub const MAX_SOURCES_PER_PROTOCOL: usize = 6;
+/// `ProtocolSource.name` — the alias a `write`/`frame` refers to.
+pub const MAX_SOURCE_NAME_LEN: usize = 24;
+/// `ProtocolDef.frames` — declared frame shapes one protocol can dispatch
+/// on. Only frames a state machine actually reacts to live here; a frame
+/// that exists solely to render a capture is a decision-52 `StructLayout`
+/// and never reaches dev-bench.
+pub const MAX_FRAMES_PER_PROTOCOL: usize = 8;
+/// `FrameDef.name` — referenced by `on_event <frame>` and by field paths.
+pub const MAX_FRAME_NAME_LEN: usize = 32;
+/// `FrameDef.fields` — the **guard-reachable** scalar reads of one frame
+/// (design.md §3 decision 59). Not every field of the real packet: only the
+/// ones a `when`, a `remember` or a `write` names. A GWF1 batch record has
+/// thirty channel descriptors and none of them is reachable from a guard.
+pub const MAX_FRAME_FIELDS: usize = 8;
+/// `FrameDef.spans` — declared byte spans of one frame. A span's *bytes*
+/// never reach an expression (design.md §3 decision 60 removed byte-span
+/// concatenation outright); only its `len()` does, which is what a
+/// flow-controlled pump loop actually counts.
+pub const MAX_FRAME_SPANS: usize = 4;
+/// `ScalarRead.name` / `SpanRead.name` — a field's identifier within its
+/// frame. Shares [`MAX_STRUCT_FIELD_NAME_LEN`]'s size on purpose: the same
+/// `.eap` frame can also be lowered into a decision-52 `StructLayout`, and
+/// a name that fit one and not the other would be a silent authoring trap.
+pub const MAX_EAP_FIELD_NAME_LEN: usize = MAX_STRUCT_FIELD_NAME_LEN;
+/// `FrameMatch.eq` (design.md §3 decision 59's `select_if`) — the literal
+/// byte run a frame is selected by. Sized for a four-byte format magic
+/// (`GWF1`, `BSS\x03`) with headroom.
+pub const MAX_SELECT_MATCH_LEN: usize = 8;
+/// `ProtocolDef.session` — named integer variables one protocol run carries
+/// (design.md §3 decision 60). Integers only: the `bytes` session variable
+/// the draft carried is gone with `++`.
+pub const MAX_SESSION_VARS: usize = 6;
+/// `SessionVarDef.name` — referenced as `session.<name>`.
+pub const MAX_SESSION_VAR_NAME_LEN: usize = 24;
+/// `ProtocolDef.states` — named states in one protocol's machine, terminal
+/// states included. The real BDS download uses six.
+pub const MAX_STATES_PER_PROTOCOL: usize = 12;
+/// `StateDef.name`, and `ProtocolOutcome.final_state` (design.md §3
+/// decision 62) — the one string a protocol run reports back.
+pub const MAX_STATE_NAME_LEN: usize = 24;
+/// `ActiveState.on_event` — distinct frames one state reacts to.
+pub const MAX_EVENT_ARMS_PER_STATE: usize = 4;
+/// `EventArm.when` — guarded transitions in one arm, first match winning.
+/// More than one so an author can express a small dispatch without
+/// inventing intermediate states; small enough that a real branch stays
+/// legible.
+pub const MAX_GUARDS_PER_ARM: usize = 2;
+/// `EventArm.remember` — session-variable updates one arm performs before
+/// its guards are evaluated.
+pub const MAX_REMEMBER_PER_ARM: usize = 2;
+/// `WriteAction.fields` — typed fields one `on_enter` write assembles
+/// (design.md §3 decision 61). A control-point write is a one-byte opcode
+/// and occasionally an argument; this is sized for the argument.
+pub const MAX_WRITE_FIELDS: usize = 6;

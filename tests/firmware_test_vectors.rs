@@ -253,6 +253,7 @@ fn dump_step_result_wire_bytes() {
             outcome: Outcome::Pass,
             captured_data: Some(heapless::Vec::from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]).unwrap()),
             gatt_services: None,
+            protocol: None,
             security_level: None,
         },
     };
@@ -363,6 +364,7 @@ fn dump_step_result_with_security_wire_bytes() {
             outcome: Outcome::Pass,
             captured_data: None,
             gatt_services: None,
+            protocol: None,
             security_level: Some(BleSecurityLevel::L4),
         },
     };

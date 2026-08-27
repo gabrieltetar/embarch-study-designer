@@ -1,0 +1,88 @@
+# A GWF1-shaped self-describing batch record: a fixed header, a full
+# compile-time-capacity channel descriptor table, a runtime-counted list of
+# delta+zigzag+bit-packed sample chunks, and a trailing CRC-32.
+#
+# Chosen because every awkward case this grammar has to survive is in it:
+# magic-byte format dispatch with no version handshake, a descriptor table
+# decoded first that parametrizes how later bytes are read, and the
+# variable-bit-packed columns that turn out to be the actual compression
+# primitive under every batch format this was checked against.
+#
+# Only the header scalars are guard-reachable. Everything below `repeat` is
+# render-only (design.md §3 decision 59's split) and never reaches dev-bench.
+
+protocol gwf1_capture {
+    source batch_data = characteristic(service: "00000010-1234-5678-9abc-def012345678", char: "0011")
+    source ctrl       = characteristic(service: "00000010-1234-5678-9abc-def012345678", char: "0012")
+
+    frame gwf1_batch on batch_data
+        select_if { offset: 0, len: 4, eq: magic("GWF1") }
+    {
+        u32be magic
+        u64be uptime_ms
+        u8    n_channels
+        u16be n_samples
+        u8    n_chunks
+
+        # Always the full compile-time capacity: the flash erase happens
+        # before the geometry is known, so the table is fixed-size even when
+        # fewer channels are live.
+        repeat channel[30]: channel_desc
+
+        struct channel_desc {
+            u8    channel_class
+            u8    channel_id
+            u32be period_us
+            u8    field_size
+            i32be first signed
+            u8    label
+        }
+
+        repeat chunk[count_from: n_chunks]: sample_chunk
+
+        struct sample_chunk {
+            u8    bps
+            u16be n_samples
+            u16be packed_bytes
+            bitpack samples[count_from: n_samples]
+                width_from: bps  delta  zigzag  seed: channel_desc.first
+        }
+
+        # A bad record is dropped and the blob walk continues -- this DUT's
+        # own behavior, declared per frame rather than assumed by the
+        # interpreter.
+        crc32 ieee policy: skip
+    }
+
+    # A flat sibling on the same source, proving the second half of §3
+    # decision 62: a frame this shape lowers into decision 52's own
+    # `StructLayout` and renders through the mechanism that already shipped.
+    frame ppg_batch on batch_data
+        select_if { offset: 0, len: 4, eq: magic("PPG1") }
+    {
+        u32be magic
+        u16be seq
+        repeat sample[8]: ppg_sample
+
+        struct ppg_sample {
+            i16le green
+            i16le red
+        }
+    }
+
+    state capturing {
+        on_enter: write ctrl { u8: 0x01, u32be: session.epoch } with_response
+        on_event gwf1_batch:
+            remember seen = seen + 1
+            when seen >= 1: goto done
+        on_timeout 5000ms retry 0: goto failed
+    }
+
+    session {
+        var seen:  u32 = 0
+        var epoch: u32 = 0
+    }
+
+    state done   outcome: pass
+    state failed outcome: fail
+}

@@ -93,6 +93,14 @@ gatt-extract = ["std", "dep:regex", "dep:serde_json", "dep:ignore"]
 # rather than through a binary of its own -- `axum`/`tokio` dropped from
 # this feature since nothing under it needs a web server anymore.
 study-ui = ["std", "dep:toml"]
+# The `.eap` protocol-manifest parser and host-side reference interpreter
+# (design.md §3 decisions 58-62). `std`-only authoring-time tooling, exactly
+# like `gatt-extract`: an `.eap` file is read off the firmware repo's disk and
+# resolved into a `Study` at build time, and nothing here runs on the DUT or
+# on the dev-bench MCU. The wire types it produces (`crate::eap`) are `no_std`
+# and are NOT behind this feature -- dev-bench carries those and executes
+# them, and carries no parser at all.
+eap-parse = ["std"]
 
 # design.md §3 decision 23: this crate is the build root when cross-compiled as
 # dev-bench firmware's FFI staticlib, so this profile setting is what actually

@@ -32,9 +32,20 @@ extern crate alloc;
 
 pub mod crc;
 pub mod decoder;
+/// `.eap` protocol manifests, in the form dev-bench executes (§3 decisions
+/// 58-62). `no_std` like every other wire type — the *parser* that produces
+/// one is not (see [`eap_parse`]).
+pub mod eap;
 #[cfg(feature = "ffi")]
 pub mod ffi;
 pub mod gatt;
+/// The `.eap` text parser and host-side reference interpreter (§3
+/// decisions 58-62) — `std`-only authoring-time tooling, the same posture
+/// as [`gatt_extract`], so dev-bench firmware never carries it.
+#[cfg(feature = "eap-parse")]
+pub mod eap_interp;
+#[cfg(feature = "eap-parse")]
+pub mod eap_parse;
 #[cfg(feature = "gatt-extract")]
 pub mod gatt_extract;
 /// Characteristic display names (§3 decision 56) — `std`-only, so a
@@ -59,7 +70,16 @@ pub mod study;
 pub mod study_builder;
 pub mod vendor;
 
-pub use crc::{steps_crc, streams_crc, StepTooLargeError, StreamTapTooLargeError};
+pub use crc::{
+    protocols_crc, steps_crc, streams_crc, ProtocolTooLargeError, StepTooLargeError,
+    StreamTapTooLargeError,
+};
+pub use eap::{
+    validate_protocol, ActiveState, CompareOp, Condition, EventArm, Expr, FrameDef, FrameMatch,
+    GuardedGoto, Operand, ProtocolDef, ProtocolError, ProtocolSource, Remember, ScalarRead,
+    SessionVarDef, SpanRead, StateDef, StateKind, TerminalOutcome, TimeoutArm, WriteAction,
+    WriteField,
+};
 pub use decoder::{DecodeError, ScalarType, StructField, StructLayout};
 pub use gatt::{
     GattCharacteristicInfo, GattDirection, GattEventKind, GattServiceInfo, GattTarget,
@@ -84,7 +104,8 @@ pub use registry::{
     RegistryError, StructRegistry,
 };
 pub use result::{
-    Outcome, Provenance, StepResult, StudyResult, VersionOverride, VersionSource, VersionSubject,
+    Outcome, ProtocolOutcome, Provenance, StepResult, StudyResult, VersionOverride, VersionSource,
+    VersionSubject,
 };
 pub use sample::{Sample, Unit};
 pub use schema_version::{DEV_BENCH_WIRE_SCHEMA_VERSION, HOST_TYPE_SCHEMA_VERSION};
@@ -135,6 +156,8 @@ mod tests {
         let streams_crc = crc::streams_crc(&streams).unwrap();
 
         Study {
+            protocols: Default::default(),
+            protocols_crc: 0,
 
             decoders: Default::default(),
             name: heapless::String::try_from("smoke-test").unwrap(),
@@ -230,6 +253,7 @@ mod tests {
         assert_round_trips(&DevBenchMessage::StepResult {
             step_index: 0,
             result: StepResult {
+                protocol: None,
                 step_name: heapless::String::try_from("connect").unwrap(),
                 outcome: Outcome::Pass,
                 captured_data: None,
@@ -532,6 +556,7 @@ mod tests {
     #[test]
     fn step_result_gatt_fields_round_trip_and_default_on_missing_json() {
         let result = StepResult {
+            protocol: None,
             step_name: heapless::String::try_from("discover").unwrap(),
             outcome: Outcome::Pass,
             captured_data: None,
@@ -706,9 +731,15 @@ mod tests {
         0xde, 0xad, 0xbe, 0xef,
         0x00, // gatt_services: None
         0x00, // security_level: None (schema v12, decision 50)
+        0x00, // protocol: None (schema v15, decision 62)
         // Nothing between `captured_data` and `gatt_services`: the two
         // retired refs are gone from the type and must be gone from the
         // wire.
+        //
+        // The v15 byte is the last one for a reason (`StepResult.protocol`'s
+        // own note): appending made this a one-byte diff a human can check,
+        // where inserting mid-struct would have shifted every byte after it
+        // and given dev-bench's C decoder a whole message to re-walk.
     ];
 
     /// `HelloAck { schema_version: 10, compatible: true, firmware_version:
@@ -795,6 +826,7 @@ mod tests {
             &DevBenchMessage::StepResult {
                 step_index: 1,
                 result: StepResult {
+                    protocol: None,
                     step_name: heapless::String::try_from("advertise").unwrap(),
                     outcome: Outcome::Pass,
                     captured_data: Some(captured),

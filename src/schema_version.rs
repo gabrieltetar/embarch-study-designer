@@ -210,7 +210,7 @@
 ///   that makes this unambiguously a wire bump rather than a host-only one —
 ///   a removal in the middle of a hand-encoded struct is exactly the drift
 ///   this handshake exists to refuse.
-pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 14;
+pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 15;
 
 /// Served by `embarch-core`'s `GET /status` and compared by `embarch-api`
 /// against its own compiled-in copy before submitting a `Study` (design.md
@@ -288,7 +288,7 @@ pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 14;
 ///   `Study.decoders` those taps resolve against (design.md §3 decision 52),
 ///   which crosses `embarch-api` -> `embarch-core` as JSON and reaches
 ///   dev-bench never. Follows by the superset rule either way.
-pub const HOST_TYPE_SCHEMA_VERSION: u32 = 16;
+pub const HOST_TYPE_SCHEMA_VERSION: u32 = 17;
 
 /// [`HOST_TYPE_SCHEMA_VERSION`]'s triggers are a strict superset of
 /// [`DEV_BENCH_WIRE_SCHEMA_VERSION`]'s (design.md §3 decision 12's
