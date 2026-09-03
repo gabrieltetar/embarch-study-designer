@@ -354,6 +354,34 @@ mod tests {
         );
     }
 
+    /// The other half of the guard above, and decision 63's: the inline shape
+    /// is allowed to be big, but not without a ceiling.
+    ///
+    /// `cargo test` builds this crate with default features, so the test
+    /// harness runs against the allocator-free shape — and a debug-profile
+    /// test that builds a handful of `DevBenchMessage`s copies each one
+    /// tens of times. At [measured 2026-09-02] 75,288 bytes that needed
+    /// between 3 and 4 MiB of thread stack against libtest's 2 MiB default,
+    /// which is why `.cargo/config.toml` raises `RUST_MIN_STACK` to 64 MiB.
+    ///
+    /// The ceiling exists because the failure mode is the problem: growing
+    /// this type past what the harness stack covers aborts the whole test
+    /// binary with a SIGABRT part-way through an unrelated test, not with a
+    /// named failure. This turns that into one. The number is ~3.5x today's
+    /// size — real growth room, and still far inside the 16x headroom the
+    /// 64 MiB setting has over the 4 MiB actually measured. If it trips,
+    /// raise the stack *and* this ceiling together, deliberately.
+    #[cfg(not(feature = "alloc"))]
+    #[test]
+    fn the_no_std_wire_types_stay_inside_the_configured_harness_stack() {
+        let msg = core::mem::size_of::<crate::protocol::DevBenchMessage>();
+        assert!(
+            msg <= 262_144,
+            "DevBenchMessage is {msg} bytes without `alloc`; see \
+             .cargo/config.toml and decision 63 before raising this"
+        );
+    }
+
     /// A `Bounded` and the `heapless::Vec` it replaces must be
     /// indistinguishable on the wire — the whole basis for decisions 46/49
     /// needing no schema bump. Asserted for a non-`Step` element type too,
