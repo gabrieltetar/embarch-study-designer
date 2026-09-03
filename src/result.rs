@@ -177,8 +177,10 @@ pub struct StepResult {
     #[serde(default)]
     pub gatt_services: Option<crate::bounded::Bounded<GattServiceInfo, MAX_DISCOVERED_SERVICES>>,
     // `gatt_activity` was here and is **retired** by design.md §3 decision
-    // 54. It held at most `MAX_GATT_ACTIVITY_RECORDS` (32) captured
-    // notifications per step, inline in `events.json` — a bounded, in-memory
+    // 54. It held at most 32 captured notifications per step — its bound,
+    // `MAX_GATT_ACTIVITY_RECORDS`, was retired with it and survives only as a
+    // tombstone in `interfaces/limits.md` — inline in `events.json`: a
+    // bounded, in-memory
     // copy of something unbounded and streamed. The tap pipeline (§4.8)
     // already writes every record incrementally to a file, so the capped
     // copy's only remaining effect was to let a study *look* complete while

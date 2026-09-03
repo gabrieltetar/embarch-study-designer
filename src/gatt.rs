@@ -48,8 +48,9 @@ pub struct GattTarget {
 
 // `GattActivityRecord` was here and is **retired** by design.md §3 decision
 // 54, along with `StepResult.gatt_activity`. It capped a step's captured
-// notifications at `MAX_GATT_ACTIVITY_RECORDS` (32) inline in `events.json`,
-// which is the wrong shape for the thing it was recording: a capture is
+// notifications at 32 — by a `MAX_GATT_ACTIVITY_RECORDS` that went with it,
+// and is now only a tombstone in `interfaces/limits.md` — inline in
+// `events.json`, which is the wrong shape for what it recorded: a capture is
 // unbounded and streamed, and the tap pipeline (§4.8) already writes exactly
 // that, incrementally, to a file. Keeping a second, capped, in-memory copy
 // meant a study could look like it had captured everything while holding 32
@@ -133,19 +134,18 @@ impl GattEventKind {
 /// One line of the exhaustive GATT transcript — design.md §3 decision 36,
 /// §4.3b.
 ///
-/// Deliberately *not* a second [`GattActivityRecord`]: that type exists to
-/// summarize a single `GattMonitorAll` step inline in `events.json`, is
-/// capped at [`crate::limits::MAX_GATT_ACTIVITY_RECORDS`] per step, and
-/// records inbound notifications only. This type is streamed one entry at a
-/// time over its own [`crate::protocol::DevBenchMessage`] variant, so it is
-/// bounded by nothing but the study's own duration, and it records what
-/// dev-bench *sent* as well as what it received. Both survive: the inline
-/// summary stays useful for a quick pass/fail read without opening a large
-/// capture file, exactly the reason `data.csv` is kept out of `events.json`
-/// (design.md §5.2).
+/// **The only record of GATT activity this crate carries.** It was once
+/// contrasted here with `GattActivityRecord`, a per-step summary capped at
+/// 32 inbound notifications inline in `events.json`; that type and its cap
+/// are **retired** by §3 decision 54, so the contrast is history and this
+/// type is not one of two. It is streamed one entry at a time over its own
+/// [`crate::protocol::DevBenchMessage`] variant, so it is bounded by nothing
+/// but the study's own duration, and it records what dev-bench *sent* as
+/// well as what it received — which is what made the bounded in-memory copy
+/// removable rather than merely redundant.
 ///
 /// UUIDs are carried in full rather than as a `characteristic_index` into a
-/// step's `gatt_services` (the compression `GattActivityRecord` uses),
+/// step's `gatt_services` (the compression the retired summary used),
 /// because a transcript spans steps — including steps that ran no discovery
 /// at all — so there is no single flattened table for an index to mean
 /// anything against.
