@@ -753,8 +753,13 @@ mod tests {
     #[cfg(feature = "alloc")]
     #[test]
     fn a_layout_2_stream_is_refused_rather_than_misread() {
+        // `String::from` rather than `.to_string()`: this test only compiles
+        // under `alloc` without `std` (see the `render` module above for the
+        // same rule) — `ToString` is not in the prelude there.
+        use alloc::string::String;
+
         let manifest = OutpostManifest {
-            build_id: "abc123".to_string(),
+            build_id: String::from("abc123"),
             record_layout_version: 2,
             ..Default::default()
         };
@@ -769,7 +774,7 @@ mod tests {
         // And the agreeing case still passes, so the refusal above is about
         // the version and not about the manifest being rejected wholesale.
         let ok = OutpostManifest {
-            build_id: "abc123".to_string(),
+            build_id: String::from("abc123"),
             record_layout_version: RECORD_LAYOUT_VERSION,
             ..Default::default()
         };
