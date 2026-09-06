@@ -44,6 +44,41 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # --- Decision 65: this crate does not release, and this is the guard ---
+      # embarch-umbrella decisions 27/29 leave "whichever gains a release
+      # workflow first inherits the obligation to copy verify-version" as an
+      # honour system. This step is that obligation mechanised: it passes while
+      # no release.yml exists (the state decision 65 argues for) and fails the
+      # moment one appears without a verify-version job that something gates on.
+      #
+      # Note what makes this legitimate where verify-version itself would not
+      # be. verify-version fires `on: push: tags:`, and this repo has never
+      # pushed a tag, so copying it here would be a step that cannot fail for
+      # the reason it was added — the same mistake the header rejects for the
+      # feature matrix. This step runs on every push and fails on the exact day
+      # it matters: the pull request that adds a release without the check.
+      #
+      # Two greps, not one: the job must be *defined*, and some job must
+      # `needs:` it. 27/29 verified its own `needs:` wiring only structurally,
+      # so an unwired verify-version is a real shape to guard against.
+      - name: "release.yml, if it ever exists, must carry verify-version (decision 65)"
+        run: |
+          f=.github/workflows/release.yml
+          if [ ! -f "$f" ]; then
+            echo "no $f — decision 65: this crate does not release"
+            exit 0
+          fi
+          if ! grep -qE '^[[:space:]]{2}verify-version:' "$f"; then
+            echo "::error::$f exists but defines no verify-version job (embarch-umbrella decisions 27/29; embarch-study-designer decision 65)"
+            exit 1
+          fi
+          if ! grep -qE 'needs:.*verify-version' "$f"; then
+            echo "::error::$f defines verify-version but no job needs: it, so it does not gate the build"
+            exit 1
+          fi
+          echo "$f carries a verify-version job and something gates on it"
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
