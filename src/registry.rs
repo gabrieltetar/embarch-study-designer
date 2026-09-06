@@ -113,6 +113,13 @@ pub enum RegistryError {
         expected: usize,
         actual: usize,
     },
+    /// Two `[[actions]]` entries share a name, so a row referencing it would
+    /// resolve to whichever happened to come first
+    /// (`study_builder.rs`'s `.find(|a| &a.name == name)`), silently
+    /// building the wrong payload. The [`ActionRegistry`] half of
+    /// [`RegistryError::DuplicateStructLayout`]: one hand-edit mistake, one
+    /// refusal, whichever of this module's two registries it lands in.
+    DuplicateRegisteredAction { name: String },
     /// A `study-structs.toml` field declares a scalar type this crate has no
     /// spelling for — named rather than defaulted to a plausible width
     /// (design.md §3 decision 52).
@@ -146,6 +153,11 @@ impl std::fmt::Display for RegistryError {
                 f,
                 "action '{action_name}' field '{field_name}' value '{value_label}': \
                  declared byte_len {expected}, but bytes has length {actual}"
+            ),
+            RegistryError::DuplicateRegisteredAction { name } => write!(
+                f,
+                "two actions are both named '{name}'; a row referencing it could resolve to \
+                 either"
             ),
             RegistryError::UnknownScalarType { layout_name, field_name, declared } => write!(
                 f,
@@ -206,10 +218,17 @@ impl ActionRegistry {
         fs::write(&path, raw).map_err(RegistryError::Io)
     }
 
-    /// Confirms every field's every value has exactly `byte_len` bytes.
-    /// Pure/offline — no I/O, callable independent of `load`/`save`.
+    /// Confirms no two actions share a name, and that every field's every
+    /// value has exactly `byte_len` bytes. Pure/offline — no I/O, callable
+    /// independent of `load`/`save`; called by both, so a file this refuses
+    /// can be neither read nor written.
     pub fn validate(&self) -> Result<(), RegistryError> {
-        for action in &self.actions {
+        for (index, action) in self.actions.iter().enumerate() {
+            if self.actions[..index].iter().any(|earlier| earlier.name == action.name) {
+                return Err(RegistryError::DuplicateRegisteredAction {
+                    name: action.name.clone(),
+                });
+            }
             for field in &action.fields {
                 for value in &field.values {
                     if value.bytes.len() != field.byte_len {
@@ -484,6 +503,88 @@ mod tests {
         let err = ActionRegistry::load(&dir).unwrap_err();
         assert!(matches!(err, RegistryError::FieldLengthMismatch { .. }));
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn two_actions_with_one_name_are_refused_on_load_and_on_save() {
+        // The sibling of `two_structs_with_one_name_are_refused`: the same
+        // hand-edit mistake, in the other registry this module holds.
+        // `study_builder.rs` resolves a row's action by the first `name`
+        // match, so the second of two is unreachable and the row builds a
+        // payload the author never chose.
+        let dir = std::env::temp_dir().join(std::format!(
+            "embarch-study-designer-registry-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+                + 3
+        ));
+        let mut registry = sample_registry();
+        let duplicate = registry.actions[0].clone();
+        registry.actions.push(duplicate);
+
+        match registry.validate() {
+            Err(RegistryError::DuplicateRegisteredAction { name }) => {
+                assert_eq!(name, "example_write");
+            }
+            other => panic!("expected DuplicateRegisteredAction, got {other:?}"),
+        }
+
+        // save() refuses too: a file that could be written and not read back
+        // is worse than one rejected on the way in.
+        assert!(matches!(
+            registry.save(&dir),
+            Err(RegistryError::DuplicateRegisteredAction { .. })
+        ));
+        assert!(!registry_path(&dir).exists());
+
+        // And a file hand-edited past that refusal fails to load, with the
+        // same named error rather than a silently-shadowed second action.
+        std::fs::create_dir_all(dir.join("embarch")).unwrap();
+        std::fs::write(registry_path(&dir), toml::to_string_pretty(&registry).unwrap()).unwrap();
+        assert!(matches!(
+            ActionRegistry::load(&dir),
+            Err(RegistryError::DuplicateRegisteredAction { .. })
+        ));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn one_action_per_name_still_loads() {
+        let dir = std::env::temp_dir().join(std::format!(
+            "embarch-study-designer-registry-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+                + 4
+        ));
+        let mut registry = sample_registry();
+        let mut second = registry.actions[0].clone();
+        second.name = "example_write_2".to_string();
+        registry.actions.push(second);
+        registry.save(&dir).unwrap();
+        assert_eq!(ActionRegistry::load(&dir).unwrap(), registry);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn the_two_duplicate_name_messages_are_the_same_shape() {
+        // The symmetry is the product here, not just the check: an engineer
+        // who has read one of these messages has read the other.
+        let action = RegistryError::DuplicateRegisteredAction { name: "t".to_string() };
+        let layout = RegistryError::DuplicateStructLayout { name: "t".to_string() };
+        assert_eq!(
+            action.to_string(),
+            "two actions are both named 't'; a row referencing it could resolve to either"
+        );
+        assert_eq!(
+            layout.to_string(),
+            "two structs are both named 't'; a tap referencing it could resolve to either"
+        );
     }
 }
 
