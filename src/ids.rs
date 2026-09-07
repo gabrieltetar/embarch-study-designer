@@ -13,13 +13,28 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Uuid(pub [u8; 16]);
 
-/// A BLE device address: 6 raw address bytes plus its public/random kind.
+/// A BLE device address: 6 raw address bytes in display order,
+/// most-significant first — `bytes[0]` holds the `C4` of
+/// `C4:82:E1:42:B1:26`, i.e. `[0xc4, 0x82, 0xe1, 0x42, 0xb1, 0x26]` —
+/// plus its public/random kind.
+///
+/// Same order for both [`BleAddressKind`]s, and the derived serde impls
+/// carry `bytes` in index order, so the postcard and JSON forms are this
+/// order too. Nothing in this crate reverses it — a consumer feeding a
+/// stack that wants least-significant first (Zephyr's
+/// `bt_addr_le_t.a.val`) reverses it at that boundary. Stated here
+/// because a wrong guess fails *silently*: a `BleConnect` with an
+/// explicit `target_address` simply never matches, which reads as an
+/// absent DUT rather than as a byte-order bug.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct BleAddress {
     pub bytes: [u8; 6],
     pub kind: BleAddressKind,
 }
 
+/// Which of the two BLE address types [`BleAddress::bytes`] is. It selects
+/// how a peer interprets the address, **not** how the six bytes are laid
+/// out: both kinds use [`BleAddress`]'s display order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum BleAddressKind {
     Public,
