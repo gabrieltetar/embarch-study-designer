@@ -56,8 +56,9 @@
 /// [`crate::study::Action`], [`crate::result::StepResult`],
 /// [`crate::sample`], [`crate::streams`]' wire records/[`crate::streams::StreamTap`],
 /// or [`crate::protocol`]. A change confined to
-/// [`crate::validation`], to `Study.requires`, or to any other host-side-only
-/// type does **not** belong here; move [`HOST_TYPE_SCHEMA_VERSION`] alone.
+/// Core's own post-hoc content validation (design.md §3 decision 19), to
+/// `Study.requires`, or to any other host-side-only type does **not** belong
+/// here; move [`HOST_TYPE_SCHEMA_VERSION`] alone.
 ///
 /// # History
 ///
@@ -179,7 +180,7 @@
 ///   right to.** That decision reserved discriminant 7 for `BleSecurity`
 ///   (which it got) but deliberately left the schema version to be
 ///   *re-derived at implementation time*, citing
-///   [`embarch-decision-reversals.md`][rev] row 18: a bump number written
+///   [embarch-decision-reversals.md] row 18: a bump number written
 ///   into a design doc ahead of the work is a fact with a shelf life. It had
 ///   already reserved 8 → 9 once, and decision 39's amendment took v9 first.
 ///   Derived here from what is actually implemented: v11 → v12.
@@ -243,7 +244,8 @@ pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 15;
 /// **A strict superset of [`DEV_BENCH_WIRE_SCHEMA_VERSION`]'s triggers.**
 /// Bump this for any change to a type crossing the api<->Core hop — which
 /// is `Study` and `StudyResult` **whole**, including the parts dev-bench
-/// never sees: [`crate::validation`], `Study.requires`, `Study.gatt`.
+/// never sees: Core's post-hoc content validation (design.md §3 decision
+/// 19), `Study.requires`, `Study.gatt`.
 /// Every dev-bench wire change is also one of these, so a pass that bumps
 /// the wire constant bumps this one too; the reverse does not hold.
 ///

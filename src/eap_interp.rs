@@ -6,7 +6,7 @@
 //! §3 decision 60 puts the real interpreter **on dev-bench**: the loop closes
 //! against the DUT's own BLE connection interval, Core sends nothing
 //! mid-study, and `main.c`'s receive-then-run model is unchanged. That
-//! interpreter is hand-written C and is [`embarch-dev-bench`]'s own scope, the
+//! interpreter is hand-written C and is `embarch-dev-bench`'s own scope, the
 //! same way §3 decisions 31/32 shipped `GattDiscover`/`GattMonitorAll`'s wire
 //! types here and left live BLE dispatch there.
 //!
@@ -20,7 +20,7 @@
 //! - it replays a captured `.bin` offline, so a run that ended in the wrong
 //!   state can be re-examined without a bench.
 //!
-//! It is driven by [`Event`]s rather than by a radio: nothing in this module
+//! It is driven by `Event`s rather than by a radio: nothing in this module
 //! opens a connection, subscribes to anything, or knows what time it is.
 //! A caller feeds it arrivals and timer expiries and reads back the writes it
 //! wants performed.
