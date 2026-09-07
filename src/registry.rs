@@ -26,7 +26,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::decoder::{ScalarType, StructField, StructLayout};
 use crate::ids::Uuid;
-use crate::limits::{MAX_DECODER_NAME_LEN, MAX_STRUCT_FIELDS, MAX_STRUCT_FIELD_NAME_LEN};
+use crate::limits::{
+    MAX_DECODER_NAME_LEN, MAX_PAYLOAD_LEN, MAX_STRUCT_FIELDS, MAX_STRUCT_FIELD_NAME_LEN,
+};
 
 use heapless::String as HString;
 use heapless::Vec as HVec;
@@ -63,6 +65,10 @@ pub struct ActionFieldValue {
 /// choice the engineer has registered for it. Multiple fields describe a
 /// payload byte-range by byte-range; a payload with only one meaningful
 /// byte still gets exactly one field.
+///
+/// `byte_offset + byte_len` must land inside [`MAX_PAYLOAD_LEN`]; checked by
+/// [`ActionRegistry::validate`] alongside the value lengths, since the widest
+/// field is what sizes the payload buffer `study_builder` allocates.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActionField {
     pub name: String,
@@ -120,6 +126,22 @@ pub enum RegistryError {
     /// [`RegistryError::DuplicateStructLayout`]: one hand-edit mistake, one
     /// refusal, whichever of this module's two registries it lands in.
     DuplicateRegisteredAction { name: String },
+    /// A field claims a byte range ending past [`MAX_PAYLOAD_LEN`], so the
+    /// payload it describes could not be sent even with every value in it
+    /// the right length. Caught here rather than left to `study_builder`,
+    /// where `byte_offset + byte_len` is what *sizes the buffer*: the offset
+    /// is the one number in this file nothing else bounds, and a hand edit
+    /// choosing how many bytes the host allocates is a different mistake
+    /// from a value that is the wrong length.
+    FieldRangeTooLong {
+        action_name: String,
+        field_name: String,
+        /// `byte_offset + byte_len`, saturated at `usize::MAX` — an offset
+        /// that close to the top has no honest sum to report and does not
+        /// need one to be refused.
+        end: usize,
+        max: usize,
+    },
     /// A `study-structs.toml` field declares a scalar type this crate has no
     /// spelling for — named rather than defaulted to a plausible width
     /// (design.md §3 decision 52).
@@ -158,6 +180,11 @@ impl std::fmt::Display for RegistryError {
                 f,
                 "two actions are both named '{name}'; a row referencing it could resolve to \
                  either"
+            ),
+            RegistryError::FieldRangeTooLong { action_name, field_name, end, max } => write!(
+                f,
+                "action '{action_name}' field '{field_name}': its bytes end at offset {end}, \
+                 past the {max}-byte payload limit"
             ),
             RegistryError::UnknownScalarType { layout_name, field_name, declared } => write!(
                 f,
@@ -218,8 +245,9 @@ impl ActionRegistry {
         fs::write(&path, raw).map_err(RegistryError::Io)
     }
 
-    /// Confirms no two actions share a name, and that every field's every
-    /// value has exactly `byte_len` bytes. Pure/offline — no I/O, callable
+    /// Confirms no two actions share a name, that every field's byte range
+    /// ends inside [`MAX_PAYLOAD_LEN`], and that every field's every value
+    /// has exactly `byte_len` bytes. Pure/offline — no I/O, callable
     /// independent of `load`/`save`; called by both, so a file this refuses
     /// can be neither read nor written.
     pub fn validate(&self) -> Result<(), RegistryError> {
@@ -230,6 +258,18 @@ impl ActionRegistry {
                 });
             }
             for field in &action.fields {
+                // Saturating, for the reason on the variant: `+` here would
+                // panic in debug and wrap to a passing range in release on
+                // an offset near `usize::MAX`, and this file is hand-edited.
+                let end = field.byte_offset.saturating_add(field.byte_len);
+                if end > MAX_PAYLOAD_LEN {
+                    return Err(RegistryError::FieldRangeTooLong {
+                        action_name: action.name.clone(),
+                        field_name: field.name.clone(),
+                        end,
+                        max: MAX_PAYLOAD_LEN,
+                    });
+                }
                 for value in &field.values {
                     if value.bytes.len() != field.byte_len {
                         return Err(RegistryError::FieldLengthMismatch {
@@ -569,6 +609,92 @@ mod tests {
         registry.save(&dir).unwrap();
         assert_eq!(ActionRegistry::load(&dir).unwrap(), registry);
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_hand_written_field_reaching_past_the_payload_limit_is_refused_at_load() {
+        // The point of the test is *where* this fires. A registry is read
+        // long before any study is built from it, and `byte_offset` is what
+        // sizes the buffer the builder allocates — so a file this large has
+        // to be refused on the way in, not on the way to a study.
+        let dir = std::env::temp_dir().join(format!(
+            "embarch-study-designer-registry-range-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(dir.join("embarch")).unwrap();
+        let uuid_literal = |byte: u8| {
+            let items: Vec<String> = (0..16).map(|_| byte.to_string()).collect();
+            format!("[{}]", items.join(", "))
+        };
+        let raw = format!(
+            r#"
+[[actions]]
+name = "far_field"
+service_uuid = {service}
+uuid = {characteristic}
+operation = "write"
+
+[[actions.fields]]
+name = "flag"
+byte_offset = {offset}
+byte_len = 1
+values = [{{ label = "On", bytes = [1] }}]
+"#,
+            service = uuid_literal(0xAA),
+            characteristic = uuid_literal(0xAB),
+            offset = MAX_PAYLOAD_LEN,
+        );
+        std::fs::write(registry_path(&dir), raw).unwrap();
+
+        match ActionRegistry::load(&dir) {
+            Err(RegistryError::FieldRangeTooLong { action_name, field_name, end, max }) => {
+                assert_eq!(action_name, "far_field");
+                assert_eq!(field_name, "flag");
+                assert_eq!(end, MAX_PAYLOAD_LEN + 1);
+                assert_eq!(max, MAX_PAYLOAD_LEN);
+            }
+            other => panic!("expected a FieldRangeTooLong, got {other:?}"),
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn an_offset_that_would_overflow_is_refused_rather_than_wrapping() {
+        // `usize::MAX` as an offset makes `byte_offset + byte_len` panic in
+        // debug and wrap to 0 in release — a range that passes every check
+        // and then indexes wherever it likes. Saturating is why this is a
+        // refusal on both profiles.
+        let registry = ActionRegistry {
+            actions: vec![RegisteredAction {
+                name: "wrapper".to_string(),
+                service_uuid: Uuid([0xAA; 16]),
+                uuid: Uuid([0xAB; 16]),
+                operation: RegisteredOperation::Write,
+                fields: vec![ActionField {
+                    name: "flag".to_string(),
+                    byte_offset: usize::MAX,
+                    byte_len: 1,
+                    values: vec![ActionFieldValue { label: "On".to_string(), bytes: vec![1] }],
+                }],
+            }],
+        };
+        match registry.validate() {
+            Err(RegistryError::FieldRangeTooLong { end, .. }) => assert_eq!(end, usize::MAX),
+            other => panic!("expected a FieldRangeTooLong, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_field_ending_exactly_on_the_payload_limit_is_accepted() {
+        // The bound is the end of the range, not the start of it: a field
+        // whose last byte is the payload's last byte fits.
+        let mut registry = sample_registry();
+        registry.actions[0].fields[0].byte_offset = MAX_PAYLOAD_LEN - 1;
+        registry.validate().unwrap();
     }
 
     #[test]

@@ -606,12 +606,25 @@ fn resolve_write_payload(
         return Err(BuildStudyError::RegisteredActionHasNoFields { action: registered.name.clone() });
     }
 
+    // `byte_offset`/`byte_len` come out of a hand-edited `study-actions.toml`,
+    // so this length is engineer-supplied and nothing structural bounds it.
+    // `ActionRegistry::validate` refuses a range past `MAX_PAYLOAD_LEN` on
+    // read and on write (`registry.rs`), but a registry assembled in memory
+    // has never been through it, so the bound is enforced here too — and
+    // *before* the allocation, not after, since the whole hazard is a file
+    // choosing how many bytes this host allocates.
+    // `saturating_add` rather than `+`: a `byte_offset` near `usize::MAX`
+    // overflows, which panics in debug and wraps to a small, passing length
+    // in release — the one arithmetic here that a hand edit can reach.
     let buffer_len = registered
         .fields
         .iter()
-        .map(|f| f.byte_offset + f.byte_len)
+        .map(|f| f.byte_offset.saturating_add(f.byte_len))
         .max()
         .unwrap_or(0);
+    if buffer_len > MAX_PAYLOAD_LEN {
+        return Err(BuildStudyError::PayloadTooLong { max: MAX_PAYLOAD_LEN, actual: buffer_len });
+    }
     let mut buffer = vec![0u8; buffer_len];
 
     for field in &registered.fields {
@@ -629,10 +642,9 @@ fn resolve_write_payload(
         buffer[field.byte_offset..field.byte_offset + field.byte_len].copy_from_slice(&value.bytes);
     }
 
-    heapless::Vec::from_slice(&buffer).map_err(|_| BuildStudyError::TooManySteps {
-        // Reused variant for "doesn't fit a fixed-capacity buffer" -- a
-        // payload exceeding MAX_PAYLOAD_LEN is exactly as much an
-        // over-capacity condition as too many steps is.
+    // Unreachable given the check above; kept as the same named error rather
+    // than an `expect`, so the bound has one spelling on both paths.
+    heapless::Vec::from_slice(&buffer).map_err(|_| BuildStudyError::PayloadTooLong {
         max: MAX_PAYLOAD_LEN,
         actual: buffer_len,
     })
@@ -922,6 +934,80 @@ mod tests {
                 }
             }
             other => panic!("expected DataExchange, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_registered_write_past_the_payload_limit_says_payload_not_steps() {
+        // This used to report `TooManySteps`, so a one-row table came back
+        // as "study has 513 steps, but the limit is 512" — a true number
+        // about the wrong thing, pointing whoever read it at the table
+        // instead of at the field they had just mis-offset. The rendered
+        // message is asserted because the message is the whole defect.
+        let mut registry = registry_with_write_action();
+        registry.actions[0].fields[0].byte_offset = MAX_PAYLOAD_LEN;
+        let mut field_choices = HashMap::new();
+        field_choices.insert("mode".to_string(), "On".to_string());
+        let rows = vec![TableRow {
+            name: "set-on".to_string(),
+            action: RowAction::Registered { name: "set_mode".to_string(), field_choices },
+            timeout_ms: 5_000,
+            continue_on_fail: false,
+            delay_before_ms: 0,
+        }];
+        let err = build_study("s", &rows, &registry).unwrap_err();
+        assert_eq!(
+            err,
+            BuildStudyError::PayloadTooLong { max: MAX_PAYLOAD_LEN, actual: MAX_PAYLOAD_LEN + 1 }
+        );
+        assert_eq!(err.to_string(), "payload is 513 bytes, but the limit is 512");
+    }
+
+    #[test]
+    fn a_registered_write_whose_offset_would_overflow_is_refused_not_wrapped() {
+        // The builder takes a registry as an argument, so an in-memory one
+        // that never went through `ActionRegistry::validate` reaches here —
+        // which is why the bound is checked on this side too, before the
+        // allocation this length would otherwise size.
+        let mut registry = registry_with_write_action();
+        registry.actions[0].fields[0].byte_offset = usize::MAX;
+        let mut field_choices = HashMap::new();
+        field_choices.insert("mode".to_string(), "On".to_string());
+        let rows = vec![TableRow {
+            name: "set-on".to_string(),
+            action: RowAction::Registered { name: "set_mode".to_string(), field_choices },
+            timeout_ms: 5_000,
+            continue_on_fail: false,
+            delay_before_ms: 0,
+        }];
+        assert_eq!(
+            build_study("s", &rows, &registry).unwrap_err(),
+            BuildStudyError::PayloadTooLong { max: MAX_PAYLOAD_LEN, actual: usize::MAX }
+        );
+    }
+
+    #[test]
+    fn a_registered_write_filling_the_payload_exactly_still_builds() {
+        // The bound is `>`, not `>=`: a field whose last byte is the
+        // payload's last byte is a legal payload, not an over-long one.
+        let mut registry = registry_with_write_action();
+        registry.actions[0].fields[0].byte_offset = MAX_PAYLOAD_LEN - 1;
+        let mut field_choices = HashMap::new();
+        field_choices.insert("mode".to_string(), "On".to_string());
+        let rows = vec![TableRow {
+            name: "set-on".to_string(),
+            action: RowAction::Registered { name: "set_mode".to_string(), field_choices },
+            timeout_ms: 5_000,
+            continue_on_fail: false,
+            delay_before_ms: 0,
+        }];
+        let study = build_study("s", &rows, &registry).unwrap();
+        match &study.steps[0].action {
+            Action::DataExchange { operation: GattOperation::Write { payload }, .. } => {
+                assert_eq!(payload.len(), MAX_PAYLOAD_LEN);
+                assert_eq!(payload[MAX_PAYLOAD_LEN - 1], 0x01);
+            }
+            other => panic!("expected a Write, got {other:?}"),
         }
     }
 
