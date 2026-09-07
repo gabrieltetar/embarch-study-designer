@@ -56,7 +56,7 @@
 /// [`crate::study::Action`], [`crate::result::StepResult`],
 /// [`crate::sample`], [`crate::streams`]' wire records/[`crate::streams::StreamTap`],
 /// or [`crate::protocol`]. A change confined to
-/// Core's own post-hoc content validation (design.md §3 decision 19), to
+/// Core's own post-hoc content validation (decision 19, retired), to
 /// `Study.requires`, or to any other host-side-only type does **not** belong
 /// here; move [`HOST_TYPE_SCHEMA_VERSION`] alone.
 ///
@@ -244,8 +244,8 @@ pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 15;
 /// **A strict superset of [`DEV_BENCH_WIRE_SCHEMA_VERSION`]'s triggers.**
 /// Bump this for any change to a type crossing the api<->Core hop — which
 /// is `Study` and `StudyResult` **whole**, including the parts dev-bench
-/// never sees: Core's post-hoc content validation (design.md §3 decision
-/// 19), `Study.requires`, `Study.gatt`.
+/// never sees: Core's post-hoc content validation (decision 19, retired),
+/// `Study.requires`, `Study.gatt`.
 /// Every dev-bench wire change is also one of these, so a pass that bumps
 /// the wire constant bumps this one too; the reverse does not hold.
 ///
