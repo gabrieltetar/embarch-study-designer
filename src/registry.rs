@@ -156,10 +156,13 @@ pub enum RegistryError {
     /// so the later field overwrites whatever the earlier one put in the
     /// shared bytes. This is worse than "the later declaration wins": where
     /// the two ranges overlap only *partly*, the earlier field's bytes end up
-    /// a **splice** of both chosen values — its head from its own pick, its
-    /// tail from the other's — **a byte string that appears in neither
-    /// field's `values` and that the engineer therefore never registered at
-    /// all**, let alone chose. (A total overlap is the milder case: the
+    /// a **splice** of both chosen values — **a byte string that appears in
+    /// neither field's `values` and that the engineer therefore never
+    /// registered at all**, let alone chose. (Which end of the splice comes
+    /// from which pick follows the declaration order, not the offsets: declare
+    /// the higher-offset field first and the ends swap. The invariant is that
+    /// the earlier field's range holds a value nobody registered.)
+    /// (A total overlap is the milder case: the
     /// earlier pick is simply gone.) The UI shows both choices as honoured
     /// either way. Decision 35's duplicate-name rule applied to offsets
     /// instead of names: the same hand-edited file, the same "the row
