@@ -1,4 +1,4 @@
-//! The two schema-version constants — design.md §3 decision 12 and its
+//! The two schema-version constants — decision 12 and its
 //! 2026-08-25 amendment.
 //!
 //! **One constant became two, because it was guarding two hops with
@@ -6,7 +6,7 @@
 //! `STUDY_DESIGNER_SCHEMA_VERSION` was compared at both the Core<->dev-bench
 //! serial handshake and Core's `/status` HTTP response, with one trigger
 //! list serving both — and that list was wrong at both ends.
-//! `Study.validations` never reaches dev-bench at all (§3 decisions 17, 19),
+//! `Study.validations` never reaches dev-bench at all (decisions 17, 19),
 //! so a change there can never drift a dev-bench decoder; yet `Study`
 //! *including* `validations` crosses `embarch-api` -> `embarch-core` as JSON,
 //! whose only drift check was that same constant. Dropping validation from
@@ -20,7 +20,7 @@
 //! - [`DEV_BENCH_WIRE_SCHEMA_VERSION`] — compared at `Hello`/`HelloAck`.
 //!   Moves only for a change to something **dev-bench itself parses or
 //!   emits**. This is the number whose movement costs a firmware reflash and
-//!   a both-languages re-pinning pass (§3 decision 36's pairing).
+//!   a both-languages re-pinning pass (decision 36's pairing).
 //! - [`HOST_TYPE_SCHEMA_VERSION`] — served by Core's `GET /status`, compared
 //!   by `embarch-api`. Moves for **any** change to a type crossing the
 //!   api<->Core hop: a strict superset, covering every dev-bench wire change
@@ -67,37 +67,37 @@
 /// today's rule; the numbers themselves are untouched (see this module's own
 /// doc comment for why).
 ///
-/// - **v2** (`embarch-dev-bench/design.md` §3 decisions 7/18) — added
+/// - **v2** (`embarch-dev-bench` decisions 7/18) — added
 ///   `DevBenchMessage::LogLine` and `HelloAck.firmware_version`. **Wire.**
-/// - **v3** (§3 decisions 24/25/27) — `Hello` lost `steps_crc` (moved to
+/// - **v3** (decisions 24/25/27) — `Hello` lost `steps_crc` (moved to
 ///   `StudyStart`); added `DevBenchMessage::StudyStart`/`StepResult`/
 ///   `StudyDone`/`StreamChunkBatch`; `Sample` gained `unit`/`channel_id`.
 ///   **Wire.**
-/// - **v4** (§3 decisions 31/32) — added `Action::GattDiscover`/
+/// - **v4** (decisions 31/32) — added `Action::GattDiscover`/
 ///   `GattMonitorAll` and the matching `StepResult.gatt_services`/
 ///   `gatt_activity` fields (§4.3a). One bump covering both new `Action`
 ///   variants and both new `StepResult` fields together, the same
 ///   one-bump-per-pass discipline v2's `LogLine`+`firmware_version` pairing
 ///   already established. **Wire.**
-/// - **v5** (§3 decision 36) — added `Action::GattMonitorStart`/
+/// - **v5** (decision 36) — added `Action::GattMonitorStart`/
 ///   `GattMonitorStop`, `DevBenchMessage::GattTranscriptRecord`, the
 ///   `GattTranscriptEntry`/`GattDirection`/`GattEventKind` types it carried
 ///   (§4.3b), and `DataChannel::GattTranscript`. **Wire** — except
 ///   `DataChannel::GattTranscript`, which was host-only even then and is
 ///   retired outright at v9.
-/// - **v6** (§3 decision 42) — `Step` gained a trailing `delay_before_ms`,
+/// - **v6** (decision 42) — `Step` gained a trailing `delay_before_ms`,
 ///   the first `Step` field added since this constant existed. Appended
 ///   rather than inserted precisely because postcard carries no field names
 ///   and dev-bench hand-decodes `Step` in C, but appended is still a wire
 ///   change: a v5 decoder reads a v6 `Step` and then finds an unconsumed
 ///   trailing varint, and a v6 decoder runs off the end of a v5 `Step`. The
 ///   handshake rejecting the mismatch outright is the point. **Wire.**
-/// - **v7** (§3 decision 43) — `Action::BleConnect` gained a trailing
+/// - **v7** (decision 43) — `Action::BleConnect` gained a trailing
 ///   `target_name`, so a study can name the DUT it means instead of taking
 ///   whichever peripheral advertises first. Same append-don't-insert
 ///   discipline as v6, and the same reason it's still a wire break.
 ///   **Wire.**
-/// - **v8** (§3 decisions 39 **and** 40, one bump for the pair) — the
+/// - **v8** (decisions 39 **and** 40, one bump for the pair) — the
 ///   largest single wire change since this constant existed, and the first
 ///   that *removes* rather than appends. Decision 39's one generic inbound
 ///   stream pipeline: `Study` gained `streams` (§4.8) and `StudyResult`
@@ -115,7 +115,7 @@
 ///   rode the same bump. **This pairing is the precedent the split
 ///   contradicts**: under today's rule decision 40 alone would have moved
 ///   only [`HOST_TYPE_SCHEMA_VERSION`].
-/// - **v9** (§3 decision 39's 2026-08-25 amendment, Milestone 7 Phase B —
+/// - **v9** (decision 39's 2026-08-25 amendment, Milestone 7 Phase B —
 ///   one bump covering both of its halves, the standing one-bump-per-pass
 ///   discipline). `Study` gained `streams_crc` and `StudyStart` gained it
 ///   after `streams`, a sibling seal over the taps rather than a widening of
@@ -124,27 +124,27 @@
 ///   author a power capture afterwards. **Wire, both halves** — dev-bench
 ///   checks the new seal and stops reading a field that is gone.
 ///
-///   Note what did *not* move this number in the same pass: §3 decision 19's
+///   Note what did *not* move this number in the same pass: decision 19's
 ///   amendment reshaped `ValidationSource`/`DataChannel`, and `validations`
 ///   never crosses this hop. That is the first change the split actually
 ///   spares dev-bench, and it is why the split was worth making.
 ///
 /// - **v10 did not move this constant either**, and that is the second time
-///   the split paid for itself. `Provenance` grew `overrides` (§3 decision
+///   the split paid for itself. `Provenance` grew `overrides` (decision
 ///   40, Milestone 7 Phase B item 2) — a `StudyResult` field, and
 ///   `StudyResult` is assembled *by the host* out of the `StepResult`
 ///   messages dev-bench sends. dev-bench has never encoded or decoded a
 ///   `StudyResult`, so no firmware decoder can drift on this and no
-///   both-languages pin (§3 decision 36) applies. Under the pre-split single
+///   both-languages pin (decision 36) applies. Under the pre-split single
 ///   constant this would have charged a firmware reflash for a type firmware
 ///   cannot observe.
 ///
-/// Note what has never bumped either constant: `vendor.rs` (§3 decision 41)
+/// Note what has never bumped either constant: `vendor.rs` (decision 41)
 /// is a table of compile-time constants with no wire representation of its
 /// own — a vendor-defined characteristic resolves into an ordinary
 /// `Action::DataExchange` carrying plain UUIDs before anything is encoded,
 /// so dev-bench firmware never needs to know the table exists.
-/// - **v10** (§3 decision 47, `embarch-core/design.md` §3 decision 35).
+/// - **v10** (decision 47, `embarch-core` decision 35).
 ///   `HelloAck` gained `hardware_id` — dev-bench's own factory-unique chip
 ///   ID, hex-encoded — so Core can confirm the board answering on the serial
 ///   link is the same silicon its JTAG probe just verified. One field on the
@@ -152,7 +152,7 @@
 ///   (`schema_version`, `firmware_version`), which is why it costs a wire
 ///   bump and no new mechanism. **Wire**, and the host constant moves with
 ///   it as always.
-/// - **v11** (`embarch-outpost/design.md` §3 decision 9, Milestone 7 Phase C).
+/// - **v11** (`embarch-outpost` decision 9, Milestone 7 Phase C).
 ///   `StreamEncoding::OutpostTrace` loses its `manifest_crc` payload and
 ///   becomes a unit variant. **Wire**, unavoidably: `StreamEncoding` rides
 ///   `StudyStart` inside every `StreamTap`, and dev-bench's decoder has to
@@ -167,7 +167,7 @@
 ///   firmware still had not been flashed when this landed, which is the same
 ///   window decisions 29/39 were spent in and the reason this cost a reshape
 ///   rather than a migration.
-/// - **v12** (§3 decisions 44 **and** 50, one bump for the pair — the
+/// - **v12** (decisions 44 **and** 50, one bump for the pair — the
 ///   standing one-bump-per-pass discipline). `Action` gains
 ///   `BleSecurity { level }` and `BleUnbond {}`, appended at
 ///   discriminants 7 and 8; `BleSecurityLevel` is a new enum riding inside
@@ -195,13 +195,13 @@
 ///   reason: postcard encodes the discriminant positionally.
 ///
 /// - **v13** — `StudyStart` gains `dev_bench_log_level`
-///   ([`crate::study::DevBenchLogLevel`], `embarch-dev-bench/design.md` §3
+///   ([`crate::study::DevBenchLogLevel`], `embarch-dev-bench`
 ///   decision 39). Appended after `streams_crc`, and a wire bump by the
 ///   plainest possible reading of this constant's rule: dev-bench parses the
 ///   field and acts on it.
 /// - **v14** — three changes dev-bench itself parses or emits, taken as one
-///   bump the same way v4 took decisions 31/32 together (design.md §3
-///   decisions 52/53/54):
+///   bump the same way v4 took decisions 31/32 together (decisions
+///   52/53/54):
 ///   `Action::GattMonitorSelected`/`GattMonitorSelectedStart` at
 ///   discriminants 9 and 10, each carrying a `GattTarget` list dev-bench
 ///   decodes and subscribes from; `StreamEncoding::Struct { decoder }` at
@@ -211,7 +211,7 @@
 ///   that makes this unambiguously a wire bump rather than a host-only one —
 ///   a removal in the middle of a hand-encoded struct is exactly the drift
 ///   this handshake exists to refuse.
-/// - **v15** (§3 decisions 58-62, and `embarch-dev-bench/design.md` §3
+/// - **v15** (decisions 58-62, and `embarch-dev-bench`
 ///   decision 41) — `.eap` protocol manifests, taken as one bump the way v4
 ///   and v14 each took a related group. `StudyStart` gains `protocols` and
 ///   `protocols_crc`, appended after `dev_bench_log_level`;
@@ -236,8 +236,8 @@
 pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 15;
 
 /// Served by `embarch-core`'s `GET /status` and compared by `embarch-api`
-/// against its own compiled-in copy before submitting a `Study` (design.md
-/// §5.1). `GET /status` is already that hop's connection-establishment
+/// against its own compiled-in copy before submitting a `Study`.
+/// `GET /status` is already that hop's connection-establishment
 /// check, so it carries this rather than there being a separate handshake
 /// call.
 ///
@@ -256,7 +256,7 @@ pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 15;
 /// moved this one too, since each either changed a type crossing this hop or
 /// (v8's decision 40 half) was host-side-only to begin with.
 ///
-/// - **v9** (Milestone 7 Phase B, §3 decision 39's amendment **and** §3
+/// - **v9** (Milestone 7 Phase B, decision 39's amendment **and**
 ///   decision 19's amendment). Decision 39's amendment as listed opposite —
 ///   `Study.streams_crc`, `Step.power_sample` retired — plus the one change
 ///   in this pass that moves *only* this constant: `ValidationSource` splits
@@ -266,7 +266,7 @@ pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 15;
 ///   `ValidationSource` rather than a flattened `step_index`/`channel` pair.
 ///   Both cross this hop inside `Study`/`StudyResult`; neither reaches
 ///   dev-bench.
-/// - **v10** (§3 decision 40, Milestone 7 Phase B item 2) — the **first bump
+/// - **v10** (decision 40, Milestone 7 Phase B item 2) — the **first bump
 ///   that moves this constant alone**, which is the split working as
 ///   designed rather than a special case. `Provenance` gained `overrides:
 ///   Vec<VersionOverride, 2>`, so a run that was allowed to proceed past a
@@ -285,12 +285,12 @@ pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 15;
 ///   `ContentValidity` and `ValidationResult` are all gone, along with the
 ///   `core-validation` feature and `signal.rs`'s evaluation logic. The second
 ///   bump to move this constant alone, and for the cleanest possible reason:
-///   none of it ever crossed the dev-bench wire (§3 decision 17), so
+///   none of it ever crossed the dev-bench wire (decision 17), so
 ///   [`DEV_BENCH_WIRE_SCHEMA_VERSION`] is untouched at 9 and dev-bench needs
 ///   no reflash. A removal is exactly as breaking as an addition on this hop —
 ///   an api built before this and a Core built after it disagree about
 ///   `Study`'s shape — which is what this constant exists to refuse.
-/// - **v12** (§3 decision 47) — a wire bump, so this one follows by the rule
+/// - **v12** (decision 47) — a wire bump, so this one follows by the rule
 ///   above rather than by a judgement call: `HelloAck.hardware_id`. Written
 ///   in that decision as 10 → 11 and **re-derived to 12 here**, because
 ///   decision 48's removal landed first and took this constant to 11; the
@@ -300,7 +300,7 @@ pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 15;
 ///   18's protocol working as intended, not a mistake being corrected.
 /// - **v13** — a wire bump (`StreamEncoding::OutpostTrace` becomes a unit
 ///   variant), so this follows by the superset rule rather than by judgement.
-/// - **v14** — a wire bump (§3 decisions 44/50: `Action::BleSecurity`,
+/// - **v14** — a wire bump (decisions 44/50: `Action::BleSecurity`,
 ///   `Action::BleUnbond`, `StepResult.security_level`), so this follows by
 ///   the superset rule rather than by judgement.
 /// - **v15** — a wire bump (v13's `StudyStart.dev_bench_log_level`), plus the
@@ -309,18 +309,18 @@ pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 15;
 ///   either way.
 /// - **v16** — a wire bump (v14's selective monitor actions, the `Struct`
 ///   encoding and the retired `gatt_activity`), plus the host-only
-///   `Study.decoders` those taps resolve against (design.md §3 decision 52),
+///   `Study.decoders` those taps resolve against (decision 52),
 ///   which crosses `embarch-api` -> `embarch-core` as JSON and reaches
 ///   dev-bench never. Follows by the superset rule either way.
 /// - **v17** — a wire bump (v15's `.eap` protocol manifests), so this follows
 ///   by the superset rule rather than by judgement. Nothing in that pass is
 ///   host-only: `Study.protocols`/`protocols_crc` cross `embarch-api` ->
 ///   `embarch-core` as JSON *and* cross to dev-bench, which is the whole
-///   difference between a protocol and a decoder (§3 decision 58).
+///   difference between a protocol and a decoder (decision 58).
 pub const HOST_TYPE_SCHEMA_VERSION: u32 = 17;
 
 /// [`HOST_TYPE_SCHEMA_VERSION`]'s triggers are a strict superset of
-/// [`DEV_BENCH_WIRE_SCHEMA_VERSION`]'s (design.md §3 decision 12's
+/// [`DEV_BENCH_WIRE_SCHEMA_VERSION`]'s (decision 12's
 /// amendment), so every wire bump is also a host bump and the host number
 /// can never trail the wire one.
 ///
