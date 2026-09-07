@@ -69,6 +69,12 @@ pub struct ActionFieldValue {
 /// `byte_offset + byte_len` must land inside [`MAX_PAYLOAD_LEN`]; checked by
 /// [`ActionRegistry::validate`] alongside the value lengths, since the widest
 /// field is what sizes the payload buffer `study_builder` allocates.
+///
+/// **Two fields of one action must cover disjoint byte ranges**, also checked
+/// by [`ActionRegistry::validate`]. Nothing structural stops two ranges from
+/// meeting, and `study_builder` writes each chosen value in declaration order,
+/// so an overlap loses at least one of the engineer's picks with the UI still
+/// showing both as honoured.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActionField {
     pub name: String,
@@ -78,8 +84,10 @@ pub struct ActionField {
 }
 
 /// One engineer-registered action against a specific, already-detected
-/// characteristic. `fields` is only meaningful for `operation: Write` —
-/// empty for every other operation, per this module's own doc comment.
+/// characteristic. `fields` is only meaningful for `operation: Write`, and
+/// [`ActionRegistry::validate`] **refuses** a non-`Write` action that carries
+/// any — the rule used to be prose here and nothing enforced it, so a read
+/// with fields offered choices that could never be sent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RegisteredAction {
     pub name: String,
@@ -142,6 +150,39 @@ pub enum RegistryError {
         end: usize,
         max: usize,
     },
+    /// Two fields of one action cover at least one payload byte in common.
+    /// `study_builder` writes each chosen value into
+    /// `buffer[byte_offset..byte_offset + byte_len]` **in declaration order**,
+    /// so the later field overwrites whatever the earlier one put in the
+    /// shared bytes. This is worse than "the later declaration wins": where
+    /// the two ranges overlap only *partly*, the earlier field's bytes end up
+    /// a **splice** of both chosen values — its head from its own pick, its
+    /// tail from the other's — **a byte string that appears in neither
+    /// field's `values` and that the engineer therefore never registered at
+    /// all**, let alone chose. (A total overlap is the milder case: the
+    /// earlier pick is simply gone.) The UI shows both choices as honoured
+    /// either way. Decision 35's duplicate-name rule applied to offsets
+    /// instead of names: the same hand-edited file, the same "the row
+    /// silently carries a payload nobody chose".
+    FieldRangesOverlap {
+        action_name: String,
+        /// The earlier-declared of the two — the one whose bytes lose.
+        first_field: String,
+        second_field: String,
+        /// The shared range, half-open: `[overlap_start, overlap_end)`.
+        overlap_start: usize,
+        overlap_end: usize,
+    },
+    /// A non-`Write` action carries fields. `fields` describes a write
+    /// payload and no other operation sends one, so `study_builder` ignores
+    /// them entirely — the registry advertises choices that can never leave
+    /// the host, and the only feedback is a `NotWritable` at build time
+    /// blaming the *row* for choosing what the *registry* offered it.
+    FieldsOnNonWriteAction {
+        action_name: String,
+        field_name: String,
+        operation: RegisteredOperation,
+    },
     /// A `study-structs.toml` field declares a scalar type this crate has no
     /// spelling for — named rather than defaulted to a plausible width
     /// (design.md §3 decision 52).
@@ -157,6 +198,19 @@ pub enum RegistryError {
     /// Two `[[struct]]` entries share a name, so a tap referencing it would
     /// resolve to whichever happened to come first.
     DuplicateStructLayout { name: String },
+}
+
+/// The operation's name as an error message should say it — the `serde`
+/// spelling rather than the `Debug` one, so the message names the word the
+/// engineer typed into `study-actions.toml`.
+fn operation_word(operation: RegisteredOperation) -> &'static str {
+    match operation {
+        RegisteredOperation::Read => "read",
+        RegisteredOperation::Write => "write",
+        RegisteredOperation::Subscribe => "subscribe",
+        RegisteredOperation::Notify => "notify",
+        RegisteredOperation::Indicate => "indicate",
+    }
 }
 
 impl std::fmt::Display for RegistryError {
@@ -186,6 +240,29 @@ impl std::fmt::Display for RegistryError {
                 "action '{action_name}' field '{field_name}': its bytes end at offset {end}, \
                  past the {max}-byte payload limit"
             ),
+            RegistryError::FieldRangesOverlap {
+                action_name,
+                first_field,
+                second_field,
+                overlap_start,
+                overlap_end,
+            } => write!(
+                f,
+                "action '{action_name}': fields '{first_field}' and '{second_field}' both cover \
+                 bytes {overlap_start}..{overlap_end}; '{second_field}' is written second and \
+                 overwrites them, so '{first_field}'s chosen value is not in the payload — and \
+                 where the ranges only partly overlap, what is there instead is a splice of \
+                 both that nobody registered"
+            ),
+            RegistryError::FieldsOnNonWriteAction { action_name, field_name, operation } => {
+                let op = operation_word(*operation);
+                write!(
+                    f,
+                    "action '{action_name}' is a {op} but declares field '{field_name}'; fields \
+                     describe a write payload, and a {op} sends none — those choices could never \
+                     leave the host"
+                )
+            }
             RegistryError::UnknownScalarType { layout_name, field_name, declared } => write!(
                 f,
                 "struct '{layout_name}' field '{field_name}' declares type '{declared}', which is \
@@ -245,16 +322,40 @@ impl ActionRegistry {
         fs::write(&path, raw).map_err(RegistryError::Io)
     }
 
-    /// Confirms no two actions share a name, that every field's byte range
-    /// ends inside [`MAX_PAYLOAD_LEN`], and that every field's every value
-    /// has exactly `byte_len` bytes. Pure/offline — no I/O, callable
-    /// independent of `load`/`save`; called by both, so a file this refuses
-    /// can be neither read nor written.
+    /// Confirms no two actions share a name, that only a `Write` action
+    /// carries fields, that every field's byte range ends inside
+    /// [`MAX_PAYLOAD_LEN`], that no two fields of one action cover the same
+    /// byte, and that every field's every value has exactly `byte_len`
+    /// bytes. Pure/offline — no I/O, callable independent of `load`/`save`;
+    /// called by both, so a file this refuses can be neither read nor
+    /// written.
+    ///
+    /// **This is the whole gate on registry shape.** `study_builder` re-checks
+    /// exactly one of these rules, the `MAX_PAYLOAD_LEN` bound, and only
+    /// because that number sizes an allocation it makes before any of this has
+    /// necessarily run; it re-checks neither the duplicate-name rule nor the
+    /// overlap one. An `ActionRegistry` assembled in memory and never passed
+    /// through here can still build a study whose payload is wrong.
     pub fn validate(&self) -> Result<(), RegistryError> {
         for (index, action) in self.actions.iter().enumerate() {
             if self.actions[..index].iter().any(|earlier| earlier.name == action.name) {
                 return Err(RegistryError::DuplicateRegisteredAction {
                     name: action.name.clone(),
+                });
+            }
+            // Before anything about the ranges: a read carrying fields is one
+            // mistake to name, not a range mistake inside a field that was
+            // never going to be sent. `match` rather than `if` + `if let`
+            // because this crate is edition 2021 and has no let-chains.
+            let stray_field = match action.operation {
+                RegisteredOperation::Write => None,
+                _ => action.fields.first(),
+            };
+            if let Some(field) = stray_field {
+                return Err(RegistryError::FieldsOnNonWriteAction {
+                    action_name: action.name.clone(),
+                    field_name: field.name.clone(),
+                    operation: action.operation,
                 });
             }
             for field in &action.fields {
@@ -278,6 +379,34 @@ impl ActionRegistry {
                             value_label: value.label.clone(),
                             expected: field.byte_len,
                             actual: value.bytes.len(),
+                        });
+                    }
+                }
+            }
+            // Pairwise, after the bound check above, so a field reaching past
+            // the payload is reported as that rather than as an overlap with
+            // whatever it happens to run into. Every `end` here is therefore
+            // already <= MAX_PAYLOAD_LEN; `saturating_add` regardless, since
+            // this crate's stated invariant is that addition saturates and a
+            // reader should not have to re-derive the earlier return to see
+            // that it does. O(n^2) over one action's fields, like the
+            // duplicate-name scan above it over actions.
+            for (index, field) in action.fields.iter().enumerate() {
+                let end = field.byte_offset.saturating_add(field.byte_len);
+                for earlier in &action.fields[..index] {
+                    let earlier_end = earlier.byte_offset.saturating_add(earlier.byte_len);
+                    let start = field.byte_offset.max(earlier.byte_offset);
+                    let stop = end.min(earlier_end);
+                    // Strict: half-open ranges that merely *meet* (0..2 and
+                    // 2..3) share no byte, and a zero-length field covers
+                    // none at all.
+                    if start < stop {
+                        return Err(RegistryError::FieldRangesOverlap {
+                            action_name: action.name.clone(),
+                            first_field: earlier.name.clone(),
+                            second_field: field.name.clone(),
+                            overlap_start: start,
+                            overlap_end: stop,
                         });
                     }
                 }
@@ -665,9 +794,14 @@ values = [{{ label = "On", bytes = [1] }}]
     #[test]
     fn an_offset_that_would_overflow_is_refused_rather_than_wrapping() {
         // `usize::MAX` as an offset makes `byte_offset + byte_len` panic in
-        // debug and wrap to 0 in release — a range that passes every check
-        // and then indexes wherever it likes. Saturating is why this is a
-        // refusal on both profiles.
+        // debug and wrap to a length of 0 in release — a range that passes
+        // every check and then *panics* on the slice index that follows,
+        // because the allocation succeeds at length 0 and slice bounds checks
+        // are never elided in either profile. There is no out-of-bounds write
+        // available here; the defect is a crash on a hand edit, and the
+        // un-overflowing case (a 4 GB offset, which passes and then sizes a
+        // 4 GB allocation) is the larger hazard. Saturating is why this is a
+        // named refusal on both profiles instead of either.
         let registry = ActionRegistry {
             actions: vec![RegisteredAction {
                 name: "wrapper".to_string(),
@@ -695,6 +829,204 @@ values = [{{ label = "On", bytes = [1] }}]
         let mut registry = sample_registry();
         registry.actions[0].fields[0].byte_offset = MAX_PAYLOAD_LEN - 1;
         registry.validate().unwrap();
+    }
+
+    /// A scratch firmware-repo root, unique per test.
+    fn scratch_repo(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "embarch-study-designer-registry-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(dir.join("embarch")).unwrap();
+        dir
+    }
+
+    fn uuid_array(byte: u8) -> String {
+        let items: Vec<String> = (0..16).map(|_| byte.to_string()).collect();
+        format!("[{}]", items.join(", "))
+    }
+
+    #[test]
+    fn two_fields_covering_one_byte_are_refused_at_load() {
+        // Hand-written, because this is a hand-edit mistake: `header` claims
+        // bytes 1..3 and `mode` claims 2..4, so they share byte 2 and nothing
+        // in the file says so. The overlap is *partial* on purpose — that is
+        // the case where the payload ends up holding a byte string nobody
+        // registered; `study_builder`'s own
+        // `an_overlapping_registry_the_builder_never_validated_splices_two_values`
+        // is where that is demonstrated rather than asserted.
+        let dir = scratch_repo("overlap");
+        let raw = format!(
+            r#"
+[[actions]]
+name = "set_mode"
+service_uuid = {service}
+uuid = {characteristic}
+operation = "write"
+
+[[actions.fields]]
+name = "header"
+byte_offset = 1
+byte_len = 2
+values = [{{ label = "V1", bytes = [0xA1, 0xA2] }}]
+
+[[actions.fields]]
+name = "mode"
+byte_offset = 2
+byte_len = 2
+values = [{{ label = "On", bytes = [0xB1, 0xB2] }}]
+"#,
+            service = uuid_array(0xAA),
+            characteristic = uuid_array(0xAB),
+        );
+        std::fs::write(registry_path(&dir), raw).unwrap();
+
+        let err = match ActionRegistry::load(&dir) {
+            Err(e) => e,
+            Ok(other) => panic!("expected a FieldRangesOverlap, loaded {other:?}"),
+        };
+        match &err {
+            RegistryError::FieldRangesOverlap {
+                action_name,
+                first_field,
+                second_field,
+                overlap_start,
+                overlap_end,
+            } => {
+                assert_eq!(action_name, "set_mode");
+                // Declaration order, not alphabetical: the first name is the
+                // field whose bytes lose, which is the half a reader needs.
+                assert_eq!(first_field, "header");
+                assert_eq!(second_field, "mode");
+                assert_eq!((*overlap_start, *overlap_end), (2, 3));
+            }
+            other => panic!("expected a FieldRangesOverlap, got {other:?}"),
+        }
+        // Asserted rather than eyeballed: the understated version of this
+        // message ("the later declaration wins") is wrong for exactly the
+        // case in this test, so the wording is part of the fix.
+        assert_eq!(
+            err.to_string(),
+            "action 'set_mode': fields 'header' and 'mode' both cover bytes 2..3; 'mode' is \
+             written second and overwrites them, so 'header's chosen value is not in the \
+             payload — and where the ranges only partly overlap, what is there instead is a \
+             splice of both that nobody registered"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn fields_that_only_meet_at_a_boundary_are_accepted() {
+        // The ranges are half-open, so 0..2 and 2..3 are adjacent and share
+        // nothing. This is the ordinary shape of a multi-field payload and
+        // the check must not refuse it.
+        let mut registry = sample_registry();
+        registry.actions[0].fields[0].byte_len = 2;
+        registry.actions[0].fields[0].values = vec![
+            ActionFieldValue { label: "Off".to_string(), bytes: vec![0x00, 0x00] },
+            ActionFieldValue { label: "On".to_string(), bytes: vec![0x00, 0x01] },
+        ];
+        registry.actions[0].fields.push(ActionField {
+            name: "flags".to_string(),
+            byte_offset: 2,
+            byte_len: 1,
+            values: vec![ActionFieldValue { label: "None".to_string(), bytes: vec![0x00] }],
+        });
+        registry.validate().unwrap();
+    }
+
+    #[test]
+    fn a_zero_length_field_covers_no_byte_and_so_overlaps_nothing() {
+        // `byte_len = 0` is a degenerate but representable hand edit. It
+        // covers no byte, so it cannot collide with one — the check is `<`,
+        // not `<=`, and this is what pins that.
+        let mut registry = sample_registry();
+        registry.actions[0].fields.push(ActionField {
+            name: "nothing".to_string(),
+            byte_offset: 0,
+            byte_len: 0,
+            values: vec![ActionFieldValue { label: "Empty".to_string(), bytes: Vec::new() }],
+        });
+        registry.validate().unwrap();
+    }
+
+    #[test]
+    fn a_read_action_carrying_fields_is_refused_at_load() {
+        // Documented as meaningless since decision 35 and enforced by nothing
+        // until now: the file offered a choice the builder discards, and the
+        // engineer's only signal was a `NotWritable` at build time blaming
+        // the row for picking what the registry had offered it.
+        let dir = scratch_repo("read-fields");
+        let raw = format!(
+            r#"
+[[actions]]
+name = "read_status"
+service_uuid = {service}
+uuid = {characteristic}
+operation = "read"
+
+[[actions.fields]]
+name = "mode"
+byte_offset = 0
+byte_len = 1
+values = [{{ label = "On", bytes = [1] }}]
+"#,
+            service = uuid_array(0xAA),
+            characteristic = uuid_array(0xAB),
+        );
+        std::fs::write(registry_path(&dir), raw).unwrap();
+
+        let err = match ActionRegistry::load(&dir) {
+            Err(e) => e,
+            Ok(other) => panic!("expected a FieldsOnNonWriteAction, loaded {other:?}"),
+        };
+        match &err {
+            RegistryError::FieldsOnNonWriteAction { action_name, field_name, operation } => {
+                assert_eq!(action_name, "read_status");
+                assert_eq!(field_name, "mode");
+                assert_eq!(*operation, RegisteredOperation::Read);
+            }
+            other => panic!("expected a FieldsOnNonWriteAction, got {other:?}"),
+        }
+        // The message names the operation with the word the file spells, not
+        // the `Debug` capitalisation, so it points at the line to edit.
+        assert_eq!(
+            err.to_string(),
+            "action 'read_status' is a read but declares field 'mode'; fields describe a write \
+             payload, and a read sends none — those choices could never leave the host"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn every_non_write_operation_refuses_a_field_and_write_keeps_them() {
+        // The rule is "only a write has a payload", not "reads are special":
+        // subscribe, notify and indicate send no payload either, and each has
+        // its own line in the TOML an engineer might attach fields to.
+        for operation in [
+            RegisteredOperation::Read,
+            RegisteredOperation::Subscribe,
+            RegisteredOperation::Notify,
+            RegisteredOperation::Indicate,
+        ] {
+            let mut registry = sample_registry();
+            registry.actions[0].operation = operation;
+            match registry.validate() {
+                Err(RegistryError::FieldsOnNonWriteAction { operation: got, .. }) => {
+                    assert_eq!(got, operation);
+                }
+                other => panic!("expected a FieldsOnNonWriteAction for {operation:?}, got {other:?}"),
+            }
+            // ...and the same action with no fields is fine, so what is being
+            // refused is the fields and not the operation.
+            registry.actions[0].fields.clear();
+            registry.validate().unwrap();
+        }
+        assert!(sample_registry().validate().is_ok());
     }
 
     #[test]

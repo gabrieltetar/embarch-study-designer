@@ -1012,6 +1012,75 @@ mod tests {
     }
 
     #[test]
+    fn an_overlapping_registry_the_builder_never_validated_splices_two_values() {
+        // The evidence behind `RegistryError::FieldRangesOverlap`'s wording,
+        // demonstrated rather than asserted in prose. `header` claims bytes
+        // 1..3 and picks [0xA1, 0xA2]; `mode` claims 2..4 and picks
+        // [0xB1, 0xB2]. They are written in declaration order, so byte 2 is
+        // written twice and what lands at `header`'s own offset is
+        // [0xA1, 0xB1] — the head of one pick and the head of the other, a
+        // pair that appears in neither field's `values` list. "The later
+        // declaration wins" would be the reassuring version of this: it would
+        // mean each field's range holds *some* registered value. It does not.
+        //
+        // The builder reaches this state at all only because it is downstream
+        // of the gate rather than part of it: `ActionRegistry::validate`
+        // refuses this registry (asserted at the bottom), and this one was
+        // assembled in memory and never passed through it. That is the
+        // residual, and it is the same one the duplicate-name rule has.
+        let mut registry = registry_with_write_action();
+        registry.actions[0].fields = vec![
+            ActionField {
+                name: "header".to_string(),
+                byte_offset: 1,
+                byte_len: 2,
+                values: vec![ActionFieldValue {
+                    label: "V1".to_string(),
+                    bytes: vec![0xA1, 0xA2],
+                }],
+            },
+            ActionField {
+                name: "mode".to_string(),
+                byte_offset: 2,
+                byte_len: 2,
+                values: vec![ActionFieldValue {
+                    label: "On".to_string(),
+                    bytes: vec![0xB1, 0xB2],
+                }],
+            },
+        ];
+        let mut field_choices = HashMap::new();
+        field_choices.insert("header".to_string(), "V1".to_string());
+        field_choices.insert("mode".to_string(), "On".to_string());
+        let rows = vec![TableRow {
+            name: "set-on".to_string(),
+            action: RowAction::Registered { name: "set_mode".to_string(), field_choices },
+            timeout_ms: 5_000,
+            continue_on_fail: false,
+            delay_before_ms: 0,
+        }];
+
+        let study = build_study("s", &rows, &registry).unwrap();
+        match &study.steps[0].action {
+            Action::DataExchange { operation: GattOperation::Write { payload }, .. } => {
+                assert_eq!(payload.as_slice(), &[0x00, 0xA1, 0xB1, 0xB2]);
+                // `header` was told to send [0xA1, 0xA2]. Its own bytes hold
+                // neither that nor `mode`'s [0xB1, 0xB2].
+                let at_header = &payload[1..3];
+                assert_eq!(at_header, &[0xA1, 0xB1]);
+                assert_ne!(at_header, &registry.actions[0].fields[0].values[0].bytes[..]);
+                assert_ne!(at_header, &registry.actions[0].fields[1].values[0].bytes[..]);
+            }
+            other => panic!("expected a Write, got {other:?}"),
+        }
+
+        assert!(matches!(
+            registry.validate(),
+            Err(crate::registry::RegistryError::FieldRangesOverlap { .. })
+        ));
+    }
+
+    #[test]
     fn an_unknown_registered_action_name_is_a_named_error() {
         let rows = vec![TableRow {
             name: "x".to_string(),
