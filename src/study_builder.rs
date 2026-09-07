@@ -1081,6 +1081,72 @@ mod tests {
     }
 
     #[test]
+    fn two_fields_sharing_a_name_the_builder_never_validated_write_one_pick_into_both() {
+        // The evidence behind `RegistryError::DuplicateActionField`, same
+        // posture as `an_overlapping_registry_the_builder_never_validated_splices_two_values`:
+        // this registry is assembled in memory and never passed through
+        // `ActionRegistry::validate` (asserted at the bottom), which is the
+        // only reason the builder reaches this state at all.
+        //
+        // Both fields are named `mode`. `field_choices` is a
+        // `HashMap<String, String>` keyed by that name — the UI's own
+        // dropdown is keyed the same way — so there is only ever **one**
+        // entry no matter how the two fields differ, and `resolve_write_payload`
+        // resolves both fields' choices against it. Here the single label
+        // "On" happens to also name a value on the second field, so both
+        // byte ranges are written from that one pick: byte 1 becomes 0x03
+        // (the second field's own "On"), not 0x02 ("Low"), which the
+        // engineer never had a way to choose because the two dropdowns
+        // collapsed into one.
+        let mut registry = registry_with_write_action();
+        registry.actions[0].fields = vec![
+            ActionField {
+                name: "mode".to_string(),
+                byte_offset: 0,
+                byte_len: 1,
+                values: vec![
+                    ActionFieldValue { label: "Off".to_string(), bytes: vec![0x00] },
+                    ActionFieldValue { label: "On".to_string(), bytes: vec![0x01] },
+                ],
+            },
+            ActionField {
+                name: "mode".to_string(),
+                byte_offset: 1,
+                byte_len: 1,
+                values: vec![
+                    ActionFieldValue { label: "Low".to_string(), bytes: vec![0x02] },
+                    ActionFieldValue { label: "On".to_string(), bytes: vec![0x03] },
+                ],
+            },
+        ];
+        let mut field_choices = HashMap::new();
+        field_choices.insert("mode".to_string(), "On".to_string());
+        let rows = vec![TableRow {
+            name: "set-on".to_string(),
+            action: RowAction::Registered { name: "set_mode".to_string(), field_choices },
+            timeout_ms: 5_000,
+            continue_on_fail: false,
+            delay_before_ms: 0,
+        }];
+
+        let study = build_study("s", &rows, &registry).unwrap();
+        match &study.steps[0].action {
+            Action::DataExchange { operation: GattOperation::Write { payload }, .. } => {
+                // Both ranges came from the single "On" pick: the second
+                // field's own "Low" was never reachable, because there was
+                // never a second dropdown entry to choose it from.
+                assert_eq!(payload.as_slice(), &[0x01, 0x03]);
+            }
+            other => panic!("expected a Write, got {other:?}"),
+        }
+
+        assert!(matches!(
+            registry.validate(),
+            Err(crate::registry::RegistryError::DuplicateActionField { .. })
+        ));
+    }
+
+    #[test]
     fn an_unknown_registered_action_name_is_a_named_error() {
         let rows = vec![TableRow {
             name: "x".to_string(),

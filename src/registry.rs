@@ -186,6 +186,22 @@ pub enum RegistryError {
         field_name: String,
         operation: RegisteredOperation,
     },
+    /// Two of one action's `[[actions.fields]]` entries share a `name`.
+    /// `resolve_write_payload` (`study_builder.rs`) and the UI's own dropdown
+    /// both key a field's choice by `field.name` in a
+    /// `HashMap<String, String>`, so the two fields do not each get their own
+    /// entry — they get **one**, whichever label the engineer last picked
+    /// under that name. Resolving the first field's choice against the
+    /// second field's `values` (or the reverse) then goes one of two ways
+    /// with no third option: if the picked label also names a value on the
+    /// other field, that value's bytes are written into **both** byte
+    /// ranges, silently, and the UI still shows both dropdowns as
+    /// independently answered; if it does not, the row fails with
+    /// `UnknownFieldChoice` naming a label the engineer *did* choose, for a
+    /// field that never offered it. Decision 35's duplicate-name rule one
+    /// level down: the same hand-edited file, the same "the registry
+    /// advertises two choices and offers one."
+    DuplicateActionField { action_name: String, field_name: String },
     /// A `study-structs.toml` field declares a scalar type this crate has no
     /// spelling for — named rather than defaulted to a plausible width
     /// (design.md §3 decision 52).
@@ -266,6 +282,13 @@ impl std::fmt::Display for RegistryError {
                      leave the host"
                 )
             }
+            RegistryError::DuplicateActionField { action_name, field_name } => write!(
+                f,
+                "action '{action_name}' has two fields both named '{field_name}'; a choice for \
+                 it is keyed by that name alone, so one pick resolves for both byte ranges — \
+                 writing it into both if the label also names a value on the other field, or \
+                 refusing the row as an unknown choice for the field it does not"
+            ),
             RegistryError::UnknownScalarType { layout_name, field_name, declared } => write!(
                 f,
                 "struct '{layout_name}' field '{field_name}' declares type '{declared}', which is \
@@ -325,20 +348,20 @@ impl ActionRegistry {
         fs::write(&path, raw).map_err(RegistryError::Io)
     }
 
-    /// Confirms no two actions share a name, that only a `Write` action
-    /// carries fields, that every field's byte range ends inside
-    /// [`MAX_PAYLOAD_LEN`], that no two fields of one action cover the same
-    /// byte, and that every field's every value has exactly `byte_len`
-    /// bytes. Pure/offline — no I/O, callable independent of `load`/`save`;
-    /// called by both, so a file this refuses can be neither read nor
-    /// written.
+    /// Confirms no two actions share a name, that no two fields of one
+    /// action share a name, that only a `Write` action carries fields, that
+    /// every field's byte range ends inside [`MAX_PAYLOAD_LEN`], that no two
+    /// fields of one action cover the same byte, and that every field's
+    /// every value has exactly `byte_len` bytes. Pure/offline — no I/O,
+    /// callable independent of `load`/`save`; called by both, so a file this
+    /// refuses can be neither read nor written.
     ///
     /// **This is the whole gate on registry shape.** `study_builder` re-checks
     /// exactly one of these rules, the `MAX_PAYLOAD_LEN` bound, and only
     /// because that number sizes an allocation it makes before any of this has
-    /// necessarily run; it re-checks neither the duplicate-name rule nor the
-    /// overlap one. An `ActionRegistry` assembled in memory and never passed
-    /// through here can still build a study whose payload is wrong.
+    /// necessarily run; it re-checks none of the name, field-name or overlap
+    /// rules. An `ActionRegistry` assembled in memory and never passed through
+    /// here can still build a study whose payload is wrong.
     pub fn validate(&self) -> Result<(), RegistryError> {
         for (index, action) in self.actions.iter().enumerate() {
             if self.actions[..index].iter().any(|earlier| earlier.name == action.name) {
@@ -361,7 +384,19 @@ impl ActionRegistry {
                     operation: action.operation,
                 });
             }
-            for field in &action.fields {
+            for (index, field) in action.fields.iter().enumerate() {
+                // Before the range/value checks below, same reasoning as the
+                // duplicate-action scan above: a name collision is a
+                // different mistake from a bad range or a bad value length,
+                // and it is the one that lets a single hand edit look like
+                // it validates fine while the resolver can never tell the
+                // two fields apart.
+                if action.fields[..index].iter().any(|earlier| earlier.name == field.name) {
+                    return Err(RegistryError::DuplicateActionField {
+                        action_name: action.name.clone(),
+                        field_name: field.name.clone(),
+                    });
+                }
                 // Saturating, for the reason on the variant: `+` here would
                 // panic in debug and wrap to a passing range in release on
                 // an offset near `usize::MAX`, and this file is hand-edited.
@@ -918,6 +953,61 @@ values = [{{ label = "On", bytes = [0xB1, 0xB2] }}]
              written second and overwrites them, so 'header's chosen value is not in the \
              payload — and where the ranges only partly overlap, what is there instead is a \
              splice of both that nobody registered"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn two_fields_of_one_action_sharing_a_name_are_refused_at_load() {
+        // Hand-written, same reason as `two_fields_covering_one_byte_are_refused_at_load`:
+        // this is the mistake a human makes editing the file, not one this
+        // crate would construct in memory. Two disjoint ranges, both named
+        // `mode` — the ranges alone are fine; it is the shared name that a
+        // `field_choices` lookup (keyed by name, `study_builder.rs`) cannot
+        // tell apart.
+        let dir = scratch_repo("dup-field-name");
+        let raw = format!(
+            r#"
+[[actions]]
+name = "set_mode"
+service_uuid = {service}
+uuid = {characteristic}
+operation = "write"
+
+[[actions.fields]]
+name = "mode"
+byte_offset = 0
+byte_len = 1
+values = [{{ label = "Off", bytes = [0x00] }}, {{ label = "On", bytes = [0x01] }}]
+
+[[actions.fields]]
+name = "mode"
+byte_offset = 1
+byte_len = 1
+values = [{{ label = "Low", bytes = [0x00] }}, {{ label = "High", bytes = [0x01] }}]
+"#,
+            service = uuid_array(0xAA),
+            characteristic = uuid_array(0xAB),
+        );
+        std::fs::write(registry_path(&dir), raw).unwrap();
+
+        let err = match ActionRegistry::load(&dir) {
+            Err(e) => e,
+            Ok(other) => panic!("expected a DuplicateActionField, loaded {other:?}"),
+        };
+        match &err {
+            RegistryError::DuplicateActionField { action_name, field_name } => {
+                assert_eq!(action_name, "set_mode");
+                assert_eq!(field_name, "mode");
+            }
+            other => panic!("expected a DuplicateActionField, got {other:?}"),
+        }
+        assert_eq!(
+            err.to_string(),
+            "action 'set_mode' has two fields both named 'mode'; a choice for it is keyed by \
+             that name alone, so one pick resolves for both byte ranges — writing it into both \
+             if the label also names a value on the other field, or refusing the row as an \
+             unknown choice for the field it does not"
         );
         std::fs::remove_dir_all(&dir).ok();
     }
