@@ -403,6 +403,7 @@ mod tests {
             name: heapless::String::try_from("outpost").unwrap(),
             bytes_written: 4_096,
             truncated: false,
+            records: None,
         };
         let short = StreamRef { truncated: true, ..full.clone() };
         assert_ne!(full, short);

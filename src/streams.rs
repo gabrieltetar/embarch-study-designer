@@ -338,6 +338,20 @@ pub struct StreamRef {
     /// **A stream that lost data says so** rather than presenting a shorter,
     /// plausible capture as complete.
     pub truncated: bool,
+    /// What checking this capture's records found, when the study declared
+    /// their framing in `Study.record_checks` — see [`crate::records`].
+    ///
+    /// `None` means the study declared no framing for this tap, which is not
+    /// the same fact as "every record verified": a capture nobody could check
+    /// and a capture that checked out are different answers, and conflating
+    /// them is how a short capture read as complete in the first place.
+    ///
+    /// This is the end-to-end statement `truncated` cannot make. `truncated`
+    /// says a *link* reported losing something; this says whether the bytes on
+    /// disk are the bytes the DUT computed a checksum over, across every hop
+    /// between them.
+    #[serde(default)]
+    pub records: Option<crate::records::RecordReport>,
 }
 
 /// Why a submitted `Study`'s `streams` aren't usable — `POST /study`'s
