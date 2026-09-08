@@ -58,6 +58,7 @@ pub mod outpost;
 #[cfg(feature = "study-ui")]
 pub mod merged_actions;
 pub mod protocol;
+pub mod records;
 #[cfg(feature = "study-ui")]
 pub mod registry;
 pub mod result;
@@ -160,6 +161,7 @@ mod tests {
             protocols_crc: 0,
 
             decoders: Default::default(),
+            record_checks: Default::default(),
             name: heapless::String::try_from("smoke-test").unwrap(),
             requires: Requirements::any(),
             steps,

@@ -317,7 +317,18 @@ pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 15;
 ///   host-only: `Study.protocols`/`protocols_crc` cross `embarch-api` ->
 ///   `embarch-core` as JSON *and* cross to dev-bench, which is the whole
 ///   difference between a protocol and a decoder (decision 58).
-pub const HOST_TYPE_SCHEMA_VERSION: u32 = 17;
+/// - **v18** — host-only, and deliberately *not* a wire bump: the
+///   `Study.record_checks` declaration and the `RecordReport` Core returns on
+///   a `StreamRef` (decision 60). dev-bench neither parses nor emits either
+///   one — a tap's record framing is what a captured byte *means*, which is
+///   the knowledge decision 39 took away from it, and `StudyStart` carries
+///   `steps`/`streams`/`protocols` and nothing else. Naming the tap by its
+///   `id` instead of referencing this from `StreamEncoding` is what kept it
+///   off the wire: an encoding crosses inside `StudyStart`, so pointing at a
+///   host-side check from there would have cost a firmware reflash for a
+///   check no firmware runs. So [`DEV_BENCH_WIRE_SCHEMA_VERSION`] stays at
+///   15 and the two numbers legitimately diverge again, as they did at v16.
+pub const HOST_TYPE_SCHEMA_VERSION: u32 = 18;
 
 /// [`HOST_TYPE_SCHEMA_VERSION`]'s triggers are a strict superset of
 /// [`DEV_BENCH_WIRE_SCHEMA_VERSION`]'s (decision 12's

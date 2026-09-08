@@ -220,6 +220,25 @@ pub struct Study {
     /// studies did.
     #[serde(default)]
     pub decoders: crate::bounded::Bounded<crate::decoder::StructLayout, MAX_DECODERS_PER_STUDY>,
+    /// Per-tap record framing, checked by Core against the capture after the
+    /// run — see [`crate::records`].
+    ///
+    /// **Host-only, exactly like `requires` and `decoders`**: never
+    /// transmitted to dev-bench, and sealed by neither `steps_crc` nor
+    /// `streams_crc`. What a captured byte means is knowledge decision 39 took
+    /// away from dev-bench, and whether the host checks a checksum afterwards
+    /// changes neither what dev-bench executes nor what it captures. Naming
+    /// the tap by its `id` rather than referencing this from
+    /// `StreamEncoding` is what keeps it that way — a tap's encoding crosses
+    /// the wire inside `StudyStart`, so pointing at this from there would
+    /// make a host-side check cost a firmware reflash.
+    ///
+    /// `#[serde(default)]` so every study authored before this existed still
+    /// loads, as a study that checks nothing — which is what those studies
+    /// did, and why a 10 h drain could report a short capture as complete.
+    #[serde(default)]
+    pub record_checks:
+        crate::bounded::Bounded<crate::records::RecordCheck, MAX_STREAMS_PER_STUDY>,
 }
 
 /// The explicit "I don't care which build" value for either

@@ -370,6 +370,7 @@ pub fn build_study(
         // repo's `study-structs.toml` is in reach), and this function has no
         // repo path to resolve a layout name against.
         decoders: crate::bounded::Bounded::new(),
+        record_checks: crate::bounded::Bounded::new(),
     })
 }
 

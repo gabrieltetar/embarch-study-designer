@@ -328,6 +328,7 @@ mod tests {
             protocols: Default::default(),
             protocols_crc: 0,
             decoders: Default::default(),
+            record_checks: Default::default(),
             name: String::try_from("t").unwrap(),
             requires: crate::study::Requirements::any(),
             steps: steps.clone(),
@@ -386,6 +387,7 @@ mod tests {
             protocols_crc: 0,
 
             decoders: Default::default(),
+            record_checks: Default::default(),
             name: String::try_from("ble-advertise-study").unwrap(),
             requires: crate::study::Requirements::any(),
             steps,
@@ -457,6 +459,7 @@ mod tests {
             protocols: Default::default(),
             protocols_crc: 0,
             decoders: Default::default(),
+            record_checks: Default::default(),
             name: String::try_from("t").unwrap(),
             requires: crate::study::Requirements::any(),
             steps,

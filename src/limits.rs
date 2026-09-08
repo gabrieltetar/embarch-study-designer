@@ -99,6 +99,19 @@ pub const MAX_MONITOR_TARGETS: usize = 16;
 /// study resolves out of the firmware repo's `study-structs.toml`. Bounded
 /// by what a study can actually reference: a decoder is only reachable
 /// through a tap's `StreamEncoding::Struct`, and there are at most
+/// Longest record magic a [`crate::records::RecordFraming`] may declare.
+/// `GWF1` and the WDS spill's are four bytes; eight leaves room without
+/// letting a "magic" become a header.
+pub const MAX_RECORD_MAGIC_LEN: usize = 8;
+
+/// How many damaged-record offsets a [`crate::records::RecordReport`] lists.
+///
+/// The *count* of damaged records is never capped -- only this list is -- so a
+/// badly damaged capture cannot read as a mildly damaged one. Thirty-two is
+/// enough to point at a pattern (a burst of losses, or one per hour) which is
+/// what an offset list is actually for; past that the count is the finding.
+pub const MAX_BAD_RECORDS_REPORTED: usize = 32;
+
 /// [`MAX_STREAMS_PER_STUDY`] taps.
 pub const MAX_DECODERS_PER_STUDY: usize = MAX_STREAMS_PER_STUDY;
 /// `StructLayout.name` (design.md §4.8a) — the name a tap's decoder is
