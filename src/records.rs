@@ -338,6 +338,45 @@ mod tests {
         assert_eq!(r.leading_bytes, 5, "every byte belongs to no record");
     }
 
+    /// The exact JSON a study file carries, pinned.
+    ///
+    /// **This is the wiring most likely to fail on the bench and nowhere
+    /// else.** A `record_checks` entry is hand-authored into a study's JSON
+    /// and only ever meets this type inside Core, at `POST /study` — so a
+    /// serde representation that disagrees with what an author writes shows up
+    /// as a rejected study minutes before a 10 h run, not as a failing test.
+    /// This is the shape written into `bds-ppg-drain-10h.json` and its
+    /// siblings, byte for byte.
+    #[test]
+    fn the_json_a_study_file_carries_deserializes() {
+        let json = r#"{"stream_id":0,"framing":{"MagicPrefixedCrc32Le":{"magic":[71,87,70,49]}}}"#;
+        let check: RecordCheck = serde_json::from_str(json).unwrap();
+        assert_eq!(check.stream_id, 0);
+        let RecordFraming::MagicPrefixedCrc32Le { magic } = &check.framing;
+        assert_eq!(magic.as_slice(), b"GWF1", "71 87 70 49 is 'GWF1'");
+    }
+
+    /// A report survives the events.json path it is written and read back
+    /// through, including an empty offset list and the `None` that means
+    /// nobody checked.
+    #[test]
+    fn a_report_round_trips_through_json() {
+        let mut r = RecordReport { total: 598, verified: 595, bad_offsets: Vec::new(), leading_bytes: 0 };
+        for at in [3_340_812u32, 5_077_323, 8_944_504] {
+            r.bad_offsets.push(at).unwrap();
+        }
+        let back: RecordReport = serde_json::from_str(&serde_json::to_string(&r).unwrap()).unwrap();
+        assert_eq!(back, r);
+        assert!(!back.all_verified());
+
+        let clean = RecordReport { total: 22, verified: 22, bad_offsets: Vec::new(), leading_bytes: 0 };
+        let back: RecordReport = serde_json::from_str(&serde_json::to_string(&clean).unwrap()).unwrap();
+        assert!(back.all_verified());
+
+        let absent: Option<RecordReport> = serde_json::from_str("null").unwrap();
+        assert!(absent.is_none(), "no declared framing is not the same as everything verifying");
+    }
+
     /// The true shortfall is never capped even when the offset list is, so a
     /// badly damaged capture cannot read as a mildly damaged one.
     #[test]
