@@ -78,9 +78,9 @@ pub const MAX_STREAM_CHUNK_BYTES: usize = 512;
 /// `MAX_BATCH_SAMPLES` did for `Sample`s.
 pub const MAX_STREAM_RECORDS_PER_BATCH: usize = 4;
 /// `GattServiceInfo` entries per `StepResult.gatt_services` (design.md §3
-/// decisions 31/32, §4.3a); sized against real DUT firmware observed so far
-/// (`reference-dut-fw`'s `lib/ble/ble_def.h`/`ble.c` declares 2
-/// services today), with headroom for a DUT this crate hasn't seen yet.
+/// decisions 31/32, §4.3a); bounded against decision 57's validated GATT
+/// table — 3 services declared, 7 total once an encrypted link reaches
+/// the rest — with headroom for a DUT this crate hasn't seen yet.
 pub const MAX_DISCOVERED_SERVICES: usize = 8;
 /// `GattServiceInfo.characteristics` (design.md §4.3a); the same DUT's
 /// larger service (Sensor Data Service) declares up to 7 characteristics
