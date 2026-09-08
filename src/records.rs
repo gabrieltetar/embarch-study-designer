@@ -1,5 +1,5 @@
 //! Engineer-declared record framing for a stream tap, and the check Core runs
-//! against it after a capture — design.md §3 decision 60.
+//! against it after a capture — decision 70.
 //!
 //! **This exists because a capture could be short and say it was complete.**
 //! A 10 h PPG drain (`embarch-core` study `872aef3c466dd465c66e671412a97760`,

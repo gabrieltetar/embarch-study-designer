@@ -319,7 +319,7 @@ pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 15;
 ///   difference between a protocol and a decoder (decision 58).
 /// - **v18** — host-only, and deliberately *not* a wire bump: the
 ///   `Study.record_checks` declaration and the `RecordReport` Core returns on
-///   a `StreamRef` (decision 60). dev-bench neither parses nor emits either
+///   a `StreamRef` (decision 70). dev-bench neither parses nor emits either
 ///   one — a tap's record framing is what a captured byte *means*, which is
 ///   the knowledge decision 39 took away from it, and `StudyStart` carries
 ///   `steps`/`streams`/`protocols` and nothing else. Naming the tap by its
