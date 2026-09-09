@@ -32,18 +32,31 @@ section.
 ## Features
 
 - **default** — `#![no_std]`, no allocator, no floating-point-heavy code. What
-  `embarch-api` and dev-bench firmware link.
-- **`core-validation`** — enables `std` and the `signal` module's `SignalCheck`
-  evaluation logic. Only `embarch-core`'s build turns this on.
+  dev-bench firmware links.
+- **`alloc`** — heap-backed `Study.steps` and result containers instead of a
+  fixed-capacity `heapless` collection. Host consumers (`embarch-api`,
+  `embarch-core`, `embarch-ui`) enable it.
+- **`std`** — enables `alloc` plus the standard library, for the
+  authoring-time tools (`gatt-extract`, `study-ui`). dev-bench firmware never
+  enables this.
 - **`ffi`** — enables the `ffi` module's `extern "C"` functions. Only dev-bench
   firmware's build turns this on; today this is a minimal, representative
   slice of the eventual surface (see `ffi.rs`'s module docs) — it locks in the
   calling convention, not the full set of functions real dev-bench firmware
   will eventually need.
+- **`gatt-extract`** — the repo-walking GATT extractor (needs `regex`,
+  `ignore`): the `GattConfigExtractor` trait, `ZephyrBleDefExtractor`, and the
+  `extract-gatt-config` CLI binary. An authoring-time binary; `std`-only.
+- **`study-ui`** — table-authoring types, the study builder, and the
+  custom-action registry that `embarch-ui`'s Study Designer tab depends on.
+  `std`-only.
+- **`eap-parse`** — the `.eap` protocol-manifest parser and a host-side
+  reference interpreter, for authoring and for pinning the semantics C must
+  match. `std`-only.
 
-Run the full test suite with `cargo test --features core-validation,ffi`; a
-plain `cargo test`/`cargo build` (no features) exercises the actual
-`#![no_std]`, no-allocator path every consumer besides `embarch-core` compiles.
+Run the full test suite with `cargo test --all-features`; a plain
+`cargo test`/`cargo build` (no features) exercises the actual `#![no_std]`,
+no-allocator path every consumer besides the host crates compiles.
 
 ## Status
 
