@@ -1,4 +1,4 @@
-//! `steps_crc` and `streams_crc` — design.md §3 decision 17's integrity seal
+//! `steps_crc` and `streams_crc` — decision 17's integrity seal
 //! over `Study.steps`, and decision 39's 2026-08-25 amendment's sibling seal
 //! over `Study.streams`.
 //!
@@ -19,9 +19,9 @@ use crate::study::Step;
 const CRC32: Crc<u32> = Crc::<u32>::new(&CRC_32_ISO_HDLC);
 
 /// A single `Step`'s postcard encoding didn't fit the internal scratch
-/// buffer. Should be unreachable given `limits` (design.md §3 decision 15),
+/// buffer. Should be unreachable given `limits` (decision 15),
 /// but this returns an error rather than panicking — this crate avoids
-/// panics as a matter of course, not just at the FFI boundary (§3 decision 23).
+/// panics as a matter of course, not just at the FFI boundary (decision 23).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StepTooLargeError;
 
@@ -42,7 +42,7 @@ pub struct StreamTapTooLargeError;
 pub struct ProtocolTooLargeError;
 
 /// CRC-32 (the common "CRC-32"/Ethernet/zip polynomial) over a `Study`'s
-/// `steps`, design.md §3 decision 17. Computed once by whoever submits a
+/// `steps`, decision 17. Computed once by whoever submits a
 /// `Study` (`embarch-api`, or a human via the CLI); checked again,
 /// independently, at both the API<->Core hop and the Core<->dev-bench hop.
 ///
@@ -50,8 +50,8 @@ pub struct ProtocolTooLargeError;
 /// time rather than buffering the whole `steps` list at once, so a
 /// constrained dev-bench MCU only ever needs a stack buffer sized for one
 /// `Step`, not for `MAX_STEPS_PER_STUDY` of them.
-/// Takes a slice rather than a concrete collection (design.md §3 decision
-/// 46): `Study.steps`' backing store now differs per feature, and this
+/// Takes a slice rather than a concrete collection (decision 46):
+/// `Study.steps`' backing store now differs per feature, and this
 /// function only ever iterates, so a slice is both the honest signature and
 /// the one that works for either shape. `&study.steps` coerces via `Deref`.
 pub fn steps_crc(steps: &[Step]) -> Result<u32, StepTooLargeError> {
@@ -68,7 +68,7 @@ pub fn steps_crc(steps: &[Step]) -> Result<u32, StepTooLargeError> {
     Ok(digest.finalize())
 }
 
-/// CRC-32 over a `Study`'s `streams`, design.md §3 decision 39's 2026-08-25
+/// CRC-32 over a `Study`'s `streams`, decision 39's 2026-08-25
 /// amendment — a **sibling** of [`steps_crc`], not a widening of it.
 ///
 /// Same algorithm, same one-item-at-a-time digest, and the same
@@ -78,7 +78,7 @@ pub fn steps_crc(steps: &[Step]) -> Result<u32, StepTooLargeError> {
 /// **A study with no taps seals to `0`**, which is not a sentinel — it is the
 /// genuine CRC-32/ISO-HDLC of zero bytes (init and xorout are both
 /// `0xFFFF_FFFF`, which cancel). That is what makes `Study.streams_crc`'s
-/// `#[serde(default)]` honest for a saved study (§3 decision 38) authored
+/// `#[serde(default)]` honest for a saved study (decision 38) authored
 /// before taps existed: the defaulted value is the correct value, not a
 /// placeholder standing in for one.
 pub fn streams_crc(
@@ -98,11 +98,11 @@ pub fn streams_crc(
     Ok(digest.finalize())
 }
 
-/// CRC-32 over a `Study`'s `protocols` (design.md §3 decision 58) — the
+/// CRC-32 over a `Study`'s `protocols` (decision 58) — the
 /// third seal, and the first one added since `streams_crc`.
 ///
-/// **Why a protocol is sealed when a decoder is not.** `Study.decoders` (§3
-/// decision 52) is covered by neither CRC, because a layout only decides how
+/// **Why a protocol is sealed when a decoder is not.** `Study.decoders`
+/// (decision 52) is covered by neither CRC, because a layout only decides how
 /// the host *renders* a byte that was already captured, and re-rendering a
 /// capture with a corrected layout must leave it the same study. A
 /// `ProtocolDef` is the opposite: dev-bench **executes** it, so it is
@@ -115,8 +115,9 @@ pub fn streams_crc(
 /// time so a constrained dev-bench MCU needs stack for one `ProtocolDef`
 /// rather than for `MAX_PROTOCOLS_PER_STUDY` of them.
 ///
-/// **This is also the in-frame `crc32` primitive's algorithm** (§3 decision
-/// 59). CRC-32/ISO-HDLC *is* the CRC-32 the design doc named by its seed:
+/// **This is also the in-frame `crc32` primitive's algorithm** (decision 59).
+/// CRC-32/ISO-HDLC *is* the CRC-32 this crate's protocol grammar named by its
+/// seed:
 /// init `0xFFFFFFFF`, reflected in and out, final XOR `0xFFFFFFFF` — bit for
 /// bit what Zephyr's `crc32_ieee` computes. So the manifest-identity seal and
 /// the checksum inside a DUT's own frames run through one implementation,
@@ -128,7 +129,7 @@ pub fn protocols_crc(protocols: &[crate::eap::ProtocolDef]) -> Result<u32, Proto
     // to 12 states, each with a write and four event arms, plus frames and
     // sources carrying two 16-byte UUIDs apiece. Sized with the same
     // generous margin its siblings use rather than tuned to the two worked
-    // protocols, per §3 decision 15's posture on every constant here.
+    // protocols, per decision 15's posture on every constant here.
     const SCRATCH_LEN: usize = 8192;
 
     let mut digest = CRC32.digest();
@@ -141,14 +142,14 @@ pub fn protocols_crc(protocols: &[crate::eap::ProtocolDef]) -> Result<u32, Proto
 }
 
 /// CRC-32/ISO-HDLC over an arbitrary byte run — the in-frame `crc32`
-/// primitive of §3 decision 59's grammar, and the same digest the three
+/// primitive of decision 59's grammar, and the same digest the three
 /// study seals use.
 ///
 /// Exposed rather than kept private because a `crc32` frame primitive is
 /// applied host-side at render time ([`crate::eap_parse`]), which is a
 /// different module from the one sealing a `Study`, and this crate's answer
 /// to "two places need the identical computation" is one function, not two
-/// (§3 decision 2).
+/// (decision 2).
 pub fn crc32_ieee(bytes: &[u8]) -> u32 {
     CRC32.checksum(bytes)
 }

@@ -1,8 +1,8 @@
-//! The user-authored custom-action registry — design.md §3 decision 35.
+//! The user-authored custom-action registry — decision 35.
 //!
 //! `std`-only (file I/O, `toml`), gated behind the `study-ui` feature —
 //! never linked by dev-bench firmware or embarch-core/embarch-api's plain
-//! Cargo-dependency use, same posture as `gatt_extract` (§3 decision 33).
+//! Cargo-dependency use, same posture as `gatt_extract` (decision 33).
 //!
 //! **The one rule this whole module exists to enforce: nothing in this
 //! crate ever infers what a GATT action does.** A [`RegisteredAction`] is
@@ -16,8 +16,7 @@
 //!
 //! Persisted as `<firmware-repo>/embarch/study-actions.toml`, sibling to
 //! `embarch.toml` — travels with the firmware repo, shared across engineers
-//! the same way that file already is (`embarch-study-designer/milestone-11.md`
-//! §3.1).
+//! the same way that file already is.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -117,7 +116,7 @@ pub enum RegistryError {
     Serialize(toml::ser::Error),
     /// A `RegisteredAction`'s field has a value whose `bytes.len()` doesn't
     /// match that field's own declared `byte_len` — caught explicitly
-    /// (§3.1's own "checked, not structurally enforced" note) rather than
+    /// ("checked, not structurally enforced") rather than
     /// silently truncating or padding a mismatch a hand-edited file could
     /// easily introduce.
     FieldLengthMismatch {
@@ -204,7 +203,7 @@ pub enum RegistryError {
     DuplicateActionField { action_name: String, field_name: String },
     /// A `study-structs.toml` field declares a scalar type this crate has no
     /// spelling for — named rather than defaulted to a plausible width
-    /// (design.md §3 decision 52).
+    /// (decision 52).
     UnknownScalarType { layout_name: String, field_name: String, declared: String },
     /// A tap references a layout no `study-structs.toml` defines. Caught at
     /// authoring time, where the author can fix it, rather than at render
@@ -313,7 +312,8 @@ impl std::fmt::Display for RegistryError {
 impl std::error::Error for RegistryError {}
 
 /// `<firmware-repo>/embarch/study-actions.toml` — sibling to `embarch.toml`
-/// (`embarch-api/design.md` §4's own convention for that file's location).
+/// (`embarch-api`'s own convention for that file's location, see
+/// `embarch-api/interfaces/config.md`).
 pub fn registry_path(firmware_repo_root: &Path) -> PathBuf {
     firmware_repo_root.join("embarch").join("study-actions.toml")
 }
@@ -321,7 +321,7 @@ pub fn registry_path(firmware_repo_root: &Path) -> PathBuf {
 impl ActionRegistry {
     /// Loads the registry from `<firmware_repo_root>/embarch/study-actions.toml`.
     /// A missing file is an empty registry, not an error — this file has no
-    /// `embarch init`-equivalent bootstrap step yet (milestone-11.md §5), so
+    /// `embarch init`-equivalent bootstrap step yet, so
     /// "doesn't exist" is the ordinary starting state for a firmware repo
     /// that's never registered a custom action.
     pub fn load(firmware_repo_root: &Path) -> Result<ActionRegistry, RegistryError> {
@@ -462,8 +462,7 @@ pub fn struct_registry_path(firmware_repo_root: &Path) -> PathBuf {
     firmware_repo_root.join("embarch").join("study-structs.toml")
 }
 
-/// One `[[struct]]` entry as the TOML file spells it — design.md §3
-/// decision 52.
+/// One `[[struct]]` entry as the TOML file spells it — decision 52.
 ///
 /// Deliberately a plain-`String` mirror of [`crate::decoder::StructLayout`]
 /// rather than that type deserialized directly. A hand-edited TOML file's
@@ -494,8 +493,7 @@ pub struct StructFieldDef {
     pub ty: String,
 }
 
-/// Every payload layout one firmware repo has declared — design.md §3
-/// decision 52.
+/// Every payload layout one firmware repo has declared — decision 52.
 ///
 /// **This never says what a characteristic is *for*.** It says how wide its
 /// fields are and what order the bytes come in, under names the engineer

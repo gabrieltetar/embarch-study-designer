@@ -1,18 +1,18 @@
-//! Host-side reference interpreter for a [`ProtocolDef`] — design.md §3
-//! decision 60, §4.9.
+//! Host-side reference interpreter for a [`ProtocolDef`] — decision 60
+//! (interfaces/eap.md).
 //!
 //! # This is the reference, not the executor
 //!
-//! §3 decision 60 puts the real interpreter **on dev-bench**: the loop closes
+//! decision 60 puts the real interpreter **on dev-bench**: the loop closes
 //! against the DUT's own BLE connection interval, Core sends nothing
 //! mid-study, and `main.c`'s receive-then-run model is unchanged. That
 //! interpreter is hand-written C and is `embarch-dev-bench`'s own scope, the
-//! same way §3 decisions 31/32 shipped `GattDiscover`/`GattMonitorAll`'s wire
+//! same way decisions 31/32 shipped `GattDiscover`/`GattMonitorAll`'s wire
 //! types here and left live BLE dispatch there.
 //!
 //! What lives here is the **semantics those two have to agree on**, executable:
 //!
-//! - it is what the worked protocols in §4.9 are tested against, so the
+//! - it is what the worked protocols in interfaces/eap.md are tested against, so the
 //!   primitive set is *proven* sufficient for a real DUT's handshake rather
 //!   than illustrated as if it were;
 //! - it is what a cross-language wire-byte contract test pins the C against,
@@ -50,7 +50,7 @@ pub enum Step {
     /// Perform a GATT write of `payload` to `source`, then wait.
     ///
     /// **A write's own ATT response is never fed back in.** There is no
-    /// `Event` for one, deliberately (§3 decision 60): on the DUT this was
+    /// `Event` for one, deliberately (decision 60): on the DUT this was
     /// designed against, a control-point write's response confirms only that
     /// the write was accepted, and the authoritative answer arrives later as
     /// an independent notification on a different characteristic. `Step` says
@@ -100,7 +100,7 @@ impl<'p> Run<'p> {
     }
 
     /// Session variables, in declaration order. Exposed for tests and for
-    /// offline replay; **not** reported in [`ProtocolOutcome`] — see §3
+    /// offline replay; **not** reported in [`ProtocolOutcome`] — see
     /// decision 62 for why that stayed out of the result.
     pub fn session(&self) -> &[i64] {
         &self.session

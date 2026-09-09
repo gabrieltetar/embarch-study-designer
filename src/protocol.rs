@@ -1,8 +1,8 @@
 //! `DevBenchMessage` — the Core↔dev-bench serial wire protocol.
 //!
-//! design.md §3 decisions 10, 12, 20. COBS-framed, postcard-encoded
+//! decisions 10, 12, 20. COBS-framed, postcard-encoded
 //! (framing/encoding themselves are transport concerns handled by whichever
-//! component owns the serial port, not this crate — §3 decision 2). Versioned
+//! component owns the serial port, not this crate — decision 2). Versioned
 //! by appending variants only, never reordering or removing one, so
 //! postcard's varint enum discriminant stays wire-compatible across additions.
 
@@ -16,33 +16,33 @@ use crate::limits::{
 use crate::result::StepResult;
 use crate::streams::{StreamRecord, StreamTap};
 
-/// Every message dev-bench sends or receives. Append-only (design.md §3
-/// decision 10) — do not reorder or remove variants once this ships.
+/// Every message dev-bench sends or receives. Append-only (decision 10) —
+/// do not reorder or remove variants once this ships.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum DevBenchMessage {
     /// Sent by Core when it opens the serial port, before any `Study`
     /// traffic. Unconditionally tells dev-bench to abort whatever it's
-    /// currently running and clear its execution state (design.md §3
-    /// decision 12/16) — a hard reset, not just a version check.
+    /// currently running and clear its execution state (decision 12/16) —
+    /// a hard reset, not just a version check.
     Hello {
         schema_version: u32,
         /// Core's current UTC time in milliseconds since the epoch.
         /// Dev-bench's only clock source — it seeds/resyncs its own UTC
-        /// offset from this on every `Hello` (design.md §3 decision 12),
+        /// offset from this on every `Hello` (decision 12),
         /// which is what makes `Sample::rx_utc_ms` meaningful.
         host_utc_ms: u64,
     },
     HelloAck {
         schema_version: u32,
         compatible: bool,
-        /// Identifies which dev-bench firmware build replied (embarch-dev-bench/design.md
-        /// §3 decision 18) — e.g. `git describe` output, a board ID, a build timestamp, or
-        /// some combination; the exact contents are dev-bench build-tooling's own concern.
+        /// Identifies which dev-bench firmware build replied
+        /// (embarch-dev-bench decision 18) — e.g. `git describe` output, a
+        /// board ID, a build timestamp, or some combination; the exact
+        /// contents are dev-bench build-tooling's own concern.
         firmware_version: String<MAX_FIRMWARE_VERSION_LEN>,
         /// Dev-bench's own factory-unique chip ID, hex-encoded lowercase —
         /// what Zephyr's `hwinfo_get_device_id` returns on the board that
-        /// replied (design.md §3 decision 47, `embarch-core/design.md` §3
-        /// decision 35).
+        /// replied (decision 47, embarch-core decision 35).
         ///
         /// **Closes a hole nothing else could see.** Core re-verifies the
         /// enrolled probe's identity over JTAG on every call, and the
@@ -59,7 +59,7 @@ pub enum DevBenchMessage {
         hardware_id: String<MAX_HARDWARE_ID_LEN>,
     },
     /// Opens the tap whose `id` this is — its own index in `Study.streams`
-    /// (design.md §3 decision 39, §4.8). Carries no `step_index`: when a
+    /// (decision 39, interfaces/taps.md). Carries no `step_index`: when a
     /// tap opens is a property of its declared
     /// [`StreamScope`](crate::streams::StreamScope), not of the wire.
     ///
@@ -89,20 +89,20 @@ pub enum DevBenchMessage {
     /// producer lost — **a stream that lost data says so** rather than
     /// presenting a shorter, plausible capture as complete.
     StreamClose { id: u8, dropped: u32 },
-    /// Dev-bench's own log output (embarch-dev-bench/design.md §3 decision 7) — travels as
+    /// Dev-bench's own log output (embarch-dev-bench decision 7) — travels as
     /// a properly-framed message like everything else on this link rather than as raw
     /// interleaved bytes on the shared serial line, which would corrupt COBS framing.
     LogLine { text: String<MAX_LOG_LINE_LEN> },
     /// Sent by Core exactly once, immediately after the `Hello`/`HelloAck`
     /// handshake completes — the whole `Study.steps` vector transferred in
     /// one postcard-encoded message rather than streamed step-by-step
-    /// (design.md §3 decision 24). `steps_crc` travels here rather than on
-    /// `Hello` (design.md §3 decision 17's integrity seal), since `Hello`
+    /// (decision 24). `steps_crc` travels here rather than on
+    /// `Hello` (decision 17's integrity seal), since `Hello`
     /// itself precedes any `Study` being submitted.
     StudyStart {
         steps: crate::bounded::StepList,
         steps_crc: u32,
-        /// The study's declared taps (design.md §3 decision 39, §4.8).
+        /// The study's declared taps (decision 39, interfaces/taps.md).
         ///
         /// This is the one part of a `Study` beyond `steps` that dev-bench
         /// genuinely needs: four of the five
@@ -113,12 +113,12 @@ pub enum DevBenchMessage {
         /// `StreamChunkBatch`/`StreamClose`.
         ///
         /// `Study.requires` still never crosses this
-        /// hop (design.md §3 decisions 17, 40) — neither is anything
+        /// hop (decisions 17, 40) — neither is anything
         /// dev-bench could act on. **`steps_crc` still seals `steps`
         /// alone**; `streams` has its own sibling seal, `streams_crc`
         /// below.
         streams: Vec<StreamTap, MAX_STREAMS_PER_STUDY>,
-        /// CRC-32 over `streams`, design.md §3 decision 39's 2026-08-25
+        /// CRC-32 over `streams`, decision 39's 2026-08-25
         /// amendment — [`crate::crc::streams_crc`], checked here
         /// independently of `steps_crc` exactly as `steps_crc` is.
         ///
@@ -131,17 +131,17 @@ pub enum DevBenchMessage {
         /// order — a reshape where an append will do.
         streams_crc: u32,
         /// How loud dev-bench should be for this study
-        /// (`embarch-dev-bench/design.md` §3 decision 39). Appended after
+        /// (embarch-dev-bench decision 39). Appended after
         /// `streams_crc`, never inserted — postcard is positional.
         ///
         /// A scalar rather than a per-tap property, and deliberately not
         /// carried on the reserved `DevBenchLog` tap that stores the result:
         /// that tap is synthesized by Core and never crosses this hop at all
-        /// (§4.8), and "how verbose is the bench" is a property of the run,
+        /// (interfaces/taps.md), and "how verbose is the bench" is a property of the run,
         /// not of one capture channel.
         dev_bench_log_level: crate::study::DevBenchLogLevel,
         /// The `.eap` protocol manifests this study resolved at build time
-        /// (design.md §3 decision 58, §4.9), and the third seal over them.
+        /// (decision 58, interfaces/eap.md), and the third seal over them.
         ///
         /// **This is the field that makes decision 60 real.** Decision 60
         /// put the interpreter on dev-bench rather than in Core, and the
@@ -162,7 +162,7 @@ pub enum DevBenchMessage {
         ///
         /// `Study.decoders` still does **not** cross this hop and never
         /// will: a layout decides how the host renders a byte that was
-        /// already captured, and dev-bench renders nothing (§3 decision 52).
+        /// already captured, and dev-bench renders nothing (decision 52).
         protocols: crate::bounded::Bounded<crate::eap::ProtocolDef, MAX_PROTOCOLS_PER_STUDY>,
         /// CRC-32 over `protocols` — [`crate::crc::protocols_crc`], checked
         /// on arrival independently of the other two exactly as they are of
@@ -170,19 +170,19 @@ pub enum DevBenchMessage {
         protocols_crc: u32,
     },
     /// Sent by dev-bench as each step completes, streaming results back
-    /// incrementally rather than batched at the end (design.md §3 decision
-    /// 24). `step_index` correlates back to `StudyStart.steps`' array
-    /// position (design.md §3 decision 14).
+    /// incrementally rather than batched at the end (decision 24).
+    /// `step_index` correlates back to `StudyStart.steps`' array
+    /// position (decision 14).
     StepResult {
         step_index: u32,
         result: StepResult,
     },
     /// Sent by dev-bench exactly once, after the last step it actually ran
-    /// (design.md §3 decision 24) — `completed` distinguishes a `Study` that
+    /// (decision 24) — `completed` distinguishes a `Study` that
     /// ran to its natural end from one aborted early by a failing step with
     /// `continue_on_fail: false`.
     StudyDone { completed: bool },
-    // The old batched `StreamChunkBatch` (design.md §3 decision 25) and
+    // The old batched `StreamChunkBatch` (decision 25) and
     // `GattTranscriptRecord` (decision 36) were the last two variants here
     // and are both **retired** by decision 39. `StreamChunk` and
     // `StreamChunkBatch` had been live simultaneously, handled by Core in

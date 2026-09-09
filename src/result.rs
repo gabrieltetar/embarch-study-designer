@@ -1,4 +1,4 @@
-//! `StudyResult`/`StepResult`/`Outcome` — design.md §4.5.
+//! `StudyResult`/`StepResult`/`Outcome` — interfaces/types.md.
 
 use heapless::{String, Vec};
 use serde::{Deserialize, Serialize};
@@ -20,19 +20,19 @@ pub struct StudyResult {
     pub study_name: String<MAX_STUDY_NAME_LEN>,
     pub steps: crate::bounded::Bounded<StepResult, MAX_STEPS_PER_STUDY>,
     /// What this run actually executed against, and how each version was
-    /// established (design.md §3 decision 40, §4.5). Closes a gap wider than
+    /// established (decision 40, interfaces/types.md). Closes a gap wider than
     /// the one it was raised for: before this, two runs of the same study
     /// against two different firmware builds produced results that were
     /// indistinguishable after the fact.
     pub provenance: Provenance,
-    /// One entry per declared tap (design.md §3 decision 39, §4.8) —
+    /// One entry per declared tap (decision 39, interfaces/taps.md) —
     /// replaces `StepResult`'s retired `power_samples_ref`/`waveform_ref`,
     /// which could not describe a capture whose scope outlives one step.
     pub streams: Vec<StreamRef, MAX_STREAMS_PER_STUDY>,
 }
 
 /// What a `StudyResult` ran against, and **how each version was
-/// established** (design.md §3 decision 40, §4.5).
+/// established** (decision 40, interfaces/types.md).
 ///
 /// The source fields are not bookkeeping. A `Declared` DUT version is an
 /// assertion nobody checked; a result that rendered it identically to a
@@ -45,7 +45,7 @@ pub struct Provenance {
     pub dev_bench_source: VersionSource,
     pub firmware_source: VersionSource,
     /// Every version requirement this run had **waved through** rather than
-    /// satisfied (design.md §3 decision 40: an override "is recorded in the
+    /// satisfied (decision 40: an override "is recorded in the
     /// result rather than silently honoured"). Empty is the normal case and
     /// means the gate was satisfied, not that nobody looked.
     ///
@@ -81,7 +81,7 @@ impl Provenance {
 }
 
 /// One version requirement a run was allowed to proceed in spite of
-/// (design.md §3 decision 40, §4.5).
+/// (decision 40, interfaces/types.md).
 ///
 /// Carries both strings because the whole content of an override is the gap
 /// between them: "this study asked for X, it ran against Y, and somebody
@@ -117,14 +117,13 @@ impl VersionSubject {
     }
 }
 
-/// How a version in [`Provenance`] was established (design.md §3 decision
-/// 40). Append-only.
+/// How a version in [`Provenance`] was established (decision 40). Append-only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum VersionSource {
     /// dev-bench said so over `HelloAck` — Core read it off the live link.
     ReportedByDevBench,
     /// The DUT's own outpost stream header carried a build ID
-    /// (`embarch-outpost/design.md` §3 decision 9).
+    /// (embarch-outpost decision 9).
     ReportedByOutpost,
     /// This run flashed it, so the run knows what it put there — the only
     /// way to *know* a DUT's firmware version rather than assert it.
@@ -133,12 +132,12 @@ pub enum VersionSource {
     /// `POST /study` are separate calls with nothing linking them, so the
     /// only process that can honestly say this is the one that sequenced
     /// both — `embarch-api`, which tells Core so out of band of the `Study`
-    /// body (`embarch-api/design.md` §3 decision 40,
-    /// `embarch-core/design.md` §3 decision 31). Reflash is a run parameter,
+    /// body (embarch-api decision 40,
+    /// embarch-core decision 31). Reflash is a run parameter,
     /// not a study field, so it could not have ridden inside `Study`.
     FlashedThisRun,
     /// Asserted, unverified. Render this visibly weaker than the three
-    /// above (`embarch-ui/design.md` §3 decision 11); never as a fact.
+    /// above (embarch-ui decision 11); never as a fact.
     Declared,
 }
 
@@ -151,8 +150,7 @@ impl VersionSource {
 }
 
 /// `step_name` is a denormalized copy of `Step.name`, carried purely for
-/// human readability — never used for machine correlation (design.md §3
-/// decision 14).
+/// human readability — never used for machine correlation (decision 14).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StepResult {
     pub step_name: String<MAX_NAME_LEN>,
@@ -161,14 +159,14 @@ pub struct StepResult {
     /// unused for other action kinds.
     pub captured_data: Option<Vec<u8, MAX_PAYLOAD_LEN>>,
     // `power_samples_ref`/`waveform_ref` were here and are **retired** by
-    // design.md §3 decision 39: a capture is a property of the study's
+    // decision 39: a capture is a property of the study's
     // declared taps, not of one step, so what a run captured is reported
     // once as `StudyResult::streams` rather than as two optional
     // per-step file references that no tap outliving a single step could
     // ever have filled in correctly.
     /// Populated by every discovering action — `GattDiscover`,
     /// `GattMonitorAll`/`GattMonitorStart` and their selective counterparts
-    /// (design.md §3 decisions 31/32/53, §4.3a). Landing inline in
+    /// (decisions 31/32/53, interfaces/gatt-types.md). Landing inline in
     /// `events.json` like `captured_data` rather than as a CSV-file
     /// reference, since both are bounded and small enough to stay
     /// JSON-friendly (unlike the high-rate power/waveform channels).
@@ -176,19 +174,19 @@ pub struct StepResult {
     /// field still deserializes.
     #[serde(default)]
     pub gatt_services: Option<crate::bounded::Bounded<GattServiceInfo, MAX_DISCOVERED_SERVICES>>,
-    // `gatt_activity` was here and is **retired** by design.md §3 decision
-    // 54. It held at most 32 captured notifications per step — its bound,
+    // `gatt_activity` was here and is **retired** by decision 54. It held at
+    // most 32 captured notifications per step — its bound,
     // `MAX_GATT_ACTIVITY_RECORDS`, was retired with it and survives only as a
     // tombstone in `interfaces/limits.md` — inline in `events.json`: a
-    // bounded, in-memory
-    // copy of something unbounded and streamed. The tap pipeline (§4.8)
-    // already writes every record incrementally to a file, so the capped
+    // bounded, in-memory copy of something unbounded and streamed. The tap
+    // pipeline (interfaces/taps.md) already writes every record
+    // incrementally to a file, so the capped
     // copy's only remaining effect was to let a study *look* complete while
     // holding 32 of several thousand records. A study with a monitor step
     // now gets an auto-declared `GattTranscript` tap instead
-    // (`embarch-ui/design.md` §3 decision 15), and the file is the answer.
+    // (embarch-ui decision 15), and the file is the answer.
     /// The BLE security level the link was actually sitting at when this
-    /// step finished (design.md §3 decision 50) — `None` when there was no
+    /// step finished (decision 50) — `None` when there was no
     /// connection to ask about.
     ///
     /// **Populated for every step, not only for
@@ -208,7 +206,7 @@ pub struct StepResult {
     #[serde(default)]
     pub security_level: Option<crate::study::BleSecurityLevel>,
     /// What an [`Action::RunProtocol`](crate::study::Action::RunProtocol)
-    /// step's state machine did (design.md §3 decision 62). `None` for every
+    /// step's state machine did (decision 62). `None` for every
     /// other action kind, which is every action that existed before it.
     ///
     /// **Appended last on purpose.** postcard encodes a struct's fields in
@@ -216,22 +214,22 @@ pub struct StepResult {
     /// every byte after it; appending makes the change a pure suffix that
     /// dev-bench's hand-written C decoder can adopt by reading one more
     /// `Option` at the end rather than by re-walking the message. The
-    /// schema bump and the reflash are owed either way (§3 decision 36), but
+    /// schema bump and the reflash are owed either way (decision 36), but
     /// the diff a human has to check is a byte instead of a message.
     #[serde(default)]
     pub protocol: Option<ProtocolOutcome>,
 }
 
-/// What one protocol run ended as — design.md §3 decision 62.
+/// What one protocol run ended as — decision 62.
 ///
 /// **Two fields, and the draft's third is deliberately absent.** That draft
 /// had this carrying a bounded `heapless::Vec` of every decoded field the run
-/// saw, addressable by path. That is the exact shape §3 decision 54 retired
+/// saw, addressable by path. That is the exact shape decision 54 retired
 /// `StepResult.gatt_activity` for one week earlier: a bounded, in-memory copy
 /// of something unbounded and streamed, which lets a result *look* complete
 /// while holding a fraction of what arrived. Decoded values reach a reader the
 /// way every other captured byte does — through the tap the study declared,
-/// rendered host-side (§3 decision 52). This type says only what the tap
+/// rendered host-side (decision 52). This type says only what the tap
 /// cannot: which state the machine stopped in.
 ///
 /// Keeping `outcome` alongside `StepResult.outcome` is not redundancy. The
@@ -256,7 +254,8 @@ pub struct ProtocolOutcome {
 
 /// The only on-device validation signal — did the action complete without a
 /// protocol-level error or timeout. Whether the *content* was correct is a
-/// separate, Core-side, post-hoc question (design.md §3 decision 19, §4.6).
+/// separate, Core-side, post-hoc question (decision 19,
+/// decisions/removed.md).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Outcome {
     Pass,

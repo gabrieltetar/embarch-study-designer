@@ -1,4 +1,4 @@
-//! Vendor-defined GATT service *identities* — design.md §3 decision 41.
+//! Vendor-defined GATT service *identities* — decision 41.
 //!
 //! `no_std`, allocation-free, always compiled (no feature gate): dev-bench
 //! firmware, `embarch-core`, `embarch-api` and a Study Designer UI all need
@@ -56,7 +56,7 @@ pub struct VendorCharacteristic {
     /// The vendor's own name for it, for display.
     pub name: &'static str,
     /// The same identity in the few characters a picker's label has room for
-    /// (design.md §3 decision 56). A separate field rather than a truncation
+    /// (decision 56). A separate field rather than a truncation
     /// of [`name`](Self::name): `name` is the vendor's full sentence, and the
     /// place to decide what its short form is, is the table that knows both.
     pub short_name: &'static str,
@@ -189,7 +189,7 @@ pub fn find_by_uuid(
     })
 }
 
-/// The **service** a UUID names, or `None` (§3 decision 57).
+/// The **service** a UUID names, or `None` (decision 57).
 ///
 /// The service-level counterpart to [`find_by_uuid`], added when service
 /// identifiers stopped being thrown away: a picker that groups

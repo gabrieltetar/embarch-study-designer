@@ -4,15 +4,18 @@
 //! `Study` crossing between them can't drift into three independently
 //! maintained, slowly-diverging definitions.
 //!
-//! See `embarch-doc`'s `embarch-study-designer/design.md` for the full
-//! architecture record this crate is a mechanical translation of. Section
-//! references in doc comments throughout this crate (`§4.1`, `§3 decision
-//! 17`, etc.) point back into that document.
+//! See `embarch-doc`'s `embarch-study-designer/spec.md` for the current
+//! architecture record this crate is a mechanical translation of, with why
+//! in `decisions.md`, unresolved questions in `open.md`, and field-level
+//! detail in `interfaces/*.md`. References in doc comments throughout this
+//! crate (`decision 17`, `interfaces/types.md`, etc.) point back into those
+//! documents; a bare `spec.md §N` points at that file's own numbered
+//! section.
 //!
-//! `#![no_std]` by default (design.md §3 decision 5) — the `std` feature
+//! `#![no_std]` by default (decision 5) — the `std` feature
 //! lifts that, solely so the `gatt-extract`/`study-ui` features' authoring-time
 //! tools can use the filesystem. Every sequence/string field uses
-//! fixed-capacity `heapless` collections, not `alloc` (§3 decision 15) — with
+//! fixed-capacity `heapless` collections, not `alloc` (decision 15) — with
 //! exactly one opt-in exception, added by design decision 46: the `alloc`
 //! feature backs `Study.steps` with a heap `Vec` instead of a 64-slot inline
 //! array, for host consumers that have an allocator anyway and were paying
@@ -25,22 +28,22 @@
 // large on the stack is the accepted trade-off for staying allocator-free.
 #![allow(clippy::large_enum_variant)]
 
-// `alloc` is opted into by host consumers (design.md §3 decision 46) and is
+// `alloc` is opted into by host consumers (decision 46) and is
 // unavailable to dev-bench firmware, so every use of it is feature-gated.
 #[cfg(feature = "alloc")]
 extern crate alloc;
 
 pub mod crc;
 pub mod decoder;
-/// `.eap` protocol manifests, in the form dev-bench executes (§3 decisions
+/// `.eap` protocol manifests, in the form dev-bench executes (decisions
 /// 58-62). `no_std` like every other wire type — the *parser* that produces
 /// one is not (see [`eap_parse`]).
 pub mod eap;
 #[cfg(feature = "ffi")]
 pub mod ffi;
 pub mod gatt;
-/// The `.eap` text parser and host-side reference interpreter (§3
-/// decisions 58-62) — `std`-only authoring-time tooling, the same posture
+/// The `.eap` text parser and host-side reference interpreter (decisions
+/// 58-62) — `std`-only authoring-time tooling, the same posture
 /// as [`gatt_extract`], so dev-bench firmware never carries it.
 #[cfg(feature = "eap-parse")]
 pub mod eap_interp;
@@ -48,7 +51,7 @@ pub mod eap_interp;
 pub mod eap_parse;
 #[cfg(feature = "gatt-extract")]
 pub mod gatt_extract;
-/// Characteristic display names (§3 decision 56) — `std`-only, so a
+/// Characteristic display names (decision 56) — `std`-only, so a
 /// dev-bench firmware build never carries it.
 #[cfg(feature = "std")]
 pub mod gatt_names;
@@ -195,7 +198,7 @@ mod tests {
     /// Encode/decode one message and assert it survives, in a callee frame
     /// so the caller never holds more than one at a time.
     ///
-    /// Still in a callee frame after design.md §3 decision 46, for a reason
+    /// Still in a callee frame after decision 46, for a reason
     /// that changed: `StudyStart`'s steps are no longer a 64-slot inline
     /// array (this test build has `alloc`), so `DevBenchMessage` is far
     /// smaller than the ~40 KiB it used to be — but `StepResult`'s own
@@ -270,7 +273,7 @@ mod tests {
 
     #[test]
     fn requires_never_crosses_the_wire_to_dev_bench() {
-        // design.md §3 decision 40: `requires` is host-side only. dev-bench
+        // decision 40: `requires` is host-side only. dev-bench
         // has no use for a
         // requirement it cannot check about itself, and `steps_crc` seals
         // what dev-bench actually executes, which is unchanged.
@@ -309,7 +312,7 @@ mod tests {
 
     #[test]
     fn a_declared_version_is_never_reported_as_a_verified_one() {
-        // design.md §3 decision 40's load-bearing asymmetry: dev-bench
+        // decision 40's load-bearing asymmetry: dev-bench
         // self-reports over HelloAck and is genuinely checked; the DUT
         // reports nothing at all, so an unflashed run's DUT version is an
         // assertion nobody verified. A result that rendered the two
@@ -343,7 +346,7 @@ mod tests {
 
     #[test]
     fn an_overridden_run_says_so_in_its_own_result() {
-        // design.md §3 decision 40: an override is "recorded in the result
+        // decision 40: an override is "recorded in the result
         // rather than silently honoured". The thing that makes the record
         // worth having is that both strings survive into it — `Study.requires`
         // never travels into a `StudyResult`, so without them a reader has no
@@ -478,11 +481,10 @@ mod tests {
         assert!(heapless::String::<{ limits::MAX_NAME_LEN }>::try_from(too_long).is_err());
     }
 
-    // design.md §3 decisions 31/32/33, embarch-study-designer/milestone-9.md
-    // §3.1-3.4: the GATT-discovery types, the two new `Action` variants, and
+    // decisions 31/32/33: the GATT-discovery types, the two new `Action` variants, and
     // `StepResult`'s two new fields all round-trip through both postcard
     // (the Core<->dev-bench wire format) and serde_json (the
-    // embarch-api/events.json path, §3 decision 3's format-agnostic stance).
+    // embarch-api/events.json path, decision 3's format-agnostic stance).
 
     fn sample_gatt_services() -> bounded::Bounded<crate::gatt::GattServiceInfo, { limits::MAX_DISCOVERED_SERVICES }> {
         let mut chars: HVec<crate::gatt::GattCharacteristicInfo, { limits::MAX_CHARS_PER_SERVICE }> =
@@ -508,7 +510,7 @@ mod tests {
 
         // Encoded from a `Bounded` and decoded back into a plain
         // `heapless::Vec` — which is now the load-bearing assertion behind
-        // §3 decisions 46/49 needing no schema bump. A host encoding this
+        // decisions 46/49 needing no schema bump. A host encoding this
         // field and a dev-bench build decoding it hold *different* shapes of
         // the same type, and this is what says those shapes agree on the
         // wire. Compared as slices because the two are deliberately not the
@@ -528,7 +530,7 @@ mod tests {
     #[test]
     fn a_gatt_target_round_trips_through_both_formats() {
         // Replaces `GattActivityRecord`'s round-trip, retired with the type
-        // by design.md §3 decision 54. `GattTarget` is what a study now says
+        // by decision 54. `GattTarget` is what a study now says
         // about a characteristic it cares about (decision 53).
         let target = crate::gatt::GattTarget {
             service_uuid: Uuid([0x11; 16]),
@@ -580,8 +582,8 @@ mod tests {
         let decoded: StepResult = serde_json::from_str(&json).unwrap();
         assert_eq!(result, decoded);
 
-        // A `StepResult` JSON predating decision 31/32 (no `gatt_services`/
-        // — this is the specific claim milestone-9.md §2's scope note makes.
+        // A `StepResult` JSON predating decision 31/32 (no `gatt_services`)
+        // still deserializes, with the new field defaulting to `None`.
         let legacy_json = r#"{
             "step_name": "connect",
             "outcome": "Pass",
@@ -591,7 +593,7 @@ mod tests {
         assert_eq!(decoded.gatt_services, None);
     }
 
-    // design.md §3 decision 36, §4.3b: the streamed GATT transcript — its
+    // decision 36 (interfaces/gatt-types.md): the streamed GATT transcript — its
     // record type, its own wire variant, the two window actions, and the
     // `gatt.csv` rendering whose column knowledge lives only in this crate.
 
@@ -679,7 +681,7 @@ mod tests {
         assert_eq!(round_tripped, entry);
     }
 
-    // ---- Cross-language wire contract (design.md §3 decisions 36, 39) ----
+    // ---- Cross-language wire contract (decisions 36, 39) ----
     //
     // dev-bench firmware hand-writes its postcard encoding in C
     // (`serial_protocol.c`), and nothing in either side's own test suite
@@ -1040,7 +1042,7 @@ mod tests {
         // postcard encodes an enum as a varint discriminant, so appending is
         // only safe if every pre-existing variant keeps its index. This
         // pins all seven rather than trusting the declaration order to be
-        // left alone (design.md §3 decision 10's append-only rule, applied
+        // left alone (decision 10's append-only rule, applied
         // to `Action` as well as `DevBenchMessage`).
         let cases: [(Action, u8); 7] = [
             (
@@ -1051,7 +1053,7 @@ mod tests {
             (Action::GattMonitorAll {}, 4),
             (Action::GattMonitorStart {}, 5),
             (Action::GattMonitorStop {}, 6),
-            // Schema v12 (design.md §3 decisions 50/51) -- appended at the
+            // Schema v12 (decisions 50/51) -- appended at the
             // end, never inserted, which is the whole reason these two
             // numbers are worth pinning rather than reading off the
             // declaration.

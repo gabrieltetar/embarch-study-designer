@@ -1,5 +1,4 @@
-//! The merged action list a Study Designer UI row picks from — design.md
-//! §3 decisions 34/35, `embarch-study-designer/milestone-11.md` §3.2.
+//! The merged action list a Study Designer UI row picks from — decisions 34/35.
 //!
 //! `std`-only (uses `std::collections::HashMap`), gated behind the
 //! `study-ui` feature. Pure and offline: takes whatever `GattServiceInfo`
@@ -29,13 +28,13 @@ pub enum BuiltInAction {
     BleConnect,
     GattDiscover,
     GattMonitorAll,
-    /// design.md §3 decision 36 — opens a capture window that stays armed
+    /// decision 36 — opens a capture window that stays armed
     /// across the steps that follow it.
     GattMonitorStart,
-    /// design.md §3 decision 36 — closes the window `GattMonitorStart`
+    /// decision 36 — closes the window `GattMonitorStart`
     /// opened.
     GattMonitorStop,
-    /// design.md §3 decision 50 — elevates the link's security. Listed here
+    /// decision 50 — elevates the link's security. Listed here
     /// rather than left to `Raw`/`Registered`: it takes no UUID and no
     /// payload, so it is exactly the shape this list is for, and an action
     /// that exists on the wire but on no clickable row is an action nobody
@@ -43,7 +42,7 @@ pub enum BuiltInAction {
     /// The level it asks for rides on the row, not on this enum — see
     /// `study_builder::RowAction::BuiltIn::security_level`.
     BleSecurity,
-    /// design.md §3 decision 51 — drops the bond mid-study.
+    /// decision 51 — drops the bond mid-study.
     BleUnbond,
 }
 
@@ -83,7 +82,7 @@ pub enum MergedAction {
     Registered(RegisteredAction),
     /// A characteristic some discovery source found, but nobody has
     /// registered an action against yet — the UI's own prompt to route the
-    /// engineer to the registration form (milestone-11.md §3.4), not
+    /// engineer to the registration form, not
     /// something a Study row can be built from directly. `service_uuid` is
     /// carried alongside `uuid` since registering an action against this
     /// characteristic needs both (`Action::DataExchange` requires a
@@ -91,7 +90,7 @@ pub enum MergedAction {
     /// alone).
     Unregistered { service_uuid: Uuid, uuid: Uuid, properties: u8, sources: DiscoverySources },
     /// A characteristic of a **vendor-defined** service from
-    /// [`crate::vendor`] — design.md §3 decision 41.
+    /// [`crate::vendor`] — decision 41.
     ///
     /// Always listed, whether or not any discovery source saw it, because
     /// the table is a compile-time fact rather than an observation;

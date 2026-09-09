@@ -1,4 +1,4 @@
-//! Stream taps — design.md §3 decision 39, §4.8.
+//! Stream taps — decision 39, interfaces/taps.md.
 //!
 //! One generic inbound capture pipeline, replacing the three near-identical
 //! bespoke ones this crate had grown (power, sensor waveform, GATT
@@ -15,7 +15,7 @@
 //!
 //! **[`StreamEncoding`] is the only place in this crate where a byte payload
 //! acquires a meaning, it is always engineer-declared, and no component ever
-//! guesses one** — design.md §3 decision 35's no-inference rule, applied to
+//! guesses one** — decision 35's no-inference rule, applied to
 //! the read direction.
 
 use heapless::{String, Vec};
@@ -29,13 +29,12 @@ use crate::sample::{Sample, Unit};
 
 /// The one stream name a submitted `Study` may not use: it belongs to the
 /// reserved [`StreamSource::DevBenchLog`] tap that carries dev-bench's own
-/// `LogLine` output (design.md §4.8), built by [`dev_bench_log_tap`].
-/// Rejected by `POST /study`'s pre-flight validation (design.md §3 decision
-/// 18) via [`validate_taps`].
+/// `LogLine` output (interfaces/taps.md), built by [`dev_bench_log_tap`].
+/// Rejected by `POST /study`'s pre-flight validation (decision 18) via [`validate_taps`].
 pub const RESERVED_DEV_BENCH_STREAM_NAME: &str = "dev-bench";
 
-/// The reserved `dev-bench` tap, synthesized rather than declared (design.md
-/// §4.8) — the one tap a submitted `Study` may not author, since
+/// The reserved `dev-bench` tap, synthesized rather than declared
+/// (interfaces/taps.md) — the one tap a submitted `Study` may not author, since
 /// [`validate_taps`] rejects its name.
 ///
 /// **Its `id` is `declared.len()`**, which is free by construction: a
@@ -51,7 +50,7 @@ pub const RESERVED_DEV_BENCH_STREAM_NAME: &str = "dev-bench";
 /// **Where the bytes come from, in the shipped implementation:** Core
 /// renders them out of the `DevBenchMessage::LogLine` frames it already
 /// receives, rather than dev-bench opening a second channel for its own log
-/// and sending each line twice. §4.8's original sketch had dev-bench
+/// and sending each line twice. interfaces/taps.md's original sketch had dev-bench
 /// emitting `StreamOpen`/`StreamChunkBatch`/`StreamClose` for this tap
 /// itself; that was strictly more firmware, more link traffic, and more
 /// SRAM on a board already at 98% of `sram0_0_seg`, to move bytes that were
@@ -70,8 +69,8 @@ pub fn dev_bench_log_tap(declared: &Vec<StreamTap, MAX_STREAMS_PER_STUDY>) -> St
     }
 }
 
-/// One declared capture channel for the duration of a `Study` (design.md
-/// §4.8).
+/// One declared capture channel for the duration of a `Study`
+/// (interfaces/taps.md).
 ///
 /// `id` is the wire handle — its own index in `Study.streams` — and is what
 /// [`crate::protocol::DevBenchMessage::StreamOpen`]/`StreamChunkBatch`/
@@ -91,35 +90,35 @@ pub struct StreamTap {
     pub scope: StreamScope,
 }
 
-/// Where a tap's bytes come from (design.md §4.8).
+/// Where a tap's bytes come from (interfaces/taps.md).
 ///
 /// The first four are **dev-bench-mediated** — dev-bench receives the bytes
 /// and forwards them, stamping arrival and interpreting nothing.
 /// [`StreamSource::Signal`] is the exception and the one genuinely new idea
 /// decision 39 adds: Core reads it itself, with the carrier resolved live by
-/// `embarch-topology` (`embarch-topology/design.md` §3 decision 18) — a
+/// `embarch-topology` (embarch-topology decision 18) — a
 /// local serial port for a `Route::Direct` signal, relayed bytes for a
 /// `Route::ViaDevBench` one. The tap is identical either way, which is what
-/// lets the identical saved study (design.md §3 decision 38) run unchanged
+/// lets the identical saved study (decision 38) run unchanged
 /// across a rewiring of the bench.
 ///
 /// Append-only, same wire-compatibility rule as
-/// [`crate::protocol::DevBenchMessage`] (design.md §3 decision 10).
+/// [`crate::protocol::DevBenchMessage`] (decision 10).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum StreamSource {
     /// Notifications/indications from one DUT characteristic, subscribed by
     /// dev-bench for the tap's scope. Replaces the retired
     /// `GattOperation::StreamCapture` -> `StreamChannel::SensorWaveform`
-    /// pair (design.md §3 decision 21).
+    /// pair (decision 21).
     GattNotify {
         service_uuid: Uuid,
         characteristic_uuid: Uuid,
     },
     /// dev-bench's own power-sampling front end. Replaces the retired
-    /// `StreamChannel::Power` (design.md §3 decision 20).
+    /// `StreamChannel::Power` (decision 20).
     PowerFrontEnd { sample_hz: u32 },
-    /// dev-bench's exhaustive GATT transcript (design.md §3 decision 36,
-    /// §4.3b) — the record type, its both-directions coverage, and its
+    /// dev-bench's exhaustive GATT transcript (decision 36,
+    /// interfaces/gatt-types.md) — the record type, its both-directions coverage, and its
     /// `gatt.csv` columns all survive; only its dedicated
     /// `DevBenchMessage::GattTranscriptRecord` variant is retired.
     GattTranscript,
@@ -130,9 +129,8 @@ pub enum StreamSource {
     /// a study's own results at all.
     DevBenchLog,
     /// A named signal Core reads itself, resolved to a carrier live by
-    /// `embarch-topology`'s `SignalLink` (`embarch-topology/design.md` §3
-    /// decision 18). The outpost's tap
-    /// (`embarch-outpost/design.md` §3 decisions 11, 12).
+    /// `embarch-topology`'s `SignalLink` (embarch-topology decision 18). The outpost's tap
+    /// (embarch-outpost decisions 11, 12).
     ///
     /// **The tap names the signal, never the carrier.** A source variant
     /// naming a concrete port or dev-bench pin would re-author every saved
@@ -146,18 +144,17 @@ impl StreamSource {
     /// Whether dev-bench is the node that produces this tap's bytes. Core
     /// opens its own carrier for the one source that isn't
     /// ([`StreamSource::Signal`]), taking neither `hw_lock` nor
-    /// `study_lock` (`embarch-core/design.md` §3 decision 30).
+    /// `study_lock` (embarch-core decision 30).
     pub const fn is_dev_bench_mediated(&self) -> bool {
         !matches!(self, StreamSource::Signal { .. })
     }
 }
 
-/// How to render a tap's bytes (design.md §4.8).
+/// How to render a tap's bytes (interfaces/taps.md).
 ///
 /// **The only place a byte payload acquires a meaning in this crate.** Every
 /// variant is engineer-declared in the submitted `Study`; nothing anywhere
-/// in the suite infers one from the bytes themselves (design.md §3 decision
-/// 35). Append-only.
+/// in the suite infers one from the bytes themselves (decision 35). Append-only.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum StreamEncoding {
     /// Written verbatim, decoded by nothing. The honest default for a
@@ -167,7 +164,7 @@ pub enum StreamEncoding {
     /// assumed beyond that.
     Text,
     /// Bytes are packed scalar samples — the `data.csv`/`waveform.csv` row
-    /// shape (design.md §4.7, §5.2), unchanged, now reached through a
+    /// shape (interfaces/decoders.md), unchanged, now reached through a
     /// declared encoding rather than through a `Sample`-carrying wire
     /// message. [`samples_in`] does the decode, so column knowledge still
     /// lives only in this crate.
@@ -177,7 +174,7 @@ pub enum StreamEncoding {
         channel_id: u8,
     },
     /// Each record's bytes are one postcard-encoded
-    /// [`crate::gatt::GattTranscriptEntry`] (design.md §4.3b), rendered
+    /// [`crate::gatt::GattTranscriptEntry`] (interfaces/gatt-types.md), rendered
     /// through that type's own `to_csv_row` into `gatt.csv`'s unchanged
     /// columns.
     ///
@@ -189,7 +186,7 @@ pub enum StreamEncoding {
     /// defined that field to mean.
     GattTranscript,
     /// Decoded against a build-time manifest from the DUT's own firmware
-    /// build (`embarch-outpost/design.md` §3 decision 9), via
+    /// build (embarch-outpost decision 9), via
     /// [`crate::outpost`]. A firmware whose header frame reports a different
     /// build **refuses to decode rather than decoding wrong** — the raw bytes
     /// are still written either way.
@@ -203,13 +200,13 @@ pub enum StreamEncoding {
     ///   generated *from the linked image* — it holds thread and ISR tables
     ///   read out of the ELF — so there is no CRC the firmware could have been
     ///   built knowing. The field encoded the post-link CRC patch that
-    ///   `embarch-outpost/design.md` §3 decision 9's own rework had already
+    ///   embarch-outpost decision 9's own rework had already
     ///   replaced with a compile-time build ID; the type layer kept the
     ///   mechanism the decision dropped.
     /// * **Author-time is the wrong moment to bind it.** A CRC chosen when the
     ///   study was written is a persisted record of resolved state consulted at
     ///   a later, unrelated moment — the write-ahead staleness pattern
-    ///   `embarch-topology/design.md` §3 decision 3 exists to eliminate, and
+    ///   embarch-topology decision 3 exists to eliminate, and
     ///   the one decision 9 spent three paragraphs distinguishing itself from.
     ///   A saved study would go stale on the next rebuild.
     ///
@@ -218,7 +215,7 @@ pub enum StreamEncoding {
     /// The tap declares only what the bytes *are*.
     OutpostTrace,
     /// Each record's bytes are one instance of an engineer-declared payload
-    /// layout — design.md §3 decision 52, [`crate::decoder`]. `decoder`
+    /// layout — decision 52, [`crate::decoder`]. `decoder`
     /// indexes into `Study.decoders`.
     ///
     /// **An index, not the layout itself, and that is the whole design.** A
@@ -239,12 +236,12 @@ pub enum StreamEncoding {
 }
 
 /// How to read scalar elements out of a [`StreamEncoding::Samples`] payload
-/// (design.md §4.8).
+/// (interfaces/taps.md).
 ///
 /// **Element width, type, and byte order only — no scaling, no offset, no
 /// unit conversion.** Those would be a claim about what a particular DUT's
 /// bytes *mean*, which is the engineer's knowledge and not this crate's
-/// (design.md §3 decision 35). `unit` names the quantity; nothing here
+/// (decision 35). `unit` names the quantity; nothing here
 /// transforms the number.
 ///
 /// Append-only.
@@ -291,11 +288,11 @@ impl SampleLayout {
     }
 }
 
-/// How long a tap lives (design.md §4.8).
+/// How long a tap lives (interfaces/taps.md).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StreamScope {
     /// Open for the whole study — what an outpost trace uses
-    /// (`embarch-outpost/design.md` §3 decision 10).
+    /// (embarch-outpost decision 10).
     WholeStudy,
     /// Open across a step range, `from` and `to` both **inclusive** indices
     /// into `Study.steps` — what a power window uses. A single-step window
@@ -313,18 +310,18 @@ impl StreamScope {
     }
 }
 
-/// One arrival-stamped run of bytes (design.md §4.8) — **never a decoded
+/// One arrival-stamped run of bytes (interfaces/taps.md) — **never a decoded
 /// value.** `rx_utc_ms` is stamped by whichever node received the bytes
 /// (dev-bench for a dev-bench-mediated source, Core for a
 /// [`StreamSource::Signal`]), on the same clock convention
-/// `Sample::rx_utc_ms` already uses (design.md §4.7).
+/// `Sample::rx_utc_ms` already uses (interfaces/decoders.md).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StreamRecord {
     pub rx_utc_ms: u64,
     pub bytes: Vec<u8, MAX_STREAM_CHUNK_BYTES>,
 }
 
-/// What a tap produced, per `StudyResult` (design.md §4.8). Replaces the
+/// What a tap produced, per `StudyResult` (interfaces/taps.md). Replaces the
 /// retired `StepResult::power_samples_ref`/`waveform_ref` — a stream belongs
 /// to the study, not to one step, which is what those two fields could never
 /// express for a tap whose scope outlives a single step.
@@ -355,7 +352,7 @@ pub struct StreamRef {
 }
 
 /// Why a submitted `Study`'s `streams` aren't usable — `POST /study`'s
-/// pre-flight validation failure (design.md §3 decision 18), computed here
+/// pre-flight validation failure (decision 18), computed here
 /// so Core holds no independent knowledge of the rules.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StreamTapError {
@@ -423,12 +420,12 @@ impl core::fmt::Display for StreamTapError {
 #[cfg(feature = "std")]
 impl std::error::Error for StreamTapError {}
 
-/// Pre-flight validation for a submitted `Study`'s taps (design.md §3
-/// decision 18, §4.8). `step_count` is `study.steps.len()`.
+/// Pre-flight validation for a submitted `Study`'s taps (decision 18,
+/// interfaces/taps.md). `step_count` is `study.steps.len()`.
 ///
 /// Deliberately in this crate rather than in Core: the rules are properties
-/// of the type model, and a second copy in Core is exactly the drift §1
-/// exists to prevent.
+/// of the type model, and a second copy in Core is exactly the drift
+/// spec.md §1 exists to prevent.
 pub fn validate_taps(
     taps: &Vec<StreamTap, MAX_STREAMS_PER_STUDY>,
     step_count: u32,
@@ -472,7 +469,7 @@ pub fn validate_taps(
 /// [`StreamEncoding::Samples`] tap declared it holds — the crate-side half
 /// of writing `data.csv`/`waveform.csv`, so Core's job stays "call
 /// `Sample::to_csv_row` on each of these and append its own
-/// `core_rx_utc_ms`" (design.md §4.7, §5.2) with no column or layout
+/// `core_rx_utc_ms`" (interfaces/decoders.md) with no column or layout
 /// knowledge of its own.
 ///
 /// `sample_hz`, when given (a [`StreamSource::PowerFrontEnd`] tap declares

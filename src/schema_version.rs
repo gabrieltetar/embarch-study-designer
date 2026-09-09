@@ -75,14 +75,14 @@
 ///   **Wire.**
 /// - **v4** (decisions 31/32) — added `Action::GattDiscover`/
 ///   `GattMonitorAll` and the matching `StepResult.gatt_services`/
-///   `gatt_activity` fields (§4.3a). One bump covering both new `Action`
+///   `gatt_activity` fields (interfaces/gatt-types.md). One bump covering both new `Action`
 ///   variants and both new `StepResult` fields together, the same
 ///   one-bump-per-pass discipline v2's `LogLine`+`firmware_version` pairing
 ///   already established. **Wire.**
 /// - **v5** (decision 36) — added `Action::GattMonitorStart`/
 ///   `GattMonitorStop`, `DevBenchMessage::GattTranscriptRecord`, the
 ///   `GattTranscriptEntry`/`GattDirection`/`GattEventKind` types it carried
-///   (§4.3b), and `DataChannel::GattTranscript`. **Wire** — except
+///   (interfaces/gatt-types.md), and `DataChannel::GattTranscript`. **Wire** — except
 ///   `DataChannel::GattTranscript`, which was host-only even then and is
 ///   retired outright at v9.
 /// - **v6** (decision 42) — `Step` gained a trailing `delay_before_ms`,
@@ -100,7 +100,7 @@
 /// - **v8** (decisions 39 **and** 40, one bump for the pair) — the
 ///   largest single wire change since this constant existed, and the first
 ///   that *removes* rather than appends. Decision 39's one generic inbound
-///   stream pipeline: `Study` gained `streams` (§4.8) and `StudyResult`
+///   stream pipeline: `Study` gained `streams` (interfaces/taps.md) and `StudyResult`
 ///   gained `streams`; `DevBenchMessage`'s four stream variants collapsed
 ///   into the `StreamOpen`/`StreamChunkBatch`/`StreamClose` triple carrying
 ///   `{ rx_utc_ms, bytes }` records instead of `Sample`s; `StreamChannel`,

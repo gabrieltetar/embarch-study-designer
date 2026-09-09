@@ -1,9 +1,9 @@
 //! The `.eap` text grammar: lexer, parser, and the lowering that splits one
 //! manifest into the half dev-bench executes and the half the host renders —
-//! design.md §3 decisions 58/59, §4.9.
+//! decisions 58/59 (interfaces/eap.md).
 //!
 //! `std`-only authoring-time tooling, the same posture as
-//! [`crate::gatt_extract`] (§3 decision 33): an `.eap` file is read off the
+//! [`crate::gatt_extract`] (decision 33): an `.eap` file is read off the
 //! firmware repo's disk and resolved into a `Study` at build time. Nothing
 //! here runs on the DUT or on the dev-bench MCU — dev-bench carries the
 //! resolved [`crate::eap::ProtocolDef`] and no parser at all.
@@ -66,7 +66,7 @@
 //! Whitespace and `#` comments separate tokens and are otherwise
 //! insignificant; newlines are not. `,` is accepted and ignored between the
 //! fields of a `write` payload, so both the one-per-line and the
-//! comma-separated styles in §4.9's worked examples parse.
+//! comma-separated styles in interfaces/eap.md's worked examples parse.
 //!
 //! # Two things the grammar deliberately does not have
 //!
@@ -86,7 +86,7 @@
 //! design named none of them, and neither worked protocol uses one. Guessing
 //! which would be exactly the inference this suite refuses everywhere else;
 //! shipping all four would be four primitives with no caller, the shape
-//! `embarch-core` §3 decision 30's settlement 2 already records as a
+//! `embarch-core` decision 30's settlement 2 already records as a
 //! mistake. It is one line to add the day a real frame needs a named
 //! variant.
 
@@ -389,8 +389,8 @@ pub enum AstField {
         name: String,
         ty: ScalarType,
         at: Option<u16>,
-        /// `fixed(scale, unit)` — a **render-only** modifier (§3 decision
-        /// 59). Parsed and carried so a rendering can apply it; never
+        /// `fixed(scale, unit)` — a **render-only** modifier (decision 59).
+        /// Parsed and carried so a rendering can apply it; never
         /// consulted by a guard, whose operands are integers.
         fixed: Option<(f64, String)>,
         line: u32,
@@ -762,7 +762,7 @@ fn unescape(s: &str, line: u32) -> R<Vec<u8>> {
 }
 
 /// A frame or struct body. `struct` declarations are accepted **inside** a
-/// frame block as well as beside it — §4.9's worked GWF1 record writes them
+/// frame block as well as beside it — interfaces/eap.md's worked GWF1 record writes them
 /// that way, next to the `repeat` that uses them, which reads better than
 /// making an author scroll — and are hoisted into `structs` either way. A
 /// struct's scope is the whole protocol regardless of where it was written.
@@ -1107,7 +1107,7 @@ fn parse_uuid(s: &str, line: u32) -> R<Uuid> {
 
 // --- Lowering -----------------------------------------------------------
 //
-// §3 decision 59's split, made concrete. `resolve` produces the two halves
+// decision 59's split, made concrete. `resolve` produces the two halves
 // together, from one parse, so they cannot describe different manifests.
 
 /// One `.eap` protocol, lowered.
@@ -1120,7 +1120,7 @@ pub struct ResolvedProtocol {
     pub render: Vec<FrameRender>,
 }
 
-/// The render-only primitives one frame declares (§3 decision 59).
+/// The render-only primitives one frame declares (decision 59).
 ///
 /// These never reach dev-bench. They are applied host-side, after the fact,
 /// over the raw bytes the tap already wrote — which is where they were always
@@ -1129,7 +1129,7 @@ pub struct ResolvedProtocol {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FrameRender {
     pub frame: String,
-    /// Present when the frame is flat enough to lower into §3 decision 52's
+    /// Present when the frame is flat enough to lower into decision 52's
     /// own type — see [`ResolvedProtocol::struct_layouts`].
     pub layout: Option<StructLayout>,
     pub repeats: Vec<AstField>,
@@ -1140,7 +1140,7 @@ pub struct FrameRender {
 impl ResolvedProtocol {
     /// Every frame that lowered cleanly into a decision-52 [`StructLayout`].
     ///
-    /// **This is the whole relationship between the two mechanisms.** §3
+    /// **This is the whole relationship between the two mechanisms.**
     /// decision 52's `StreamEncoding::Struct { decoder }` shipped first and
     /// is unchanged: it is still how a captured `GattNotify` payload becomes
     /// CSV rows, still resolved out of `study-structs.toml`, still indexed by
@@ -1558,7 +1558,7 @@ fn lower_operand(
     }
 }
 
-/// Lower a frame into §3 decision 52's [`StructLayout`], when it is flat
+/// Lower a frame into decision 52's [`StructLayout`], when it is flat
 /// enough to be one.
 ///
 /// Returns `None` — no layout at all — rather than an approximate one, for

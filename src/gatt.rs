@@ -1,7 +1,7 @@
-//! GATT discovery types — design.md §4.3a (§3 decisions 31/32/33).
+//! GATT discovery types — interfaces/gatt-types.md (decisions 31/32/33).
 //!
 //! Shared by both a live `Action::GattDiscover`/`Action::GattMonitorAll`
-//! result and a static `GattConfigExtractor` extraction (§3 decision 33,
+//! result and a static `GattConfigExtractor` extraction (decision 33,
 //! [`crate::gatt_extract`]) — same shape, so the two are directly comparable
 //! rather than needing separate diffing logic.
 
@@ -19,7 +19,7 @@ use crate::limits::MAX_CHARS_PER_SERVICE;
 /// per the Bluetooth Core Spec's own characteristic-declaration encoding) —
 /// passed through unchanged, not re-encoded into a crate-invented bitflag
 /// enum, matching this crate's existing "raw, not symbolic" stance on UUIDs
-/// (design.md §4.3).
+/// (interfaces/types.md).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GattCharacteristicInfo {
     pub uuid: Uuid,
@@ -33,7 +33,7 @@ pub struct GattServiceInfo {
     pub characteristics: Vec<GattCharacteristicInfo, MAX_CHARS_PER_SERVICE>,
 }
 
-/// One characteristic a study names explicitly — design.md §3 decision 53.
+/// One characteristic a study names explicitly — decision 53.
 ///
 /// Both UUIDs, not the characteristic's alone: subscribing needs the service
 /// to discover within, exactly as `Action::DataExchange` has always needed
@@ -46,18 +46,19 @@ pub struct GattTarget {
     pub characteristic_uuid: Uuid,
 }
 
-// `GattActivityRecord` was here and is **retired** by design.md §3 decision
-// 54, along with `StepResult.gatt_activity`. It capped a step's captured
+// `GattActivityRecord` was here and is **retired** by decision 54, along
+// with `StepResult.gatt_activity`. It capped a step's captured
 // notifications at 32 — by a `MAX_GATT_ACTIVITY_RECORDS` that went with it,
 // and is now only a tombstone in `interfaces/limits.md` — inline in
 // `events.json`, which is the wrong shape for what it recorded: a capture is
-// unbounded and streamed, and the tap pipeline (§4.8) already writes exactly
-// that, incrementally, to a file. Keeping a second, capped, in-memory copy
-// meant a study could look like it had captured everything while holding 32
-// of several thousand records — the "nothing captured, no error" family of
+// unbounded and streamed, and the tap pipeline (interfaces/taps.md) already
+// writes exactly that, incrementally, to a file. Keeping a second, capped,
+// in-memory copy meant a study could look like it had captured everything
+// while holding 32 of several thousand records — the "nothing captured, no
+// error" family of
 // failure this suite has now arrived at from four directions.
 
-/// Which way a transcript entry travelled — design.md §3 decision 36, §4.3b.
+/// Which way a transcript entry travelled — decision 36 (interfaces/gatt-types.md).
 ///
 /// `Local` covers dev-bench's own internal milestones (discovery starting,
 /// a subscription being armed) that aren't an ATT PDU in either direction
@@ -73,7 +74,7 @@ pub enum GattDirection {
 }
 
 impl GattDirection {
-    /// Lowercase column text for `gatt.csv` (design.md §4.3b).
+    /// Lowercase column text for `gatt.csv` (interfaces/gatt-types.md).
     pub fn as_str(self) -> &'static str {
         match self {
             GattDirection::Out => "out",
@@ -83,10 +84,10 @@ impl GattDirection {
     }
 }
 
-/// What a transcript entry records — design.md §3 decision 36, §4.3b.
+/// What a transcript entry records — decision 36 (interfaces/gatt-types.md).
 ///
 /// Append-only, the same discipline [`crate::protocol::DevBenchMessage`]
-/// follows (design.md §3 decision 10): postcard encodes this as a varint
+/// follows (decision 10): postcard encodes this as a varint
 /// discriminant, so a new kind goes on the end and an existing one is never
 /// reordered or removed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -110,7 +111,7 @@ pub enum GattEventKind {
 }
 
 impl GattEventKind {
-    /// Lowercase column text for `gatt.csv` (design.md §4.3b).
+    /// Lowercase column text for `gatt.csv` (interfaces/gatt-types.md).
     pub fn as_str(self) -> &'static str {
         match self {
             GattEventKind::Connected => "connected",
@@ -131,13 +132,13 @@ impl GattEventKind {
     }
 }
 
-/// One line of the exhaustive GATT transcript — design.md §3 decision 36,
-/// §4.3b.
+/// One line of the exhaustive GATT transcript — decision 36
+/// (interfaces/gatt-types.md).
 ///
 /// **The only record of GATT activity this crate carries.** It was once
 /// contrasted here with `GattActivityRecord`, a per-step summary capped at
 /// 32 inbound notifications inline in `events.json`; that type and its cap
-/// are **retired** by §3 decision 54, so the contrast is history and this
+/// are **retired** by decision 54, so the contrast is history and this
 /// type is not one of two. It is streamed one entry at a time over its own
 /// [`crate::protocol::DevBenchMessage`] variant, so it is bounded by nothing
 /// but the study's own duration, and it records what dev-bench *sent* as
@@ -152,7 +153,7 @@ impl GattEventKind {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GattTranscriptEntry {
     /// dev-bench's own capture-time timestamp, same convention as
-    /// `Sample.rx_utc_ms` (design.md §4.7).
+    /// `Sample.rx_utc_ms` (interfaces/decoders.md).
     pub rx_utc_ms: u64,
     pub direction: GattDirection,
     pub kind: GattEventKind,
@@ -169,10 +170,10 @@ pub struct GattTranscriptEntry {
 
 #[cfg(feature = "std")]
 impl GattTranscriptEntry {
-    /// The `gatt.csv` header (design.md §4.3b). `core_rx_utc_ms` is appended
+    /// The `gatt.csv` header (interfaces/gatt-types.md). `core_rx_utc_ms` is appended
     /// by Core itself, not by this crate — its own receipt time, not part of
     /// the wire type, the same split `Sample::csv_header` already uses
-    /// (design.md §3 decision 30).
+    /// (decision 30).
     pub fn csv_header() -> &'static str {
         "rx_utc_ms,step_index,step_name,direction,kind,service_uuid,characteristic_uuid,att_status,payload_len,payload_hex,payload_ascii"
     }

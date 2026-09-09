@@ -1,5 +1,5 @@
-//! `.eap` protocol manifests, in the form dev-bench executes — design.md
-//! §3 decisions 58-62, §4.9.
+//! `.eap` protocol manifests, in the form dev-bench executes — decisions
+//! 58-62 (interfaces/eap.md).
 //!
 //! **This is the write direction decision 39 left open.** A `Study` could
 //! always declare where bytes come from and how to render them
@@ -12,7 +12,7 @@
 //!
 //! # What is here, and what deliberately is not
 //!
-//! An `.eap` file's grammar (§4.9) is larger than this module. Decision 59
+//! An `.eap` file's grammar (interfaces/eap.md) is larger than this module. Decision 59
 //! splits it in two, and the line is **what a running state machine can
 //! reach**:
 //!
@@ -33,7 +33,7 @@
 //!
 //! A [`ProtocolDef`] is authored by an engineer in the firmware repo's own
 //! `embarch/protocols/<name>.eap` and **resolved into the submitted `Study`
-//! at build time** — the posture §3 decision 52 settled for payload layouts,
+//! at build time** — the posture decision 52 settled for payload layouts,
 //! for the same reason: Core cannot read that repo, so a study that named a
 //! manifest rather than carrying it would run on its author's machine and
 //! nowhere else. What crosses the wire is the resolved definition, indexed by
@@ -43,7 +43,7 @@
 //! six comparisons ([`Expr`], [`Condition`]). There is no nesting, no
 //! boolean connective, no user-defined function, and no way to express a
 //! loop that is not a state transition. That is a deliberate ceiling, not an
-//! unfinished one — see §3 decision 60 for what each omission costs and why
+//! unfinished one — see decision 60 for what each omission costs and why
 //! it was judged worth paying.
 
 use heapless::{String, Vec};
@@ -72,13 +72,13 @@ use crate::limits::{
 pub struct ProtocolDef {
     pub name: String<MAX_PROTOCOL_NAME_LEN>,
     /// Characteristic aliases this block declares for itself. A protocol is
-    /// **self-contained** (design.md §3 decision 58): it does not reference
+    /// **self-contained** (decision 58): it does not reference
     /// the study's `StreamTap`s, so the same `.eap` protocol is portable
     /// across studies that are wired up differently.
     pub sources: Vec<ProtocolSource, MAX_SOURCES_PER_PROTOCOL>,
     /// Frame shapes the machine can dispatch on. Two frames may declare the
     /// same source; the first whose `select_if` matches wins, which is the
-    /// only format-versioning mechanism there is (design.md §3 decision 59).
+    /// only format-versioning mechanism there is (decision 59).
     pub frames: Vec<FrameDef, MAX_FRAMES_PER_PROTOCOL>,
     /// Named integer variables, initialised once when the run enters its
     /// entry state.
@@ -143,7 +143,7 @@ impl FrameMatch {
 
 /// One integer field a guard, a `remember` or a `write` can name.
 ///
-/// Reuses [`ScalarType`] — §3 decision 52's own 18-variant width/signedness/
+/// Reuses [`ScalarType`] — decision 52's own 18-variant width/signedness/
 /// byte-order enum — rather than declaring a second one, so a frame lowered
 /// into a `StructLayout` for rendering reads its bytes through exactly the
 /// same code path that a guard does.
@@ -172,8 +172,8 @@ pub struct SpanRead {
 /// **Integers only, and that is the shape of a real decision.** The draft
 /// this decision came from had a `bytes` variable accumulating a download
 /// (`buffer = buffer ++ chunk.payload`) so a guard could compare its length
-/// against an expected total. With dev-bench as the executor (§3 decision
-/// 60) there is nowhere to put those bytes — and nowhere they are needed:
+/// against an expected total. With dev-bench as the executor (decision 60)
+/// there is nowhere to put those bytes — and nowhere they are needed:
 /// the chunks are already streaming out on their own tap as they arrive, so
 /// the machine only has to count them. `received = received + len(chunk.payload)`
 /// says the same thing in eight bytes of state instead of the whole transfer.
@@ -253,12 +253,12 @@ pub struct Remember {
     pub value: Expr,
 }
 
-/// One typed field of a `write` payload (design.md §3 decision 61).
+/// One typed field of a `write` payload (decision 61).
 ///
 /// The same [`ScalarType`] vocabulary decode uses, which is the whole point
 /// of the decision: a write that has to echo back a decoded value or carry a
 /// session variable cannot be expressed by a literal-only payload, and
-/// `study-actions.toml`'s registered actions (§3 decision 35) are
+/// `study-actions.toml`'s registered actions (decision 35) are
 /// literal-only by design. This does not change them — it applies only
 /// inside a `RunProtocol` block.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -308,7 +308,7 @@ pub struct EventArm {
     /// following chunk — and restarts the stall watchdog, so each arriving
     /// chunk resets the deadline. Omitting `otherwise` there would consume
     /// every chunk correctly, ack none of them, and stall at the watchdog.
-    /// Both behaviors are real and the author says which; §4.9's worked BDS
+    /// Both behaviors are real and the author says which; interfaces/eap.md's worked BDS
     /// download writes the self-transition explicitly for exactly this
     /// reason.
     pub otherwise: Option<u8>,
@@ -360,7 +360,7 @@ pub enum StateKind {
 /// A non-terminal state's behavior.
 ///
 /// **Nothing here can transition on a write's own ATT response**, and that
-/// is deliberate rather than an omission (design.md §3 decision 60). On the
+/// is deliberate rather than an omission (decision 60). On the
 /// DUT this was designed against, a control-point write's response confirms
 /// only that the write was *accepted*; the authoritative answer arrives
 /// later as an independent notification on a different characteristic. A
@@ -390,14 +390,14 @@ pub struct StateDef {
 // --- Validation --------------------------------------------------------
 //
 // Computed here rather than in `embarch-core` or in the `.eap` parser, for
-// the reason `validate_taps` (§4.8) already is: there must be no second copy
+// the reason `validate_taps` (interfaces/taps.md) already is: there must be no second copy
 // to drift. A `ProtocolDef` reaching dev-bench with an out-of-range index
 // would be a hand-written C interpreter dereferencing past an array, so the
 // check that it cannot happen belongs where every consumer sees the same one.
 
 /// Why a [`ProtocolDef`] cannot be executed.
 ///
-/// Every variant names the specific thing that is wrong, in the style §3
+/// Every variant names the specific thing that is wrong, in the style
 /// decision 18 sets for Core's pre-flight validation: a raw index failure
 /// on a firmware's array is exactly the failure this exists to convert into
 /// a sentence.
@@ -661,7 +661,7 @@ pub fn eval_operand(
 /// Evaluate a `remember`'s right-hand side.
 ///
 /// `Add` **saturates**. A wrapping counter would be a plausible wrong number
-/// — the failure this crate refuses elsewhere (§3 decision 52's "integers
+/// — the failure this crate refuses elsewhere (decision 52's "integers
 /// render as integers") — and a saturated one stops a pump loop's guard from
 /// ever passing again, which is a stall the step timeout catches and reports.
 pub fn eval_expr(e: Expr, session: &[i64], frame: Option<(&FrameDef, &[u8])>) -> Option<i64> {
@@ -717,8 +717,7 @@ pub fn select_frame(p: &ProtocolDef, source: u8, payload: &[u8]) -> Option<u8> {
     })
 }
 
-/// Assemble a `write` payload from its typed fields (design.md §3 decision
-/// 61).
+/// Assemble a `write` payload from its typed fields (decision 61).
 ///
 /// Returns `None` if any operand fails to resolve — the write is not sent
 /// with a zero substituted in, because a control-point opcode carrying a
@@ -797,8 +796,8 @@ mod tests {
 
     #[test]
     fn a_protocol_round_trips_through_postcard_and_json() {
-        // Both hops, like every other wire type in this crate (§3 decision
-        // 3): postcard to dev-bench, JSON through embarch-api's events.json.
+        // Both hops, like every other wire type in this crate (decision 3):
+        // postcard to dev-bench, JSON through embarch-api's events.json.
         let mut p = minimal();
         p.sources.push(src("ctrl")).unwrap();
         p.frames.push(frame("f", 0, Some((0, &[0x02])))).unwrap();

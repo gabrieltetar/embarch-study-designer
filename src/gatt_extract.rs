@@ -1,15 +1,15 @@
-//! Static GATT-config extraction — design.md §3 decisions 33, 56, 57.
+//! Static GATT-config extraction — decisions 33, 56, 57.
 //!
 //! Answers "what UUIDs does this DUT firmware actually expose" from source,
 //! ahead of ever connecting to real hardware — distinct from the live
-//! `Action::GattDiscover`/`Action::GattMonitorAll` (§3 decisions 31/32),
+//! `Action::GattDiscover`/`Action::GattMonitorAll` (decisions 31/32),
 //! which answer the same question over an actual BLE connection. `std`-only
 //! (needs filesystem access via `std::path::Path`, and `regex` for the
 //! text-scan) — gated behind the `gatt-extract` feature, never linked by
 //! dev-bench firmware or embarch-core/embarch-api's plain Cargo-dependency
-//! use (design.md §2's scope note).
+//! use (spec.md §3's feature/target split).
 //!
-//! # What gets scanned (§3 decision 57)
+//! # What gets scanned (decision 57)
 //!
 //! Every `.c`/`.h` file in the firmware repo, not a hardcoded list of two.
 //! This module used to name `lib/ble/ble_def.h` and `lib/ble/ble.c`
@@ -35,15 +35,15 @@
 //!
 //! # Failing loudly, at the point of use
 //!
-//! Text-scan, not a full C parser (embarch-study-designer/milestone-9.md
-//! §3.6): this deliberately doesn't evaluate preprocessor conditionals (e.g.
+//! Text-scan, not a full C parser: this deliberately doesn't evaluate
+//! preprocessor conditionals (e.g.
 //! `IF_ENABLED(CONFIG_AIR_TEMP_ENABLE, (...))` in `reference-dut-fw`'s
 //! `ble_def.h`) — a characteristic wrapped in one is reported regardless of
 //! whether that Kconfig option is actually set for a given build.
 //!
 //! It still fails loudly (a named [`ExtractError`]) on an unrecognized
 //! identifier or `BT_GATT_CHRC_*` token rather than silently
-//! under-extracting — the defensive posture milestone-9.md §5 calls for.
+//! under-extracting.
 //! Decision 57 moves *where* that loudness happens: a `#define X_UUID_VAL`
 //! that resolves to nothing, in a file no service definition references, is
 //! now recorded as unresolvable rather than aborting the extraction, and
@@ -81,7 +81,7 @@ use crate::ids::Uuid;
 use crate::limits::MAX_DISCOVERED_SERVICES;
 
 /// Directory names pruned from the walk no matter what the firmware repo's
-/// ignore files say (§3 decision 57).
+/// ignore files say (decision 57).
 ///
 /// `embarch/` is this suite's own per-engineer build/flash directory, which
 /// `embarch-core` plants *inside* the firmware repo being worked on. On the
@@ -99,8 +99,7 @@ pub const SCAN_BLOCKED_DIR_NAMES: [&str; 1] = ["embarch"];
 const SCANNED_EXTENSIONS: [&str; 2] = ["c", "h"];
 
 /// Names the specific failure rather than surfacing a raw I/O/parse error
-/// (design.md §3 decisions 18/23's "name the specific failure" discipline,
-/// applied here per milestone-9.md §3.5).
+/// (decisions 18/23's "name the specific failure" discipline, applied here).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExtractError {
     /// A required source file or the repo root itself didn't exist or
@@ -108,18 +107,18 @@ pub enum ExtractError {
     FileNotFound(PathBuf),
     /// The walk reached the repo root but came back with no `.c`/`.h` file
     /// at all — an extraction that would have returned an empty table for a
-    /// reason that has nothing to do with the DUT's GATT (§3 decision 57).
+    /// reason that has nothing to do with the DUT's GATT (decision 57).
     NoSourceFilesFound(PathBuf),
     /// A `BT_UUID_INIT_128(...)`/`BT_GATT_PRIMARY_SERVICE(...)`/
     /// `BT_GATT_CHARACTERISTIC(...)` call referenced a macro, constant, or
     /// variable this scanner never found a definition for.
     MacroNotFound(String),
     /// One name carries two different values in two scanned files, and a
-    /// definition in use reached for it (§3 decision 57). Reported rather
+    /// definition in use reached for it (decision 57). Reported rather
     /// than resolved by whichever file the walk happened to read last.
     AmbiguousSymbol(String),
     /// Two `BT_GATT_SERVICE_DEFINE` blocks resolved to the same service
-    /// UUID (§3 decision 57) — a vendored or duplicated copy of the source
+    /// UUID (decision 57) — a vendored or duplicated copy of the source
     /// tree that the repo's ignore files didn't exclude. Reported rather
     /// than emitted twice, since a duplicated service fits happily under
     /// [`MAX_DISCOVERED_SERVICES`] and would otherwise pass unremarked.
@@ -178,14 +177,13 @@ impl core::fmt::Display for ExtractError {
 impl std::error::Error for ExtractError {}
 
 /// Whether a recovered identifier named a service or a characteristic
-/// (§3 decision 56, extended by decision 57).
+/// (decision 56, extended by decision 57).
 ///
 /// One `symbols` list rather than two: a name lookup is keyed by UUID, and a
 /// service UUID and a characteristic UUID never collide, so a consumer that
 /// only wants characteristic names can ignore this field entirely. It exists
 /// for the consumer that wants to *group* by service — which is the reason
-/// service identifiers stopped being thrown away (embarch-ui/design.md §3
-/// decision 17).
+/// service identifiers stopped being thrown away (embarch-ui decision 17).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GattSymbolKind {
@@ -194,7 +192,7 @@ pub enum GattSymbolKind {
 }
 
 /// The C identifier a service or characteristic was declared under, paired
-/// with the UUID it resolved to — design.md §3 decision 56.
+/// with the UUID it resolved to — decision 56.
 ///
 /// **A label, not semantics.** `sds_hrm_rrm_char_uuid` says what the
 /// firmware's authors called this characteristic in their own source; it says
@@ -216,7 +214,7 @@ pub struct GattSymbol {
 }
 
 /// One scanned file that actually contributed something, and what it
-/// contributed (§3 decision 57).
+/// contributed (decision 57).
 ///
 /// Counts rather than the parsed values themselves: this is the report an
 /// engineer reads to answer "did it look at the file I expected", not a
@@ -233,7 +231,7 @@ pub struct ScannedSource {
     pub services: usize,
 }
 
-/// The walk's account of itself (§3 decision 57) — what an engineer looks at
+/// The walk's account of itself (decision 57) — what an engineer looks at
 /// to see that a file they expected was actually read, rather than assuming
 /// it from a table that came back non-empty.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
@@ -256,8 +254,8 @@ pub struct ScanReport {
 }
 
 /// What an extraction produced: the wire-shaped GATT table, plus the source
-/// identifiers behind it (§3 decision 56) and the walk's own account of
-/// itself (§3 decision 57).
+/// identifiers behind it (decision 56) and the walk's own account of
+/// itself (decision 57).
 ///
 /// `services`/`symbols` are two fields rather than a name field on
 /// [`GattCharacteristicInfo`]: that type is the `no_std`, `heapless`,
@@ -279,7 +277,7 @@ pub struct ExtractedGatt {
     /// `BT_GATT_SERVICE_DEFINE` gets the lower ATT handle is decided by the
     /// linker's section ordering, which is a build fact this scanner cannot
     /// read out of source and does not attempt to guess. A caller comparing
-    /// a static extraction against a live discovery (§3 decision 33) should
+    /// a static extraction against a live discovery (decision 33) should
     /// compare them as sets.
     pub services: heapless::Vec<GattServiceInfo, MAX_DISCOVERED_SERVICES>,
     /// One entry per service and characteristic whose declaring identifier
@@ -311,7 +309,7 @@ impl ExtractedGatt {
 }
 
 /// Extracts a DUT firmware's GATT table from its source, ahead of ever
-/// connecting to real hardware (design.md §3 decision 33). Generic at the
+/// connecting to real hardware (decision 33). Generic at the
 /// trait boundary, narrow at the implementation, per the user's explicit
 /// call during Milestone 3's design pass — a second firmware project's own
 /// extractor is a new `impl`, not a redesign of this trait or its output
@@ -323,8 +321,8 @@ pub trait GattConfigExtractor {
     /// live `Action::GattDiscover`/`Action::GattMonitorAll` result uses, so a
     /// static extraction and a live discovery are comparable;
     /// [`ExtractedGatt::symbols`] carries what only source can know
-    /// (§3 decision 56) and [`ExtractedGatt::scan`] what only the walk can
-    /// (§3 decision 57).
+    /// (decision 56) and [`ExtractedGatt::scan`] what only the walk can
+    /// (decision 57).
     ///
     /// This is the required method rather than [`Self::extract`] because a
     /// single text-scan produces all three — an extractor asked for the
@@ -349,7 +347,7 @@ pub trait GattConfigExtractor {
 /// `BT_GATT_PRIMARY_SERVICE(&var)` / `BT_GATT_CHARACTERISTIC(&var.uuid,
 /// PROPS, ...)` calls) — confirmed against that real source, not guessed
 /// against a generic Zephyr BLE peripheral layout other projects might use
-/// differently (design.md §3 decision 33).
+/// differently (decision 33).
 ///
 /// The name is kept as-is through decision 57 even though the two files it
 /// was named for are no longer hardcoded: `static_extractor = "zephyr-ble-def"`
@@ -377,7 +375,7 @@ struct SourceFile {
 }
 
 /// Every `.c`/`.h` file the firmware repo considers its own source
-/// (§3 decision 57): the repo's ignore files decide, plus a hard prune of
+/// (decision 57): the repo's ignore files decide, plus a hard prune of
 /// [`SCAN_BLOCKED_DIR_NAMES`] and hidden directories.
 ///
 /// `require_git(false)` so a `.gitignore` is honored in an exported tree
@@ -478,7 +476,7 @@ fn walk_sources(repo_root: &Path) -> Result<(Vec<SourceFile>, ScanReport), Extra
     Ok((files, report))
 }
 
-/// A name gathered from every scanned file at once (§3 decision 57).
+/// A name gathered from every scanned file at once (decision 57).
 ///
 /// Defined twice with the same value is fine — a constant spelled in two
 /// headers, a repo that keeps a mirror of a macro. Defined twice with
@@ -610,13 +608,13 @@ fn parse_scalar_constants(src: &str) -> Vec<(String, u64)> {
 }
 
 /// `#define <NAME>_UUID_VAL \` `BT_UUID_128_ENCODE(w32, w1, w2, w3, w48)`
-/// macros → each resolved to 16 raw bytes, big-endian (design.md §4's
-/// documented `Uuid` byte order — the same order the macro's own arguments
+/// macros → each resolved to 16 raw bytes, big-endian ([`crate::ids::Uuid`]'s
+/// documented byte order — the same order the macro's own arguments
 /// are written in, `w32-w1-w2-w3-w48`).
 ///
 /// A macro whose arguments don't resolve comes back as an `Err` value rather
 /// than aborting: under a repo-wide walk it may well be a macro nothing
-/// uses (§3 decision 57).
+/// uses (decision 57).
 fn parse_uuid_macros(src: &str, consts: &RepoWide<u64>) -> Vec<(String, MaybeUuidBytes)> {
     let flattened = join_backslash_continuations(src);
     let re = Regex::new(r"#define\s+(\w+_UUID_VAL)\s+BT_UUID_128_ENCODE\(([^)]*)\)").unwrap();
@@ -710,9 +708,9 @@ fn resolve_var(
 }
 
 /// Every `BT_GATT_SERVICE_DEFINE(...)` block in one file, each appending one
-/// [`GattServiceInfo`] (design.md §4.3a) — characteristics in source order
+/// [`GattServiceInfo`] (interfaces/gatt-types.md) — characteristics in source order
 /// within a service. Also records the C identifier the service and each
-/// characteristic were declared under (§3 decisions 56/57): both are already
+/// characteristic were declared under (decisions 56/57): both are already
 /// in hand here to resolve the UUIDs at all, and both used to be dropped on
 /// the floor.
 ///
@@ -798,10 +796,10 @@ fn parse_gatt_services(
     Ok(found)
 }
 /// Bluetooth Core Spec characteristic-properties bits — the same encoding
-/// design.md §4.3a documents for the live `GattDiscover` path (bit 0 =
-/// broadcast ... bit 7 = extended-properties). Returns `None` on an
-/// unrecognized token so the caller can fail loudly rather than silently
-/// contribute zero bits (milestone-9.md §5's defensive-posture call).
+/// documented on [`crate::gatt::GattCharacteristicInfo::properties`] for the
+/// live `GattDiscover` path (bit 0 = broadcast ... bit 7 =
+/// extended-properties). Returns `None` on an unrecognized token so the
+/// caller can fail loudly rather than silently contribute zero bits.
 fn chrc_property_bit(token: &str) -> Option<u8> {
     match token {
         "BT_GATT_CHRC_BROADCAST" => Some(0x01),
@@ -877,9 +875,9 @@ mod tests {
     use super::*;
 
     // A minimal fixture mirroring reference-dut-fw's real
-    // conventions (confirmed against that actual checkout,
-    // embarch-study-designer/milestone-9.md §3.6) — enough to exercise every
-    // parsing stage without touching the filesystem or a sibling repo this
+    // conventions (confirmed against that actual checkout) — enough to
+    // exercise every parsing stage without touching the filesystem or a
+    // sibling repo this
     // crate has no dependency on.
     const FIXTURE_DEF_H: &str = r#"
 #define ES_BASE  0xE58100000000ULL
@@ -988,7 +986,7 @@ BT_GATT_SERVICE_DEFINE(sensor_bds,
         assert_eq!(dms.characteristics[0].properties, 0x02 | 0x08 | 0x10); // READ|WRITE|NOTIFY
     }
 
-    /// §3 decision 56: the C identifier each characteristic was declared
+    /// decision 56: the C identifier each characteristic was declared
     /// under comes back paired with the UUID it resolved to — and the UUID
     /// it is paired with is the *same* one the table carries, so a UI
     /// looking a name up by UUID can't miss.
@@ -1007,7 +1005,7 @@ BT_GATT_SERVICE_DEFINE(sensor_bds,
         assert_eq!(chrc[1], extracted.services[1].characteristics[0].uuid);
     }
 
-    /// §3 decision 57 extends 56 one level up: the *service*'s declaring
+    /// decision 57 extends 56 one level up: the *service*'s declaring
     /// identifier was already in hand to resolve its UUID at all, and was
     /// thrown away for exactly as long as the characteristic's was.
     #[test]
@@ -1091,7 +1089,7 @@ BT_GATT_SERVICE_DEFINE(sensor_bds,
     /// A repo-wide walk reads plenty of declarations nothing uses. A
     /// malformed `_UUID_VAL` in a corner of the tree no service definition
     /// reaches for must not be able to blank the GATT table — the loudness
-    /// moves to the point of use (§3 decision 57).
+    /// moves to the point of use (decision 57).
     #[test]
     fn an_unused_unresolvable_macro_does_not_fail_the_extraction() {
         let extracted = extract_files(&[
@@ -1235,7 +1233,7 @@ BT_GATT_SERVICE_DEFINE(s{i:02}, BT_GATT_PRIMARY_SERVICE(&s{i:02}_service_uuid),)
 
     /// A real directory with no C in it: an empty table would be a plausible
     /// answer to the wrong question, so the walk says so instead
-    /// (§3 decision 57).
+    /// (decision 57).
     #[test]
     fn a_repo_root_with_no_c_sources_is_reported() {
         let dir = std::env::temp_dir().join(format!(

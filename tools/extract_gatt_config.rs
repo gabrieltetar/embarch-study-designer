@@ -1,11 +1,11 @@
-//! CLI wrapper for `ZephyrBleDefExtractor` (design.md §3 decision 33,
-//! embarch-study-designer/milestone-9.md §3.7) — the authoring-time
-//! convenience that decision exists to provide: run this against a checked-out
+//! CLI wrapper for `ZephyrBleDefExtractor` (decision 33) — the
+//! authoring-time convenience that decision exists to provide: run this
+//! against a checked-out
 //! `reference-dut-fw` repo to see its GATT table as JSON, before ever
 //! connecting dev-bench to it.
 //!
 //! Prints `{ "services": [...], "names": {...}, "service_names": {...},
-//! "scan": {...} }` — the names half added by design.md §3 decision 56, the
+//! "scan": {...} }` — the names half added by decision 56, the
 //! service names and the scan report by decision 57.
 //!
 //! `scan` is the half worth eyeballing after a firmware repo grows a file:

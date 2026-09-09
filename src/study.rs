@@ -1,6 +1,6 @@
-//! `Study`/`Step`/`Action` — design.md §4.1-§4.3.
+//! `Study`/`Step`/`Action` — interfaces/types.md.
 //!
-//! §4.4's `PowerSampleWindow` was here and is **retired** by §3 decision
+//! `PowerSampleWindow` was here and is **retired** by decision
 //! 39's 2026-08-25 amendment: a `StreamSource::PowerFrontEnd { sample_hz }`
 //! tap scoped to a step range says the same thing, and was already the only
 //! one of the two anything read.
@@ -19,7 +19,7 @@ use crate::limits::{
 use crate::streams::StreamTap;
 
 /// How loud dev-bench's own firmware should be **for the duration of one
-/// study** (`embarch-dev-bench/design.md` §3 decision 39).
+/// study** (embarch-dev-bench decision 39).
 ///
 /// **Why this is per-study and not a build-time setting.** Decision 38 turned
 /// `CONFIG_LOG` on in the bench firmware and forwarded every record to Core as
@@ -83,17 +83,17 @@ impl DevBenchLogLevel {
     }
 }
 
-/// design.md §4.1. Sealed by two sibling CRCs: `steps_crc` over `steps`
-/// (design.md §3 decision 17) and `streams_crc` over `streams` (decision
+/// interfaces/types.md. Sealed by two sibling CRCs: `steps_crc` over `steps`
+/// (decision 17) and `streams_crc` over `streams` (decision
 /// 39's 2026-08-25 amendment) — see [`crate::crc`] for why there are two
 /// rather than one widened one.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Study {
     /// Human-readable identifier; not required to be unique.
     pub name: String<MAX_STUDY_NAME_LEN>,
-    /// The builds this study is meant to run against (design.md §3 decision
-    /// 40, §4.1). **Host-side only — never transmitted to dev-bench**,
-    /// dev-bench has no use for a
+    /// The builds this study is meant to run against (decision 40,
+    /// interfaces/types.md). **Host-side only — never transmitted to
+    /// dev-bench**, dev-bench has no use for a
     /// requirement it cannot check about itself, and `steps_crc` seals what
     /// dev-bench actually executes, which is unchanged.
     ///
@@ -106,8 +106,8 @@ pub struct Study {
     pub requires: Requirements,
     /// Run in order. Entirely static once submitted for v1.
     pub steps: crate::bounded::StepList,
-    /// Declared capture channels for this study (design.md §3 decision 39,
-    /// §4.8) — the one generic inbound stream pipeline that replaced power,
+    /// Declared capture channels for this study (decision 39,
+    /// interfaces/taps.md) — the one generic inbound stream pipeline that replaced power,
     /// sensor-waveform, and GATT-transcript capture as three separate ones.
     ///
     /// Unlike `requires`, this **does** cross the wire to
@@ -116,15 +116,15 @@ pub struct Study {
     /// dev-bench-mediated, so dev-bench has to know which taps to open and
     /// which `id` each one answers to.
     ///
-    /// `#[serde(default)]` so a saved study (design.md §3 decision 38)
+    /// `#[serde(default)]` so a saved study (decision 38)
     /// authored before taps existed still loads — as a study that captures
     /// nothing, which is exactly what it did.
     #[serde(default)]
     pub streams: Vec<StreamTap, MAX_STREAMS_PER_STUDY>,
-    /// CRC-32 over `steps` (design.md §3 decision 17), computed by whoever
+    /// CRC-32 over `steps` (decision 17), computed by whoever
     /// submits this `Study` via [`crate::crc::steps_crc`].
     pub steps_crc: u32,
-    /// CRC-32 over `streams` (design.md §3 decision 39's 2026-08-25
+    /// CRC-32 over `streams` (decision 39's 2026-08-25
     /// amendment), computed by the same submitter via
     /// [`crate::crc::streams_crc`]. A **sibling** of `steps_crc`, not a
     /// widening of it: `steps_crc`'s own definition is unchanged, and each
@@ -132,25 +132,25 @@ pub struct Study {
     /// half is corrupt.
     ///
     /// `#[serde(default)]` — and, unlike `requires`, that default is
-    /// *correct* rather than merely permissive: a saved study (design.md §3
-    /// decision 38) authored before taps existed has no `streams`, and `0`
+    /// *correct* rather than merely permissive: a saved study (decision 38)
+    /// authored before taps existed has no `streams`, and `0`
     /// is the genuine CRC-32/ISO-HDLC of zero bytes, not a sentinel standing
     /// in for one. Every submitter recomputes and overwrites it anyway
-    /// (`embarch-api/design.md` §3 decision 26).
+    /// (embarch-api decision 26).
     #[serde(default)]
     pub streams_crc: u32,
     /// `.eap` protocol manifests resolved into this study at build time
-    /// (design.md §3 decision 58, §4.9), reachable only through an
+    /// (decision 58, interfaces/eap.md), reachable only through an
     /// [`Action::RunProtocol`] step.
     ///
-    /// **Resolved, not referenced** — the posture §3 decision 52 settled for
+    /// **Resolved, not referenced** — the posture decision 52 settled for
     /// payload layouts, adopted here for the same reason and not by analogy:
     /// Core cannot read the firmware repo, so a study naming an `.eap` file
     /// rather than carrying it would run on its author's machine and nowhere
     /// else, and would run *differently* after an unrelated edit to that
     /// file. The draft this decision came from bound the manifest by a CRC
     /// instead; that is the write-ahead staleness pattern
-    /// `embarch-topology/design.md` §3 decision 3 exists to eliminate, and
+    /// embarch-topology decision 3 exists to eliminate, and
     /// the one `StreamEncoding::OutpostTrace` was corrected for
     /// (`embarch-decision-reversals.md` row 37).
     ///
@@ -161,11 +161,11 @@ pub struct Study {
     /// a seal like `steps`, [`Study::protocols_crc`].
     #[serde(default)]
     pub protocols: crate::bounded::Bounded<crate::eap::ProtocolDef, MAX_PROTOCOLS_PER_STUDY>,
-    /// CRC-32 over `protocols` (design.md §3 decision 58) — the study's
+    /// CRC-32 over `protocols` (decision 58) — the study's
     /// third seal, computed via [`crate::crc::protocols_crc`].
     ///
     /// A **sibling** of `steps_crc`/`streams_crc` rather than a widening of
-    /// either, for the structural reason §3 decision 39's amendment already
+    /// either, for the structural reason decision 39's amendment already
     /// settled: each seal is carried immediately after the one contiguous
     /// span it covers, so dev-bench's hand-written C digests one run of
     /// bytes per seal and a mismatch names which of the three is corrupt.
@@ -176,7 +176,7 @@ pub struct Study {
     #[serde(default)]
     pub protocols_crc: u32,
     /// How loud dev-bench's firmware should be while this study runs
-    /// (`embarch-dev-bench/design.md` §3 decision 39). Crosses the wire to
+    /// (embarch-dev-bench decision 39). Crosses the wire to
     /// dev-bench on `DevBenchMessage::StudyStart`, unlike `requires`, because
     /// it is an instruction dev-bench acts on rather than a fact about the
     /// host's expectations.
@@ -193,7 +193,7 @@ pub struct Study {
     #[serde(default)]
     pub dev_bench_log_level: DevBenchLogLevel,
     /// Named payload layouts this study's `Struct`-encoded taps decode with
-    /// (design.md §3 decision 52, [`crate::decoder`]). A tap's
+    /// (decision 52, [`crate::decoder`]). A tap's
     /// `StreamEncoding::Struct { decoder }` is an index into this list.
     ///
     /// **Host-side only — never transmitted to dev-bench**, the same posture
@@ -242,14 +242,14 @@ pub struct Study {
 }
 
 /// The explicit "I don't care which build" value for either
-/// [`Requirements`] field (design.md §3 decision 40).
+/// [`Requirements`] field (decision 40).
 pub const REQUIREMENT_ANY: &str = "any";
 
 /// The dev-bench and DUT firmware builds a `Study` is meant to run against
-/// (design.md §3 decision 40, §4.1).
+/// (decision 40, interfaces/types.md).
 ///
 /// Two free-form strings, matching the shape `HelloAck.firmware_version`
-/// already uses (`embarch-dev-bench/design.md` §3 decision 18: whatever the
+/// already uses (embarch-dev-bench decision 18: whatever the
 /// build embeds, typically `git describe --always --dirty --abbrev=8`).
 /// Both are mandatory and [`REQUIREMENT_ANY`] is an explicit legal value.
 ///
@@ -275,7 +275,7 @@ impl Requirements {
         Requirements { dev_bench_version: any.clone(), firmware_version: any }
     }
 
-    /// `POST /study`'s pre-flight check (design.md §3 decision 18): a blank
+    /// `POST /study`'s pre-flight check (decision 18): a blank
     /// requirement is the not-thought-about case decision 40 exists to
     /// reject, and is not the same thing as [`REQUIREMENT_ANY`].
     pub fn validate(&self) -> Result<(), RequirementsError> {
@@ -290,13 +290,13 @@ impl Requirements {
 }
 
 /// Whether an actual version satisfies a declared requirement — exact match,
-/// or [`REQUIREMENT_ANY`]. Lives here so Core's version gate (design.md §3
-/// decision 40) holds no independent copy of the comparison rule.
+/// or [`REQUIREMENT_ANY`]. Lives here so Core's version gate (decision 40)
+/// holds no independent copy of the comparison rule.
 pub fn requirement_satisfied(required: &str, actual: &str) -> bool {
     required == REQUIREMENT_ANY || required == actual
 }
 
-/// Why a `Study.requires` isn't usable (design.md §3 decision 40).
+/// Why a `Study.requires` isn't usable (decision 40).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RequirementsError {
     BlankDevBenchVersion,
@@ -319,22 +319,22 @@ impl core::fmt::Display for RequirementsError {
 #[cfg(feature = "std")]
 impl std::error::Error for RequirementsError {}
 
-/// design.md §4.2.
+/// interfaces/types.md.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Step {
     /// Label surfaced in results (`StepResult.step_name`); never used for
-    /// machine correlation (design.md §3 decision 14 uses array position).
+    /// machine correlation (decision 14 uses array position).
     pub name: String<MAX_NAME_LEN>,
     pub action: Action,
     /// Max wall-clock time dev-bench allows this step before reporting
     /// `Outcome::TimedOut`.
     pub timeout_ms: u32,
     /// `false` (default) aborts the `Study` on this step's `Fail`/`TimedOut`;
-    /// `true` continues to the next step regardless. design.md §3 decision 13.
+    /// `true` continues to the next step regardless. decision 13.
     #[serde(default)]
     pub continue_on_fail: bool,
     /// How long dev-bench waits *before* starting this step's action —
-    /// design.md §3 decision 42, the "when" half of authoring a stimulus.
+    /// decision 42, the "when" half of authoring a stimulus.
     ///
     /// Steps run strictly in sequence, so until this existed the only
     /// expressible timing was "immediately after the previous step
@@ -361,8 +361,8 @@ pub struct Step {
     pub delay_before_ms: u32,
 }
 
-/// design.md §4.3. Content validation is handled entirely post-hoc by Core
-/// (§3 decision 19) — there is no on-device validation `Action` variant.
+/// interfaces/types.md. Content validation is handled entirely post-hoc by
+/// Core (decision 19) — there is no on-device validation `Action` variant.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Action {
     BleAdvertise {
@@ -375,7 +375,7 @@ pub enum Action {
         /// `None` accepts/connects to whichever DUT shows up first.
         target_address: Option<BleAddress>,
         /// Connect only to an advertiser whose advertised local name equals
-        /// this, exactly — design.md §3 decision 43.
+        /// this, exactly — decision 43.
         ///
         /// Added because "whichever DUT shows up first" is not a usable
         /// default on a real bench. Found live running roadmap Milestone 6:
@@ -409,15 +409,15 @@ pub enum Action {
     /// (every primary service, every characteristic, each characteristic's
     /// raw ATT properties byte) rather than requiring a caller to already
     /// know a `service_uuid`/`characteristic_uuid` pair. Reports its result
-    /// in `StepResult.gatt_services` (§4.3a); doesn't subscribe or capture
-    /// anything itself. design.md §3 decision 31.
+    /// in `StepResult.gatt_services` (interfaces/gatt-types.md); doesn't subscribe or capture
+    /// anything itself. decision 31.
     GattDiscover {},
     /// Runs the same discovery as `GattDiscover` internally, then subscribes
     /// to every characteristic whose discovered properties include Notify or
     /// Indicate, then captures every notification/indication that arrives
     /// until the step's `timeout_ms` expires. Reports both `gatt_services`
-    /// and `gatt_activity` (§4.3a) — self-sufficient, doesn't depend on a
-    /// preceding `GattDiscover` step's result. design.md §3 decision 32.
+    /// and `gatt_activity` (interfaces/gatt-types.md) — self-sufficient, doesn't depend on a
+    /// preceding `GattDiscover` step's result. decision 32.
     GattMonitorAll {},
     /// Opens a capture window that deliberately **outlives its own step**:
     /// runs the same wildcard discovery as `GattDiscover`, subscribes to
@@ -425,7 +425,7 @@ pub enum Action {
     /// every subscription armed. Every step that runs afterwards — including
     /// `DataExchange` writes that stimulate the DUT — has its GATT traffic
     /// recorded into the streamed transcript until a `GattMonitorStop`
-    /// closes the window. design.md §3 decision 36.
+    /// closes the window. decision 36.
     ///
     /// This is the one action that makes "stimulate the DUT and capture what
     /// comes back" expressible at all: `GattMonitorAll` tears its own
@@ -439,11 +439,10 @@ pub enum Action {
     /// `StepResult`. The full, uncapped record is the streamed transcript,
     /// not this summary. A `GattMonitorStop` with no open window is a
     /// no-op `Pass`, not a `Fail` — a study that ends without one still has
-    /// its window closed implicitly when the study does. design.md §3
-    /// decision 36.
+    /// its window closed implicitly when the study does. decision 36.
     GattMonitorStop {},
     /// Elevates the live BLE link to at least `level`, answering the pairing
-    /// prompts itself — design.md §3 decision 44.
+    /// prompts itself — decision 44.
     ///
     /// Until this existed a study could not ask for security at all, which
     /// made a DUT that requires an encrypted link before it will answer GATT
@@ -471,7 +470,7 @@ pub enum Action {
     /// the DUT's.
     BleSecurity { level: BleSecurityLevel },
     /// Drops the bond established by a preceding [`Action::BleSecurity`],
-    /// inside the study — design.md §3 decision 50.
+    /// inside the study — decision 50.
     ///
     /// dev-bench already clears bonds at the *end* of every study, so a
     /// second run of a study behaves like the first. This is the other
@@ -487,7 +486,7 @@ pub enum Action {
     /// what "pair again" meant in the first place.
     BleUnbond {},
     /// [`Action::GattMonitorAll`], narrowed to the characteristics the study
-    /// names — design.md §3 decision 53.
+    /// names — decision 53.
     ///
     /// Discovery still runs exactly as `GattMonitorAll`'s does, so
     /// `gatt_services` reports the whole table either way; what narrows is
@@ -503,28 +502,27 @@ pub enum Action {
     /// family of decisions keeps being opened by.
     GattMonitorSelected { targets: Bounded<GattTarget, MAX_MONITOR_TARGETS> },
     /// [`Action::GattMonitorStart`], narrowed the same way
-    /// [`Action::GattMonitorSelected`] narrows `GattMonitorAll` — design.md
-    /// §3 decision 53.
+    /// [`Action::GattMonitorSelected`] narrows `GattMonitorAll` — decision 53.
     ///
     /// Closed by the same [`Action::GattMonitorStop`]: a window is a window
     /// regardless of how many characteristics it armed, and a second stop
     /// action would be two names for one thing.
     GattMonitorSelectedStart { targets: Bounded<GattTarget, MAX_MONITOR_TARGETS> },
     /// Hand the link to a declared protocol state machine for the length of
-    /// this step (design.md §3 decision 60, §4.9).
+    /// this step (decision 60, interfaces/eap.md).
     ///
-    /// **This is the write direction §3 decision 39 left open**, and the
+    /// **This is the write direction decision 39 left open**, and the
     /// thing its own rejected `StreamSend`/`StreamExpect` proposal was
     /// reaching for. That proposal was turned down as premature because
     /// nothing in the model had conditional logic, branching or multi-step
     /// state; a handshake is mostly those three. `RunProtocol` spans steps
-    /// the way `GattMonitorStart`/`GattMonitorStop` (§3 decision 36) does,
+    /// the way `GattMonitorStart`/`GattMonitorStop` (decision 36) does,
     /// but where that pair opens a time window, this one runs a machine.
     ///
     /// **Both fields are indices, not names.** `protocol` indexes
     /// [`Study::protocols`] — the same shape
     /// `StreamEncoding::Struct { decoder }` uses against `Study.decoders`
-    /// (§3 decision 52) — and `entry_state` indexes that protocol's own
+    /// (decision 52) — and `entry_state` indexes that protocol's own
     /// `states`, so one manifest can be entered at more than one point
     /// without a firmware comparing strings. Both are range-checked by
     /// [`crate::eap::validate_protocol`] and by Core's pre-flight, before
@@ -533,7 +531,7 @@ pub enum Action {
 }
 
 /// LE security mode 1's levels, as [`Action::BleSecurity`] asks for one and
-/// [`crate::result::StepResult`] reports one — design.md §3 decision 44.
+/// [`crate::result::StepResult`] reports one — decision 44.
 ///
 /// Numbered by the spec's own level numbers rather than renamed, so a value
 /// here and a Zephyr `BT_SECURITY_L*` constant and a line in a Bluetooth
@@ -544,7 +542,7 @@ pub enum Action {
 pub enum BleSecurityLevel {
     /// No encryption, no authentication — a plain connection.
     ///
-    /// **Authorable, and deliberately so** (design.md §3 decision 44): `L1`
+    /// **Authorable, and deliberately so** (decision 44): `L1`
     /// is "this DUT needs no security", *said out loud*, rather than reached
     /// by leaving the step out and hoping. It is the same distinction
     /// `REQUIREMENT_ANY` draws for [`crate::study::Requirements`] — a real
@@ -609,7 +607,7 @@ pub enum BleRole {
     Peripheral,
 }
 
-/// design.md §4.3.
+/// interfaces/types.md.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum GattOperation {
     Read,
@@ -628,22 +626,22 @@ pub enum GattOperation {
     },
     /// Enable notifications/indications without waiting for one.
     Subscribe,
-    // `StreamCapture` was here (design.md §3 decisions 20/21) and is
+    // `StreamCapture` was here (decisions 20/21) and is
     // **retired** by decision 39: a continuous capture of what a
     // characteristic streams is now a declared
-    // `StreamSource::GattNotify` tap (§4.8), not a per-step action kind.
+    // `StreamSource::GattNotify` tap (interfaces/taps.md), not a per-step action kind.
     // Removed rather than kept as a dead trailing variant so nothing can
     // author one — the schema break is already paid for by v8's
     // Hello/HelloAck handshake, and a variant nothing dispatches is the
     // silently-captures-nothing failure decision 36 was opened by.
 }
 
-// `PowerSampleWindow` was here (design.md §4.4) and is **retired** by §3
+// `PowerSampleWindow` was here and is **retired** by
 // decision 39's 2026-08-25 amendment, along with `Step.power_sample` above.
 // It carried one field, `sample_rate_hz`, naming dev-bench's power-sampling
 // rate for a step-bounded window; a `StreamSource::PowerFrontEnd
 // { sample_hz }` tap with a `StreamScope::Steps { from, to }` covering the
-// same step (§4.8) expresses exactly that.
+// same step (interfaces/taps.md) expresses exactly that.
 //
 // Retired on evidence, not on symmetry: nothing consumed it. `embarch-core`
 // took a power capture's rate from the tap, dev-bench's C encoder wrote its
@@ -700,9 +698,9 @@ mod tests {
         // Run on a deliberately larger stack: deserializing a `Study` at all
         // needs ~75 KiB of inline `heapless` arrays plus serde's own frames,
         // and overflows libtest's default stack in a debug build. That is
-        // design.md §7's long-standing open item, not something this test
+        // spec.md §7's long-standing note, not something this test
         // introduces — `embarch-api` closed its own exposure the same way
-        // (`embarch-api/design.md` §3 decision 36).
+        // (embarch-api decision 36).
         std::thread::Builder::new()
             .stack_size(8 * 1024 * 1024)
             .spawn(|| {

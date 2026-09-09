@@ -1,5 +1,5 @@
-//! Engineer-declared struct decoding for a stream tap's payloads — design.md
-//! §3 decision 52, §4.8a.
+//! Engineer-declared struct decoding for a stream tap's payloads — decision
+//! 52 (interfaces/decoders.md).
 //!
 //! **This is [`crate::streams::StreamEncoding`]'s "the only place a byte
 //! payload acquires a meaning" rule, made expressive enough to be useful.**
@@ -15,7 +15,7 @@
 //! ([`crate::registry::StructRegistry`]), named there, and resolved into the
 //! submitted `Study` at build time — the same shape
 //! [`crate::study_builder::RowAction::Registered`] already uses to resolve a
-//! chosen label to literal bytes. design.md §3 decision 35 is unchanged and
+//! chosen label to literal bytes. decision 35 is unchanged and
 //! this is an instance of it, not an exception: the engineer states the
 //! layout, this module only applies it.
 //!
@@ -151,7 +151,7 @@ impl ScalarType {
     /// Read this field as a signed 64-bit integer, or `None` if it is one
     /// of the two float widths.
     ///
-    /// Added for `.eap` guard evaluation (design.md §3 decisions 59/60),
+    /// Added for `.eap` guard evaluation (decisions 59/60),
     /// which is integer-only: [`crate::eap::Operand::Literal`] is an `i64`,
     /// so a float field has nothing it could be compared against. Returning
     /// `None` rather than lossily converting is the same refusal decision 52
@@ -215,7 +215,7 @@ impl ScalarType {
 
     /// Write an integer into `out` in this field's width and byte order,
     /// truncating to the width. Used to assemble a `write` payload
-    /// (design.md §3 decision 61) from the same vocabulary decode reads.
+    /// (decision 61) from the same vocabulary decode reads.
     ///
     /// Returns `None` for a float width, matching [`read_i64`](Self::read_i64).
     pub fn write_i64(self, value: i64, out: &mut [u8]) -> Option<usize> {
@@ -284,7 +284,7 @@ pub struct StructField {
     pub ty: ScalarType,
 }
 
-/// A named payload layout — design.md §3 decision 52.
+/// A named payload layout — decision 52.
 ///
 /// `header` is read once at offset 0. `repeat`, when non-empty, is then read
 /// as many times as fits in what remains, producing **one CSV row per
@@ -311,7 +311,7 @@ pub struct StructLayout {
 /// A [`DecodeError`] never discards the record: the raw bytes are already on
 /// disk before any decode is attempted, and the rendered row still gets
 /// written with its decoded columns empty and this reason in `decode_note`
-/// (design.md §3 decision 52). A failed decode costs a rendering, not a
+/// (decision 52). A failed decode costs a rendering, not a
 /// capture.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DecodeError {

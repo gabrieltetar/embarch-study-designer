@@ -270,7 +270,7 @@ fn dump_step_result_wire_bytes() {
 }
 
 /// Dumps a `StudyStart` carrying schema v12's two new actions
-/// (`embarch-study-designer/design.md` §3 decisions 50/51), so dev-bench's
+/// (decisions 50/51), so dev-bench's
 /// hand-written C decoder is pinned against bytes this crate produced rather
 /// than against its own encoder — decision 36's both-languages rule, applied
 /// to a new record the pass that adds it rather than a version later (which
@@ -308,8 +308,8 @@ fn dump_study_start_with_security_wire_bytes() {
             action: Action::BleSecurity { level: BleSecurityLevel::L4 },
             // A DUT that enforces a post-connect security deadline needs the
             // elevation to start promptly and finish inside a bounded
-            // window; both halves are ordinary `Step` fields (design.md §3
-            // decision 42), which is why this action needed no timing field
+            // window; both halves are ordinary `Step` fields
+            // (decision 42), which is why this action needed no timing field
             // of its own.
             timeout_ms: 10_000,
             continue_on_fail: false,
@@ -383,7 +383,7 @@ fn dump_step_result_with_security_wire_bytes() {
 }
 
 /// Dumps a `StudyStart` carrying schema v14's new wire shapes
-/// (`embarch-study-designer/design.md` §3 decisions 52/53), so dev-bench's
+/// (decisions 52/53), so dev-bench's
 /// hand-written C decoder is pinned against bytes this crate produced — the
 /// both-languages rule, applied in the pass that adds them.
 ///
@@ -484,7 +484,7 @@ fn dump_study_start_with_selective_monitor_wire_bytes() {
 /// `Action::RunProtocol` step — schema v15's two appended `StudyStart`
 /// fields (`protocols`, `protocols_crc`), the new action tag, and the
 /// **third seal** dev-bench checks independently of the other two
-/// (design.md §3 decision 58, §4.9).
+/// (decision 58, interfaces/eap.md).
 ///
 /// **The protocol is the real worked one**, resolved out of
 /// `tests/fixtures/bds_batch_download.eap` rather than hand-built here, and
@@ -497,7 +497,7 @@ fn dump_study_start_with_selective_monitor_wire_bytes() {
 /// hand-written C walker has.
 ///
 /// Gated on `eap-parse` because resolving a manifest is a host-side,
-/// `std`-only step (§4.9): the *bytes* it produces are what crosses the
+/// `std`-only step (interfaces/eap.md): the *bytes* it produces are what crosses the
 /// wire, and the crate that produces them is the definition.
 ///
 /// Run with: cargo test --features eap-parse --test firmware_test_vectors -- --nocapture dump_study_start_with_protocol
@@ -564,7 +564,7 @@ fn dump_study_start_with_protocol_wire_bytes() {
 }
 
 /// Dumps a `StepResult` carrying a `ProtocolOutcome` — schema v15's trailing
-/// `StepResult.protocol` field (design.md §3 decision 62), populated.
+/// `StepResult.protocol` field (decision 62), populated.
 ///
 /// The all-`None` vector above already pins the one appended `0x00` byte a
 /// non-`RunProtocol` step writes, which is every step this firmware has ever

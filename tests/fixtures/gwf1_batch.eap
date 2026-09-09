@@ -9,7 +9,7 @@
 # primitive under every batch format this was checked against.
 #
 # Only the header scalars are guard-reachable. Everything below `repeat` is
-# render-only (design.md §3 decision 59's split) and never reaches dev-bench.
+# render-only (decision 59's split) and never reaches dev-bench.
 
 protocol gwf1_capture {
     source batch_data = characteristic(service: "00000010-1234-5678-9abc-def012345678", char: "0011")
@@ -54,7 +54,7 @@ protocol gwf1_capture {
         crc32 ieee policy: skip
     }
 
-    # A flat sibling on the same source, proving the second half of §3
+    # A flat sibling on the same source, proving the second half of
     # decision 62: a frame this shape lowers into decision 52's own
     # `StructLayout` and renders through the mechanism that already shipped.
     frame ppg_batch on batch_data

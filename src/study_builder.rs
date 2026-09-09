@@ -1,12 +1,11 @@
-//! Table-row -> `Study` conversion for the Study Designer UI — design.md §3
-//! decision 34, `embarch-study-designer/milestone-11.md` §3.3/§3.7.
+//! Table-row -> `Study` conversion for the Study Designer UI — decision 34.
 //!
 //! `std`-only, `study-ui`-feature-gated: takes a client-submitted "table"
 //! (one [`TableRow`] per Study Designer UI row) and produces a real
 //! [`Study`], resolving each row's action against a loaded
 //! [`ActionRegistry`]. Pure and offline — no I/O, no BLE — which is what
 //! makes this the actual place `Study` schema-validity gets tested, not the
-//! UI binary itself (milestone-11.md §3.7).
+//! UI binary itself.
 //!
 //! A registered action's payload is assembled purely mechanically: each
 //! chosen field value's literal bytes (`registry::ActionFieldValue::bytes`)
@@ -40,19 +39,19 @@ pub enum BuiltInActionKind {
     BleConnect,
     GattDiscover,
     GattMonitorAll,
-    /// design.md §3 decision 36.
+    /// decision 36.
     GattMonitorStart,
-    /// design.md §3 decision 36.
+    /// decision 36.
     GattMonitorStop,
-    /// design.md §3 decision 44 — takes `security_level` from the same
+    /// decision 44 — takes `security_level` from the same
     /// [`RowAction::BuiltIn`] row.
     BleSecurity,
-    /// design.md §3 decision 50.
+    /// decision 50.
     BleUnbond,
-    /// design.md §3 decision 53 — takes `targets` from the same
+    /// decision 53 — takes `targets` from the same
     /// [`RowAction::BuiltIn`] row.
     GattMonitorSelected,
-    /// design.md §3 decision 53.
+    /// decision 53.
     GattMonitorSelectedStart,
 }
 
@@ -78,21 +77,21 @@ pub enum RowAction {
         #[serde(default = "default_role")]
         role: RoleChoice,
         /// Only meaningful for `BleConnect`: the advertised local name to
-        /// connect to (design.md §3 decision 43). Blank or absent leaves
+        /// connect to (decision 43). Blank or absent leaves
         /// the study taking whichever peripheral advertises first, which is
         /// the old behavior and rarely what anyone wants — see
         /// `Action::BleConnect::target_name`.
         #[serde(default)]
         target_name: Option<String>,
         /// Only meaningful for `BleSecurity` — which level the study asks
-        /// the link to reach (design.md §3 decision 44). Absent defaults to
+        /// the link to reach (decision 44). Absent defaults to
         /// [`BleSecurityLevel::L4`], the level decision 44 was written for;
         /// an author who wants a weaker one says so, `L1` included.
         #[serde(default)]
         security_level: Option<BleSecurityLevel>,
         /// Only meaningful for `GattMonitorSelected`/`GattMonitorSelectedStart`
-        /// — which characteristics the step subscribes to (design.md §3
-        /// decision 53). UUIDs as text, parsed by the same
+        /// — which characteristics the step subscribes to (decision 53).
+        /// UUIDs as text, parsed by the same
         /// [`Uuid::parse`] `RowAction::Raw` uses, so a value picked from the
         /// discovered table and one typed by hand mean the same thing.
         ///
@@ -115,8 +114,8 @@ pub enum RowAction {
         field_choices: HashMap<String, String>,
     },
     /// A one-off `DataExchange` against a UUID pair the engineer typed
-    /// directly, with a payload they supplied as literal bytes — design.md
-    /// §3 decision 37, alongside the registry rather than replacing it.
+    /// directly, with a payload they supplied as literal bytes — decision
+    /// 37, alongside the registry rather than replacing it.
     ///
     /// This does not weaken decision 35's rule. That rule forbids this crate
     /// inventing a *semantic description* of what an action does, and
@@ -136,7 +135,7 @@ pub enum RowAction {
     },
     /// A `DataExchange` against a **vendor-defined** service from
     /// [`crate::vendor`], picked by id rather than by typing UUIDs —
-    /// design.md §3 decision 41.
+    /// decision 41.
     ///
     /// This sits between `Registered` and `Raw` and replaces neither.
     /// `Registered` names an action an engineer authored for *their* custom
@@ -166,8 +165,8 @@ pub enum RowAction {
     },
 }
 
-/// One characteristic a selective monitor row names — design.md §3
-/// decision 53. Text UUIDs, resolved to [`crate::GattTarget`] by
+/// One characteristic a selective monitor row names — decision 53. Text
+/// UUIDs, resolved to [`crate::GattTarget`] by
 /// [`build_study`] rather than by the client.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TargetInput {
@@ -183,8 +182,8 @@ pub struct TableRow {
     pub timeout_ms: u32,
     #[serde(default)]
     pub continue_on_fail: bool,
-    /// The row's "when" — `Step::delay_before_ms` (design.md §3 decision
-    /// 40). `#[serde(default)]` so a table saved before this field existed
+    /// The row's "when" — `Step::delay_before_ms` (decision 40).
+    /// `#[serde(default)]` so a table saved before this field existed
     /// still loads, as 0 (start immediately), which is exactly what those
     /// studies did.
     #[serde(default)]
@@ -308,7 +307,7 @@ fn heapless_string<const N: usize>(
 /// Builds a real `Study` from a submitted table. `steps_crc` is left `0` —
 /// whichever `embarch-api` call actually submits this `Study`
 /// (`run-study`/`run_study`) recomputes and overwrites it unconditionally
-/// regardless of what's given (design.md §3 decision 26), so there's
+/// regardless of what's given (decision 26), so there's
 /// nothing for this offline function to compute it against yet.
 pub fn build_study(
     study_name: &str,
@@ -341,16 +340,16 @@ pub fn build_study(
         protocols_crc: 0,
         name: heapless_string::<MAX_STUDY_NAME_LEN>(study_name, "study name")?,
         // Taken from the caller rather than defaulted here on purpose
-        // (design.md §3 decision 40): "any build" is a legitimate answer that
+        // (decision 40): "any build" is a legitimate answer that
         // has to be *said*, and this function has no idea which bench the
         // study is for. `embarch-ui`'s Study Designer is where a human says
-        // it (`embarch-ui/design.md` §3 decision 11, Milestone 7 Phase D).
+        // it (embarch-ui decision 11, Milestone 7 Phase D).
         requires,
         steps,
         streams: HVec::new(),
         steps_crc: 0,
         // Both seals are left at 0 here, and both are overwritten by
-        // whoever submits (`embarch-api/design.md` §3 decision 26). For
+        // whoever submits (embarch-api decision 26). For
         // `streams_crc` that zero happens to already be correct — this
         // builder authors no taps, and 0 is the real CRC of an empty tap
         // list (`crate::crc::streams_crc`) — but it is not written *as* a
@@ -375,7 +374,7 @@ pub fn build_study(
 }
 
 /// Parses a selective monitor row's text UUID pairs into the wire type —
-/// design.md §3 decision 53.
+/// decision 53.
 fn resolve_targets(
     targets: &[TargetInput],
 ) -> Result<Bounded<GattTarget, MAX_MONITOR_TARGETS>, BuildStudyError> {
@@ -429,8 +428,8 @@ fn resolve_action(row_action: &RowAction, registry: &ActionRegistry) -> Result<A
             BuiltInActionKind::GattMonitorAll => Action::GattMonitorAll {},
             BuiltInActionKind::GattMonitorStart => Action::GattMonitorStart {},
             BuiltInActionKind::GattMonitorStop => Action::GattMonitorStop {},
-            // No level is refused here, `L1` included: design.md §3 decision
-            // 44 makes `L1` the honest way to say "this DUT needs none"
+            // No level is refused here, `L1` included: decision 44 makes
+            // `L1` the honest way to say "this DUT needs none"
             // rather than omitting the step and hoping, which is the same
             // distinction `REQUIREMENT_ANY` draws for `requires`.
             BuiltInActionKind::BleSecurity => {
@@ -570,7 +569,7 @@ fn resolve_operation(
             not_writable_if_choices_given(registered, field_choices, GattOperation::Subscribe)
         }
         // Notify/Indicate's own wait timeout is a separate field from the
-        // step's own `timeout_ms` (design.md §4.3) -- defaulted to match
+        // step's own `timeout_ms` (interfaces/types.md) -- defaulted to match
         // the step's timeout rather than asking the UI for a second value,
         // a UI simplification (adjustable later), not a guess about any
         // particular DUT's protocol.
@@ -653,7 +652,7 @@ fn resolve_write_payload(
 
 /// Convenience for the UI binary: the `service_uuid`/`uuid` an unregistered
 /// characteristic needs supplied when the engineer registers an action
-/// against it (milestone-11.md §3.4) — re-exported here rather than forcing
+/// against it — re-exported here rather than forcing
 /// the UI binary to reach into `merged_actions` for one field pair.
 pub fn characteristic_pair(service_uuid: Uuid, uuid: Uuid) -> (Uuid, Uuid) {
     (service_uuid, uuid)
@@ -755,7 +754,7 @@ mod tests {
     /// arity. Every case in this module is about resolving a table row into
     /// an `Action`, not about which builds a study requires, so they all
     /// author [`Requirements::any`] — the explicit "doesn't matter here"
-    /// value, said rather than defaulted (design.md §3 decision 40).
+    /// value, said rather than defaulted (decision 40).
     fn build_study(
         study_name: &str,
         rows: &[TableRow],
@@ -1202,7 +1201,7 @@ mod tests {
 
     #[test]
     fn raw_row_builds_a_data_exchange_write_from_typed_uuids_and_literal_bytes() {
-        // design.md §3 decision 37 — the free-text path, e.g. an NUS shell
+        // decision 37 — the free-text path, e.g. an NUS shell
         // write, with no registry entry involved at all.
         let rows = vec![TableRow {
             name: "nus-write".into(),
@@ -1363,8 +1362,8 @@ mod tests {
 
     #[test]
     fn resulting_study_round_trips_through_serde_json_matching_the_run_study_wire_shape() {
-        // Kept on a dedicated, generously-sized stack even though design.md
-        // §3 decision 46 removed the cause: `Study.steps` is a heap `Vec`
+        // Kept on a dedicated, generously-sized stack even though decision
+        // 46 removed the cause: `Study.steps` is a heap `Vec`
         // under `alloc` (which `study-ui` implies via `std`), so the 64-slot
         // inline array this comment used to describe is gone here. The big
         // stack stays because `Step` itself is still large and this test

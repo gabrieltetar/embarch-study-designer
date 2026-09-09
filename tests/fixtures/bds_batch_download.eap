@@ -1,11 +1,11 @@
 # A BDS-batch-download-shaped handshake: request -> chunked pump loop with
 # flow control -> consume. Structurally the state machine of the real Batch
 # Data Service on `reference-dut-fw` (lib/bds/bds.c's `sensor_bds`),
-# which embarch-study-designer/design.md §3 decision 57 made extractable.
+# which decision 57 made extractable.
 #
 # This is a TEST FIXTURE, not a description of that firmware's real opcodes.
 # It exists to prove the primitive set is sufficient for a flow-controlled
-# download, which is what §4.9 chose it for.
+# download, which is what interfaces/eap.md chose it for.
 
 protocol bds_batch_download {
     source ctrl   = characteristic(service: "00000020-1234-5678-9abc-def012345678", char: "0021")

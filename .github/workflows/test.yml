@@ -126,7 +126,7 @@ jobs:
       # It does NOT prove what dev-bench actually needs: that the crate links as
       # a `--crate-type staticlib` on a cross target with a panic handler and
       # panic=abort. That build root does not exist yet (see the comment above
-      # [dependencies] in Cargo.toml, and §7). Adding a cross-compile step
+      # [dependencies] in Cargo.toml, and open.md). Adding a cross-compile step
       # before that toolchain exists would be a step that cannot fail for the
       # reason it was added, so this is a `build` with a stated ceiling instead.
       # `cargo test` is not used: this cell is narrow (no_std, no alloc) and

@@ -1,13 +1,12 @@
-//! Minimal `extern "C"` surface for dev-bench firmware (design.md §3
-//! decisions 7, 23).
+//! Minimal `extern "C"` surface for dev-bench firmware (decisions 7, 23).
 //!
 //! This is a representative slice of the eventual FFI surface, enough to
 //! lock in the calling convention — integer status codes, buffer+length
 //! params, no panic ever crosses this boundary (a Rust panic unwinding into
 //! C firmware is undefined behavior) — not the full surface. The field-level
 //! accessors dev-bench firmware actually needs to build/read a `Study` are
-//! deferred until that firmware exists to define real requirements against
-//! (design.md §7). Combined with `panic = "abort"` in `Cargo.toml`'s
+//! deferred until that firmware exists to define real requirements against.
+//! Combined with `panic = "abort"` in `Cargo.toml`'s
 //! `[profile.release]`, every exported function here is safe to call from C
 //! even on malformed input: it returns a status code, never panics.
 
@@ -18,7 +17,7 @@ use crate::limits::{MAX_LOCAL_NAME_LEN, MAX_NAME_LEN, MAX_STEPS_PER_STUDY, MAX_S
 use crate::schema_version::DEV_BENCH_WIRE_SCHEMA_VERSION;
 use crate::study::{Action, Study};
 
-/// `embarch-dev-bench/design.md` §3 decision 8: when this crate is
+/// embarch-dev-bench decision 8: when this crate is
 /// cross-compiled as the bare-metal `--crate-type staticlib` dev-bench
 /// firmware links (`target_os = "none"` — true for `thumbv8m.main-none-eabihf`,
 /// false for every host target this crate is also built for, including
@@ -48,21 +47,21 @@ pub enum EssdStatus {
     NullPointer = -1,
     /// `input` wasn't a valid postcard-encoded `Study`, or a single `Step`
     /// inside it was too large for `steps_crc`'s internal scratch buffer
-    /// (should be unreachable given `limits`, design.md §3 decision 15).
+    /// (should be unreachable given `limits`, decision 15).
     DecodeError = -2,
     /// The `Study` decoded, but its `steps_crc` didn't match the recomputed
-    /// value (design.md §3 decision 17).
+    /// value (decision 17).
     CrcMismatch = -3,
     /// A step's Action isn't BleAdvertise -- this decode surface is scoped to
-    /// BleAdvertise-only steps for now (embarch-dev-bench/design.md §3 decision
-    /// 21's initial pass); BleConnect/DataExchange dispatch needs a larger
-    /// decode surface, deliberately deferred (see embarch-dev-bench/design.md §4).
+    /// BleAdvertise-only steps for now (embarch-dev-bench decision 21's
+    /// initial pass); BleConnect/DataExchange dispatch needs a larger
+    /// decode surface, deliberately deferred.
     UnsupportedAction = -4,
 }
 
-/// Mirrors `Action::BleAdvertise` (design.md §4.3), scoped to the fields
-/// dev-bench's initial dispatch pass actually needs (design.md §3 decision
-/// 21). `service_uuids` is deliberately not carried into this struct -- an
+/// Mirrors `Action::BleAdvertise` (interfaces/types.md), scoped to the fields
+/// dev-bench's initial dispatch pass actually needs (decision 21).
+/// `service_uuids` is deliberately not carried into this struct -- an
 /// accepted v1 gap, not a silent bug: advertising still exercises the radio
 /// without needing UUIDs for this milestone's self-test (which submits
 /// `service_uuids: []` anyway); a `Study` whose `BleAdvertise` step sets
@@ -88,7 +87,7 @@ impl EssdBleAdvertiseAction {
     }
 }
 
-/// Mirrors `Step` (design.md §4.2), `action` narrowed to
+/// Mirrors `Step` (interfaces/types.md), `action` narrowed to
 /// [`EssdBleAdvertiseAction`] -- see `essd_study_decode_full`'s doc comment.
 /// `delay_before_ms` is not carried into this struct (it isn't needed for
 /// `BleAdvertise` dispatch; same accepted-gap posture as `service_uuids`
@@ -121,7 +120,7 @@ impl EssdStep {
     }
 }
 
-/// Mirrors `Study` (design.md §4.1), `steps` narrowed to [`EssdStep`] -- see
+/// Mirrors `Study` (interfaces/types.md), `steps` narrowed to [`EssdStep`] -- see
 /// `essd_study_decode_full`'s doc comment. `steps_crc` is not carried into
 /// this struct: it has already been checked by the time this struct is
 /// populated.
@@ -146,7 +145,7 @@ impl EssdStudy {
 }
 
 /// Copies `src` into `dst`, truncating to `dst`'s capacity (should never
-/// actually truncate given `limits`, design.md §3 decision 15 -- `dst` is
+/// actually truncate given `limits`, decision 15 -- `dst` is
 /// always sized to match the `heapless::String`/array this is copying from).
 /// Returns the copied length.
 fn copy_bytes(src: &[u8], dst: &mut [u8]) -> u8 {
@@ -155,7 +154,7 @@ fn copy_bytes(src: &[u8], dst: &mut [u8]) -> u8 {
     len as u8
 }
 
-/// This crate's [`DEV_BENCH_WIRE_SCHEMA_VERSION`] (design.md §3 decision 12
+/// This crate's [`DEV_BENCH_WIRE_SCHEMA_VERSION`] (decision 12
 /// and its 2026-08-25 amendment), for dev-bench firmware to embed in its own
 /// `HelloAck`.
 ///
@@ -170,17 +169,17 @@ pub extern "C" fn essd_schema_version() -> u32 {
 
 /// Decodes a postcard-encoded `Study` from `input[0..input_len]` and
 /// recomputes `steps_crc` over its `steps`, writing whether that matches the
-/// `Study`'s own `steps_crc` field to `*out_crc_matches` (design.md §3
-/// decision 17). Returns a status code rather than panicking on malformed
-/// input (design.md §3 decision 23).
+/// `Study`'s own `steps_crc` field to `*out_crc_matches` (decision 17).
+/// Returns a status code rather than panicking on malformed input
+/// (decision 23).
 ///
-/// **`streams_crc` (§3 decision 39's 2026-08-25 amendment) is deliberately
+/// **`streams_crc` (decision 39's 2026-08-25 amendment) is deliberately
 /// not checked here.** A single `out_crc_matches` bool cannot say *which* of
 /// two seals failed, which is the property having two of them exists for —
 /// so folding both into it would quietly destroy the thing being added.
 /// Widening the C ABI instead would extend a surface that has no caller
-/// anywhere (design.md §7's `BleAdvertise`-scoped FFI decode surface), which
-/// is the same posture `embarch-topology/design.md` §3 decision 18's
+/// anywhere -- this `BleAdvertise`-scoped FFI decode surface is deliberately
+/// narrow -- which is the same posture embarch-topology decision 18's
 /// amendment takes toward `validate_signal`. The real Core<->dev-bench check
 /// is dev-bench's own C decoder in `serial_protocol.c`, which computes both
 /// seals over the spans it walks.

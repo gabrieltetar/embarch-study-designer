@@ -1,18 +1,18 @@
 //! The `embarch-outpost` trace wire format, and the manifest that names it.
 //!
-//! `embarch-outpost/design.md` §4, and that repo's own `src/outpost_priv.h`,
-//! which is the other half of this contract.
+//! `embarch-outpost/interfaces/wire.md`, and that repo's own
+//! `src/outpost_priv.h`, which is the other half of this contract.
 //!
 //! **Why this lives here and not in `embarch-core`.** Every other rendered
 //! stream's row shape lives in this crate — [`crate::sample::Sample`],
 //! [`crate::gatt::GattTranscriptEntry`] — precisely so Core holds no column
-//! knowledge (`embarch-core/design.md` §3 decision 30). An outpost trace is
+//! knowledge (embarch-core decision 30). An outpost trace is
 //! the third rendered encoding and gets the same treatment, which also means
 //! `embarch-api` and `embarch-ui` read a trace through the same code Core
 //! writes it with rather than through a second implementation.
 //!
 //! **This is not a dev-bench wire type**, which is the one way it differs from
-//! its neighbours: `embarch-outpost/design.md` §3 decision 11 has dev-bench
+//! its neighbours: embarch-outpost decision 11 has dev-bench
 //! passing outpost bytes through and interpreting nothing, so no C decoder
 //! mirrors this and no both-languages pin applies to it. The mirror that does
 //! exist is `embarch-outpost/scripts/decode_outpost.py`, and the firmware
@@ -27,7 +27,7 @@
 //!
 //! `frame_type` 0x01 carries a postcard `Vec<OutpostRecord>` (a varint count
 //! then that many records); 0x02 carries an [`OutpostHeader`]. COBS is the
-//! same framing the Core<->dev-bench link uses (§3 decision 10), so the same
+//! same framing the Core<->dev-bench link uses (decision 10), so the same
 //! shape of code reads both.
 
 use crc::{Crc, CRC_32_ISO_HDLC};
@@ -79,7 +79,7 @@ pub const IRQ_UNKNOWN: u32 = 0xFFFF_FFFF;
 pub const MAX_BUILD_ID_LEN: usize = 128;
 
 /// One traced event. Fixed shape, absolute timestamp, IDs never strings —
-/// `embarch-outpost/design.md` §3 decision 4.
+/// embarch-outpost decision 4.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OutpostRecord {
     /// `k_cycle_get_32()` at the moment the hook ran. **Absolute and
@@ -191,8 +191,8 @@ impl RecordKind {
 /// `CONFIG_EMBARCH_OUTPOST_HEADER_INTERVAL_MS`, so a host attaching mid-stream
 /// can still decode.
 ///
-/// **No manifest CRC.** There cannot be one: `embarch-outpost/design.md` §3
-/// decision 9's rework replaced the post-link CRC patch with a compile-time
+/// **No manifest CRC.** There cannot be one: embarch-outpost decision 9's
+/// rework replaced the post-link CRC patch with a compile-time
 /// build ID, and a manifest generated *from the linked image* has no CRC the
 /// firmware could have been built knowing. [`build_id`](Self::build_id) is
 /// what a manifest is checked against.
@@ -236,8 +236,7 @@ impl HeaderFlags {
     /// It is on the wire because an absence of records is indistinguishable
     /// from an idle subject: a host inferring self-exclusion from "the drain
     /// thread never ran" would be deriving a firmware build option from a
-    /// measurement, which is the class of thing
-    /// `embarch-study-designer/design.md` §3 decision 35 forbids.
+    /// measurement, which is the class of thing decision 35 forbids.
     pub const TRACE_SELF: u8 = 1 << 7;
 }
 
@@ -433,7 +432,7 @@ mod manifest {
     pub struct OutpostManifest {
         pub schema: u32,
         /// What a stream's header frame must match for this manifest to be
-        /// applied. `embarch-outpost/design.md` §3 decision 9.
+        /// applied. embarch-outpost decision 9.
         pub build_id: String,
         #[serde(default)]
         pub outpost_version: String,

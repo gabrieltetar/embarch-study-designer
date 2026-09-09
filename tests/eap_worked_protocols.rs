@@ -1,10 +1,10 @@
-//! The two worked protocols from design.md §4.9, as tests rather than as
+//! The two worked protocols from interfaces/eap.md, as tests rather than as
 //! documentation.
 //!
 //! They were chosen because they are structurally representative of a real
 //! DUT's BLE stack, so they are here to **prove the primitive set is
 //! sufficient**, not to illustrate it. Between them they exercise every
-//! primitive §3 decision 59 admits: magic-byte format dispatch, a descriptor
+//! primitive decision 59 admits: magic-byte format dispatch, a descriptor
 //! table that parametrizes later bytes, delta+zigzag+bit-packed columns, a
 //! trailing CRC-32 with a per-frame policy, byte spans, the whole expression
 //! set, both write forms, retries, a stall watchdog, and both terminal
@@ -259,7 +259,7 @@ fn gwf1_dispatches_on_its_magic_and_never_on_a_version_field() {
 
 #[test]
 fn only_the_header_scalars_are_guard_reachable_and_the_rest_stays_host_side() {
-    // This is §3 decision 59's split, asserted. A GWF1 record's thirty
+    // This is decision 59's split, asserted. A GWF1 record's thirty
     // channel descriptors and its bit-packed sample columns are real, are
     // parsed, and do not reach dev-bench — because no guard can name one and
     // `ProtocolOutcome` reports a state name.
@@ -358,7 +358,7 @@ fn a_flat_frame_lowers_into_decision_52s_struct_layout_and_a_recursive_one_does_
 
 #[test]
 fn a_write_carries_a_session_variable_through_the_decode_vocabulary() {
-    // §3 decision 61: a write built only from constants cannot express a
+    // decision 61: a write built only from constants cannot express a
     // live epoch or an echoed-back length. `capturing`'s on_enter is
     // `write ctrl { u8: 0x01, u32be: session.epoch }`.
     let r = resolve_only(GWF1);

@@ -1,7 +1,7 @@
 //! BLE identifier newtypes.
 //!
-//! design.md §4's preamble: "exact byte/UUID representations ... are
-//! implementation detail, not a design choice left open here." Raw fixed-size
+//! Exact byte/UUID representations are implementation detail, not a design
+//! choice left open here. Raw fixed-size
 //! byte arrays, not a `uuid`-crate dependency, so the crate stays dependency-lean
 //! and `no_std`-compatible without needing to check that crate's own `no_std`
 //! support.
@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 /// A 128-bit BLE UUID, raw bytes (big-endian, matching the Bluetooth SIG's
-/// on-the-wire base-UUID byte order) — not symbolic, per design.md §4.3.
+/// on-the-wire base-UUID byte order) — not symbolic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Uuid(pub [u8; 16]);
 
@@ -44,7 +44,7 @@ pub enum BleAddressKind {
 impl Uuid {
     /// Renders the standard hyphenated 8-4-4-4-12 form (`0000180f-0000-1000-
     /// 8000-00805f9b34fb`) from this type's big-endian bytes — the form a
-    /// human reading a `gatt.csv` transcript (design.md §4.3b) or comparing
+    /// human reading a `gatt.csv` transcript (interfaces/gatt-types.md) or comparing
     /// against a DUT's own headers actually recognizes. `no_std`, allocation
     /// free: a fixed 36-byte `heapless::String`, never a `format!`.
     /// Parses the forms a firmware engineer actually types: the hyphenated

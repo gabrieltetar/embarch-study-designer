@@ -1,5 +1,4 @@
-//! Capacity-bounded sequence storage, with one shape per target — design.md
-//! §3 decisions 46 and 49.
+//! Capacity-bounded sequence storage, with one shape per target — decisions 46 and 49.
 //!
 //! # Why this type exists
 //!
@@ -72,7 +71,7 @@ type Backing<T, const N: usize> = heapless::Vec<T, N>;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Bounded<T, const N: usize>(Backing<T, N>);
 
-/// `Study.steps` (design.md §3 decision 46).
+/// `Study.steps` (decision 46).
 pub type StepList = Bounded<Step, MAX_STEPS_PER_STUDY>;
 
 impl<T, const N: usize> Default for Bounded<T, N> {
@@ -270,7 +269,7 @@ mod tests {
         );
     }
 
-    /// The regression guard design.md §3 decision 46 asks for by name: the
+    /// The regression guard decision 46 asks for by name: the
     /// next time someone grows `Step` or `MAX_STEPS_PER_STUDY`, this fails in
     /// CI rather than as a stack overflow in production.
     ///
@@ -337,7 +336,7 @@ mod tests {
         // Asserted on `Bounded` itself rather than on a `StepResult`
         // magnitude. It used to read `size_of::<StepResult>() > 4_096`,
         // which held only because `gatt_activity` inlined 32 × 536-byte
-        // records — so retiring that field (design.md §3 decision 54) made a
+        // records — so retiring that field (decision 54) made a
         // passing test fail for a reason that had nothing to do with what it
         // was checking. The claim is "no allocator on this build", and the
         // element count times the element size is that claim directly.

@@ -8,25 +8,26 @@ them can't drift into three independently-maintained, slowly-diverging
 definitions.
 
 This crate is a mechanical translation of
-[`embarch-doc`'s `embarch-study-designer/design.md`](https://github.com/gabrieltetar/embarch-doc/blob/main/embarch-study-designer/design.md)
-— that document is the durable architecture record; this repo just implements it.
-Doc comments throughout `src/` cite it by section (`§4.1`, `§3 decision 17`, etc.).
+[`embarch-doc`'s `embarch-study-designer/spec.md`](https://github.com/gabrieltetar/embarch-doc/blob/main/embarch-study-designer/spec.md)
+— that document (with `decisions.md`, `open.md`, and `interfaces/*.md`) is the
+durable architecture record; this repo just implements it. Doc comments
+throughout `src/` cite it by decision number (`decision 17`) or by file
+(`interfaces/types.md`); a bare `spec.md §N` cites that file's own numbered
+section.
 
 ## Layout
 
 | Module | Contents |
 |---|---|
-| `study` | `Study`, `Step`, `Action`, `PowerSampleWindow` (design.md §4.1-§4.4) |
-| `result` | `StudyResult`, `StepResult`, `Outcome` (§4.5) |
-| `validation` | Post-hoc validation types: `PostHocValidation`, `SignalCheck`, `ContentValidity`, etc. (§4.6) |
-| `sample` | `Sample`, the shared power/waveform CSV row record (§4.7) |
-| `protocol` | `DevBenchMessage`, the Core<->dev-bench serial wire protocol (§3 decisions 10, 12, 20) |
-| `crc` | `steps_crc`, the CRC-32 integrity seal over `Study.steps` (§3 decision 17) |
-| `schema_version` | `STUDY_DESIGNER_SCHEMA_VERSION` (§3 decision 12) |
-| `limits` | Fixed-capacity bounds for every `heapless` collection (§3 decision 15) |
+| `study` | `Study`, `Step`, `Action` (interfaces/types.md) |
+| `result` | `StudyResult`, `StepResult`, `Outcome` (interfaces/types.md) |
+| `sample` | `Sample`, the shared power/waveform CSV row record (interfaces/decoders.md) |
+| `protocol` | `DevBenchMessage`, the Core<->dev-bench serial wire protocol (decisions 10, 12, 20) |
+| `crc` | `steps_crc`, the CRC-32 integrity seal over `Study.steps` (decision 17) |
+| `schema_version` | `STUDY_DESIGNER_SCHEMA_VERSION` (decision 12) |
+| `limits` | Fixed-capacity bounds for every `heapless` collection (decision 15) |
 | `ids` | `Uuid`/`BleAddress` newtypes |
-| `signal` (feature `core-validation`) | `SignalCheck` evaluation logic (§3 decision 19) |
-| `ffi` (feature `ffi`) | `extern "C"` surface for dev-bench firmware (§3 decisions 7, 23) |
+| `ffi` (feature `ffi`) | `extern "C"` surface for dev-bench firmware (decisions 7, 23) |
 
 ## Features
 
@@ -47,8 +48,8 @@ plain `cargo test`/`cargo build` (no features) exercises the actual
 ## Status
 
 Types, wire format, and CRC/CSV tooling are implemented and tested against a
-stand-in host target (design.md §3 decision 3's accepted posture — no real
+stand-in host target (decision 3's accepted posture — no real
 `embarch-dev-bench` hardware exists yet). The nRF54 cross-compilation
 toolchain and `cbindgen` header generation needed to actually link this crate
 into dev-bench firmware remain open, blocked on that hardware existing
-(design.md §7).
+(see open.md).
