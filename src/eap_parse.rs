@@ -354,10 +354,15 @@ pub struct EapFile {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AstProtocol {
     pub name: String,
-    pub sources: Vec<(String, Uuid, Uuid)>,
+    /// The line `protocol <name> {` opened on — the only sensible line for
+    /// an error about the protocol as a whole (its name, or a
+    /// `validate_protocol` check that spans states), because nothing
+    /// smaller-grained applies.
+    pub line: u32,
+    pub sources: Vec<(String, Uuid, Uuid, u32)>,
     pub frames: Vec<AstFrame>,
     pub structs: Vec<AstStruct>,
-    pub session: Vec<(String, i64)>,
+    pub session: Vec<(String, i64, u32)>,
     pub states: Vec<AstState>,
 }
 
@@ -600,10 +605,12 @@ pub fn parse(src: &str) -> R<EapFile> {
 }
 
 fn parse_protocol(p: &mut P) -> R<AstProtocol> {
+    let line = p.line();
     let name = p.ident()?;
     p.want_sym("{")?;
     let mut out = AstProtocol {
         name,
+        line,
         sources: Vec::new(),
         frames: Vec::new(),
         structs: Vec::new(),
@@ -615,6 +622,7 @@ fn parse_protocol(p: &mut P) -> R<AstProtocol> {
             return p.err("`}`");
         }
         if p.eat_kw("source") {
+            let source_line = p.line();
             let alias = p.ident()?;
             p.want_sym("=")?;
             p.want_kw("characteristic")?;
@@ -629,7 +637,7 @@ fn parse_protocol(p: &mut P) -> R<AstProtocol> {
             let line = p.line();
             let chr = parse_uuid(&p.string()?, line)?;
             p.want_sym(")")?;
-            out.sources.push((alias, svc, chr));
+            out.sources.push((alias, svc, chr, source_line));
         } else if p.eat_kw("frame") {
             let mut structs = Vec::new();
             let f = parse_frame(p, &mut structs)?;
@@ -643,6 +651,7 @@ fn parse_protocol(p: &mut P) -> R<AstProtocol> {
         } else if p.eat_kw("session") {
             p.want_sym("{")?;
             while !p.eat_sym("}") {
+                let var_line = p.line();
                 p.want_kw("var")?;
                 let vname = p.ident()?;
                 p.want_sym(":")?;
@@ -653,7 +662,7 @@ fn parse_protocol(p: &mut P) -> R<AstProtocol> {
                 let _ = p.ident()?;
                 p.want_sym("=")?;
                 let init = p.int()?;
-                out.session.push((vname, init));
+                out.session.push((vname, init, var_line));
             }
         } else if p.eat_kw("state") {
             out.states.push(parse_state(p)?);
@@ -1164,27 +1173,26 @@ fn push<T, const N: usize>(v: &mut HVec<T, N>, x: T, what: &'static str, line: u
 /// render-only remainder, resolving every name to an index and checking
 /// every structural rule on the way.
 pub fn resolve(a: &AstProtocol) -> R<ResolvedProtocol> {
-    let line0 = a.states.first().map(|s| s.line).unwrap_or(1);
-
     // --- sources
     let mut source_ix: HashMap<&str, u8> = HashMap::new();
     let mut sources = HVec::new();
-    for (i, (name, svc, chr)) in a.sources.iter().enumerate() {
+    for (i, (name, svc, chr, line)) in a.sources.iter().enumerate() {
+        let line = *line;
         if source_ix.insert(name.as_str(), i as u8).is_some() {
             return Err(EapError {
-                line: line0,
+                line,
                 kind: EapErrorKind::Duplicate { what: "source", name: name.clone() },
             });
         }
         push(
             &mut sources,
             ProtocolSource {
-                name: bounded_str(name, "source", line0)?,
+                name: bounded_str(name, "source", line)?,
                 service_uuid: *svc,
                 characteristic_uuid: *chr,
             },
             "sources",
-            line0,
+            line,
         )?;
     }
 
@@ -1316,18 +1324,19 @@ pub fn resolve(a: &AstProtocol) -> R<ResolvedProtocol> {
     // --- session
     let mut session_ix: HashMap<&str, u8> = HashMap::new();
     let mut session = HVec::new();
-    for (i, (name, init)) in a.session.iter().enumerate() {
+    for (i, (name, init, line)) in a.session.iter().enumerate() {
+        let line = *line;
         if session_ix.insert(name.as_str(), i as u8).is_some() {
             return Err(EapError {
-                line: line0,
+                line,
                 kind: EapErrorKind::Duplicate { what: "session variable", name: name.clone() },
             });
         }
         push(
             &mut session,
-            SessionVarDef { name: bounded_str(name, "session variable", line0)?, initial: *init },
+            SessionVarDef { name: bounded_str(name, "session variable", line)?, initial: *init },
             "session variables",
-            line0,
+            line,
         )?;
     }
 
@@ -1427,7 +1436,7 @@ pub fn resolve(a: &AstProtocol) -> R<ResolvedProtocol> {
     }
 
     let def = ProtocolDef {
-        name: bounded_str(&a.name, "protocol", line0)?,
+        name: bounded_str(&a.name, "protocol", a.line)?,
         sources,
         frames,
         session,
@@ -1435,8 +1444,14 @@ pub fn resolve(a: &AstProtocol) -> R<ResolvedProtocol> {
     };
     // The same check every other consumer runs, run once here so a manifest
     // that cannot execute fails at authoring time rather than on a bench.
+    // `validate_protocol` works over the resolved, index-only `ProtocolDef`
+    // and its checks span states, frames and sources at once (e.g. an
+    // unguarded frame shadowing a later sibling) — there is no single
+    // declaration line that is "the" line for one of its failures, so this
+    // reports at the protocol's own opening line rather than guessing which
+    // participant's line to blame.
     crate::eap::validate_protocol(&def)
-        .map_err(|e| EapError { line: line0, kind: EapErrorKind::Invalid(e) })?;
+        .map_err(|e| EapError { line: a.line, kind: EapErrorKind::Invalid(e) })?;
     Ok(ResolvedProtocol { def, render })
 }
 
@@ -1754,6 +1769,70 @@ protocol p {
         let e = parse("protocol p {\n\n\n    source s = characteristic(oops)\n}").unwrap_err();
         assert_eq!(e.line, 4);
         assert!(e.to_string().starts_with("line 4: "));
+    }
+
+    /// A manifest where the first `state` sits many lines below the
+    /// declarations under test, so a resolve-time error that reported the
+    /// first state's line (the old `line0` bug) and one that reports its own
+    /// declaration's line disagree loudly rather than by coincidence.
+    fn manifest_with_far_off_first_state(sources: &str, session: &str) -> String {
+        format!(
+            "protocol p {{\n\
+             {sources}\
+             frame f on s {{ u8 kind @ 0 }}\n\
+             session {{ {session} }}\n\
+             \n\
+             \n\
+             \n\
+             \n\
+             state go {{\n\
+             \x20   on_enter: write s {{ u8: 0x01 }}\n\
+             \x20   on_event f: goto done\n\
+             }}\n\
+             state done outcome: pass\n\
+             }}\n"
+        )
+    }
+
+    #[test]
+    fn a_duplicate_source_is_reported_at_its_own_line_not_the_first_states() {
+        let src = manifest_with_far_off_first_state(
+            "source s = characteristic(service: \"1910\", char: \"0002\")\n\
+             source s = characteristic(service: \"1911\", char: \"0003\")\n",
+            "var n: u32 = 0",
+        );
+        let e = parse(&src).and_then(|f| resolve(&f.protocols[0])).unwrap_err();
+        assert!(matches!(e.kind, EapErrorKind::Duplicate { what: "source", .. }), "{e}");
+        // Line 3 is the duplicate's own declaration; `state go {` sits well
+        // below it (line 10) once the padding lines are counted.
+        assert_eq!(e.line, 3, "{e}");
+    }
+
+    #[test]
+    fn an_over_long_source_name_is_reported_at_its_own_line_not_the_first_states() {
+        let long_name = "a".repeat(crate::limits::MAX_SOURCE_NAME_LEN + 1);
+        let src = manifest_with_far_off_first_state(
+            &format!(
+                "source {long_name} = characteristic(service: \"1910\", char: \"0002\")\n"
+            ),
+            "var n: u32 = 0",
+        );
+        let e = parse(&src).and_then(|f| resolve(&f.protocols[0])).unwrap_err();
+        assert!(matches!(e.kind, EapErrorKind::NameTooLong { what: "source", .. }), "{e}");
+        assert_eq!(e.line, 2, "{e}");
+    }
+
+    #[test]
+    fn a_duplicate_session_variable_is_reported_at_its_own_line_not_the_first_states() {
+        let src = manifest_with_far_off_first_state(
+            "source s = characteristic(service: \"1910\", char: \"0002\")\n",
+            "var n: u32 = 0 var n: u32 = 1",
+        );
+        let e = parse(&src).and_then(|f| resolve(&f.protocols[0])).unwrap_err();
+        assert!(matches!(e.kind, EapErrorKind::Duplicate { what: "session variable", .. }), "{e}");
+        // Both `var n` declarations sit on line 4 (the `session { … }` line);
+        // what matters is that it is *not* the far-off `state go {` line.
+        assert_eq!(e.line, 4, "{e}");
     }
 
     #[test]
