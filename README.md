@@ -28,6 +28,21 @@ section.
 | `limits` | Fixed-capacity bounds for every `heapless` collection (decision 15) |
 | `ids` | `Uuid`/`BleAddress` newtypes |
 | `ffi` (feature `ffi`) | `extern "C"` surface for dev-bench firmware (decisions 7, 23) |
+| `bounded` | Capacity-bounded sequence storage, one shape per target (decisions 46, 49) |
+| `streams` | Stream taps — source, scope, and rendering encoding for one capture (decision 39, interfaces/taps.md) |
+| `decoder` | Engineer-declared struct decoding for a stream tap's payload bytes (decision 52, interfaces/decoders.md) |
+| `records` | Engineer-declared record framing for a stream tap, and Core's post-capture check (decision 70) |
+| `outpost` | The `embarch-outpost` trace wire format and its manifest |
+| `gatt` | GATT discovery types shared by live discovery and static extraction (interfaces/gatt-types.md, decisions 31/32/33) |
+| `gatt_names` (feature `std`) | Naming a discovered characteristic something a human recognizes (decision 56) |
+| `vendor` | Vendor-defined GATT service identities, e.g. Nordic UART Service (decision 41) |
+| `eap` | `.eap` protocol manifests in the form dev-bench executes (decisions 58-62, interfaces/eap.md) |
+| `eap_interp` (feature `eap-parse`) | Host-side reference interpreter for a `ProtocolDef` (decision 60) |
+| `eap_parse` (feature `eap-parse`) | The `.eap` text grammar: lexer, parser, and lowering (decisions 58/59) |
+| `gatt_extract` (feature `gatt-extract`) | Static GATT-config extraction from firmware source (decisions 33, 56, 57) |
+| `registry` (feature `study-ui`) | User-authored custom-action registry (decision 35) |
+| `merged_actions` (feature `study-ui`) | The merged action list a Study Designer UI row picks from (decisions 34/35) |
+| `study_builder` (feature `study-ui`) | Table-row -> `Study` conversion for the Study Designer UI (decision 34) |
 
 ## Features
 
