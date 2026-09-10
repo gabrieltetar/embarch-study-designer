@@ -81,3 +81,7 @@ stand-in host target (decision 3's accepted posture — no real
 toolchain and `cbindgen` header generation needed to actually link this crate
 into dev-bench firmware remain open, blocked on that hardware existing
 (see open.md).
+
+## License
+
+MIT — see [LICENSE](LICENSE).
