@@ -147,6 +147,16 @@ pub enum EapErrorKind {
     MatchLenMismatch { declared: usize, actual: usize },
     /// A structural rule the resolved protocol breaks.
     Invalid(crate::eap::ProtocolError),
+    /// `frame` parses and is pinned, but uses `primitive` — `repeat`
+    /// (`count_from`), `bitpack`, `crc32`, or `fixed` — whose render half
+    /// this crate does not implement yet (see open.md's "Parsed and pinned,
+    /// with no consumer"). Never returned by `resolve`, which still succeeds:
+    /// the frame is unaffected on the wire, only turning its captured bytes
+    /// into CSV rows is unsupported. Returned by
+    /// [`ResolvedProtocol::render_layout`] instead of a wrong or silently
+    /// absent layout — the same refusal decision 52 already makes for a
+    /// payload that doesn't fit `StructLayout`, one primitive earlier.
+    RenderUnimplemented { frame: String, primitive: &'static str },
 }
 
 impl fmt::Display for EapError {
@@ -178,6 +188,11 @@ impl fmt::Display for EapError {
                 "select_if declares len {declared} but its literal is {actual} bytes"
             ),
             EapErrorKind::Invalid(e) => write!(f, "{e}"),
+            EapErrorKind::RenderUnimplemented { frame, primitive } => write!(
+                f,
+                "frame {frame:?} uses `{primitive}`, whose render half is not implemented yet \
+                 (parsed and pinned, no consumer -- see open.md)"
+            ),
         }
     }
 }
@@ -1129,9 +1144,17 @@ pub struct ResolvedProtocol {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FrameRender {
     pub frame: String,
+    pub line: u32,
     /// Present when the frame is flat enough to lower into decision 52's
     /// own type — see [`ResolvedProtocol::struct_layouts`].
     pub layout: Option<StructLayout>,
+    /// Set when `layout` is `None` *because* the frame uses one of the four
+    /// primitives this crate parses and pins but does not render — as
+    /// opposed to a shape `StructLayout` was never going to describe (a
+    /// `span`, two repeating groups, an empty frame), which stays `None`
+    /// here too. [`ResolvedProtocol::render_layout`] is the loud accessor
+    /// that turns this into a named error rather than a silent omission.
+    pub unrendered: Option<&'static str>,
     pub repeats: Vec<AstField>,
     pub bitpacks: Vec<AstField>,
     pub crc: Option<CrcPolicy>,
@@ -1155,6 +1178,39 @@ impl ResolvedProtocol {
     /// and gets no layout rather than a wrong one.
     pub fn struct_layouts(&self) -> Vec<&StructLayout> {
         self.render.iter().filter_map(|r| r.layout.as_ref()).collect()
+    }
+
+    /// The struct layout for `frame`, refusing loudly — naming the
+    /// primitive — instead of silently handing back nothing when the frame
+    /// is parsed and pinned but its render half isn't written (`repeat`
+    /// with `count_from`, `bitpack`, `crc32`, or a `fixed` scale; see
+    /// open.md's "Parsed and pinned, with no consumer").
+    ///
+    /// `Ok(None)` still covers every other reason a frame has no layout — a
+    /// `span`, a second repeating group, an empty frame — none of which is
+    /// one of the four deferred primitives, so none of them gets a named
+    /// error here. `Err(Unknown)` covers a frame name this protocol doesn't
+    /// declare.
+    pub fn render_layout(&self, frame: &str) -> R<Option<&StructLayout>> {
+        let r = self
+            .render
+            .iter()
+            .find(|r| r.frame == frame)
+            .ok_or_else(|| EapError {
+                line: 0,
+                kind: EapErrorKind::Unknown { what: "frame", name: frame.to_string() },
+            })?;
+        match (&r.layout, r.unrendered) {
+            (Some(l), _) => Ok(Some(l)),
+            (None, Some(primitive)) => Err(EapError {
+                line: r.line,
+                kind: EapErrorKind::RenderUnimplemented {
+                    frame: frame.to_string(),
+                    primitive,
+                },
+            }),
+            (None, None) => Ok(None),
+        }
     }
 }
 
@@ -1312,9 +1368,16 @@ pub fn resolve(a: &AstProtocol) -> R<ResolvedProtocol> {
             "frames",
             f.line,
         )?;
+        let (layout, unrendered) = match lower_layout(f, &a.structs) {
+            Ok(l) => (Some(l), None),
+            Err(LowerGap::NotFlat) => (None, None),
+            Err(LowerGap::Primitive(p)) => (None, Some(p)),
+        };
         render.push(FrameRender {
             frame: f.name.clone(),
-            layout: lower_layout(f, &a.structs),
+            line: f.line,
+            layout,
+            unrendered,
             repeats,
             bitpacks,
             crc,
@@ -1558,47 +1621,86 @@ fn lower_operand(
     }
 }
 
+/// Why [`lower_layout`] produced no [`StructLayout`].
+enum LowerGap {
+    /// A shape `StructLayout` was never going to describe — a `span`, a
+    /// scalar after the repeating group, a second repeating group, a name
+    /// or count too large for its bounded field, an empty frame. Not one of
+    /// the four deferred primitives, so [`ResolvedProtocol::render_layout`]
+    /// keeps this silent, unchanged from before this primitive naming
+    /// existed.
+    NotFlat,
+    /// One of the four primitives this crate parses and pins but does not
+    /// render: `repeat` with `count_from`, `bitpack`, `crc32`, or a `fixed`
+    /// scale on a scalar.
+    Primitive(&'static str),
+}
+
 /// Lower a frame into decision 52's [`StructLayout`], when it is flat
 /// enough to be one.
 ///
-/// Returns `None` — no layout at all — rather than an approximate one, for
+/// Returns `Err` — no layout at all — rather than an approximate one, for
 /// the reason decision 52 already gives about a payload that doesn't fit its
 /// layout: the raw `.bin` is on disk either way, so a missing rendering can
-/// be redone and a wrong one silently misreads every row.
-fn lower_layout(f: &AstFrame, structs: &[AstStruct]) -> Option<StructLayout> {
+/// be redone and a wrong one silently misreads every row. When the reason is
+/// one of the four primitives this crate defers rendering (open.md: "Parsed
+/// and pinned, with no consumer"), the gap is named so a caller can refuse
+/// loudly instead of silently treating the frame as though it had no bytes
+/// worth rendering at all.
+fn lower_layout(f: &AstFrame, structs: &[AstStruct]) -> Result<StructLayout, LowerGap> {
     let mut header = HVec::new();
     let mut repeat = HVec::new();
     let mut seen_repeat = false;
     for field in &f.fields {
         match field {
-            AstField::Scalar { name, ty, .. } => {
+            AstField::Scalar { name, ty, fixed, .. } => {
+                if fixed.is_some() {
+                    // A `fixed(scale, unit)` field is still a readable
+                    // integer, but carrying it through as a bare one would
+                    // be exactly the plausible-wrong-number this crate
+                    // refuses one layer up for a whole payload: the scale
+                    // is part of what the field *means*, not decoration.
+                    return Err(LowerGap::Primitive("fixed"));
+                }
                 if seen_repeat {
                     // A scalar after the repeating group is not something
                     // `StructLayout` can express.
-                    return None;
+                    return Err(LowerGap::NotFlat);
                 }
-                header.push(StructField { name: HString::try_from(name.as_str()).ok()?, ty: *ty }).ok()?;
+                let name = HString::try_from(name.as_str()).map_err(|_| LowerGap::NotFlat)?;
+                header.push(StructField { name, ty: *ty }).map_err(|_| LowerGap::NotFlat)?;
             }
             AstField::Repeat { count: AstCount::Literal(_), elem, .. } if !seen_repeat => {
                 seen_repeat = true;
-                let s = structs.iter().find(|s| &s.name == elem)?;
+                let s = structs.iter().find(|s| &s.name == elem).ok_or(LowerGap::NotFlat)?;
                 for sf in &s.fields {
-                    let AstField::Scalar { name, ty, .. } = sf else { return None };
-                    repeat
-                        .push(StructField { name: HString::try_from(name.as_str()).ok()?, ty: *ty })
-                        .ok()?;
+                    let AstField::Scalar { name, ty, fixed, .. } = sf else {
+                        return Err(LowerGap::NotFlat);
+                    };
+                    if fixed.is_some() {
+                        return Err(LowerGap::Primitive("fixed"));
+                    }
+                    let name = HString::try_from(name.as_str()).map_err(|_| LowerGap::NotFlat)?;
+                    repeat.push(StructField { name, ty: *ty }).map_err(|_| LowerGap::NotFlat)?;
                 }
             }
-            // A `count_from` repeat, a bitpack, a span, a second repeating
-            // group, or a CRC all put the frame outside what `StructLayout`
-            // describes.
-            _ => return None,
+            // `repeat channel[count_from: n]` — the counted walker, not
+            // written.
+            AstField::Repeat { count: AstCount::From(_), .. } => {
+                return Err(LowerGap::Primitive("repeat"))
+            }
+            AstField::Bitpack { .. } => return Err(LowerGap::Primitive("bitpack")),
+            AstField::Crc32 { .. } => return Err(LowerGap::Primitive("crc32")),
+            // A span, or a second repeating group, is not something
+            // `StructLayout` can express.
+            AstField::Span { .. } | AstField::Repeat { .. } => return Err(LowerGap::NotFlat),
         }
     }
     if header.is_empty() && repeat.is_empty() {
-        return None;
+        return Err(LowerGap::NotFlat);
     }
-    Some(StructLayout { name: HString::try_from(f.name.as_str()).ok()?, header, repeat })
+    let name = HString::try_from(f.name.as_str()).map_err(|_| LowerGap::NotFlat)?;
+    Ok(StructLayout { name, header, repeat })
 }
 
 #[cfg(test)]
@@ -1880,5 +1982,77 @@ protocol p {
             e.kind,
             EapErrorKind::Invalid(crate::eap::ProtocolError::NoTerminalState)
         );
+    }
+
+    // --- render_layout: the four parsed-and-pinned primitives refuse
+    // loudly, by name, instead of silently producing no layout (or, for
+    // `fixed`, a flat one with the scale dropped). See open.md's "Parsed
+    // and pinned, with no consumer".
+
+    #[test]
+    fn a_counted_repeat_is_refused_by_name_rather_than_rendered_flat() {
+        let src = SHELL.replace(
+            "frame f on s { u8 kind @ 0 }",
+            "struct chunk { u8 v }\n\
+             frame f on s { u8 n_chunks @ 0\n\
+                            repeat c[count_from: n_chunks]: chunk }",
+        );
+        let r = one(&src).unwrap();
+        let e = r.render_layout("f").unwrap_err();
+        assert_eq!(
+            e.kind,
+            EapErrorKind::RenderUnimplemented { frame: "f".into(), primitive: "repeat" }
+        );
+    }
+
+    #[test]
+    fn bitpack_is_refused_by_name_rather_than_rendered_flat() {
+        let src = SHELL.replace(
+            "frame f on s { u8 kind @ 0 }",
+            "frame f on s { u8 n @ 0\n\
+                            u8 w @ 1\n\
+                            bitpack samples[count_from: n] width_from: w }",
+        );
+        let r = one(&src).unwrap();
+        let e = r.render_layout("f").unwrap_err();
+        assert_eq!(
+            e.kind,
+            EapErrorKind::RenderUnimplemented { frame: "f".into(), primitive: "bitpack" }
+        );
+    }
+
+    #[test]
+    fn crc32_is_refused_by_name_rather_than_rendered_flat() {
+        let src = SHELL.replace(
+            "frame f on s { u8 kind @ 0 }",
+            "frame f on s { u8 kind @ 0\n        crc32 ieee policy: skip }",
+        );
+        let r = one(&src).unwrap();
+        let e = r.render_layout("f").unwrap_err();
+        assert_eq!(
+            e.kind,
+            EapErrorKind::RenderUnimplemented { frame: "f".into(), primitive: "crc32" }
+        );
+    }
+
+    #[test]
+    fn a_fixed_scale_is_refused_by_name_rather_than_rendered_as_a_bare_integer() {
+        // The scale is part of what the field means; carrying it through as
+        // a plain integer would be the same plausible-wrong-number failure
+        // decision 52 already refuses one layer up for a payload shape.
+        let src = SHELL.replace("u8 kind @ 0", "i16le temp @ 0 fixed(0.005, celsius)");
+        let r = one(&src).unwrap();
+        let e = r.render_layout("f").unwrap_err();
+        assert_eq!(
+            e.kind,
+            EapErrorKind::RenderUnimplemented { frame: "f".into(), primitive: "fixed" }
+        );
+    }
+
+    #[test]
+    fn a_flat_frame_with_no_deferred_primitive_still_renders() {
+        // The control case: nothing here regressed for the ordinary path.
+        let r = one(SHELL).unwrap();
+        assert!(r.render_layout("f").unwrap().is_some());
     }
 }
