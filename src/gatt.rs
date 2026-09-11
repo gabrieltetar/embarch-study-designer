@@ -153,7 +153,9 @@ impl GattEventKind {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GattTranscriptEntry {
     /// dev-bench's own capture-time timestamp, same convention as
-    /// `Sample.rx_utc_ms` (interfaces/decoders.md).
+    /// `Sample.rx_utc_ms` (interfaces/decoders.md) — which means
+    /// **milliseconds since the bench booted, not UTC** (decision 72). The
+    /// `core_rx_utc_ms` column appended beside it is the real epoch clock.
     pub rx_utc_ms: u64,
     pub direction: GattDirection,
     pub kind: GattEventKind,

@@ -27,9 +27,19 @@ pub enum DevBenchMessage {
     Hello {
         schema_version: u32,
         /// Core's current UTC time in milliseconds since the epoch.
-        /// Dev-bench's only clock source — it seeds/resyncs its own UTC
-        /// offset from this on every `Hello` (decision 12),
-        /// which is what makes `Sample::rx_utc_ms` meaningful.
+        /// Dev-bench's only possible clock source: the design (decision 12)
+        /// has it seed and resync its own UTC offset from this on every
+        /// `Hello`.
+        ///
+        /// **That half is not implemented in firmware** (decision 72,
+        /// `tasks/suite/016`). `embarch-dev-bench` decodes this field and
+        /// stores it; nothing reads it but a round-trip test, and the
+        /// bridge stamps `k_uptime_get()` with no offset applied anywhere.
+        /// So `Sample::rx_utc_ms` is **milliseconds since the bench
+        /// booted**, not UTC, and is not comparable with `core_rx_utc_ms`
+        /// or with any other `*_utc_ms` value in this suite. Sending this
+        /// field is still correct — it is what a firmware that closes the
+        /// gap would seed from.
         host_utc_ms: u64,
     },
     HelloAck {

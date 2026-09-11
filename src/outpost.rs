@@ -589,7 +589,11 @@ mod render {
     impl OutpostRecord {
         /// One rendered row. `absolute` comes from [`super::Unwrapper`],
         /// `rx_utc_ms` is when the host received the frame this record arrived
-        /// in (`None` when nothing stamped it), and `manifest` may be absent —
+        /// in (`None` when nothing stamped it) — **the host's clock, real UTC,
+        /// and deliberately not the same quantity as the `rx_utc_ms` column in
+        /// a study CSV**, which is dev-bench uptime (decision 72). One name,
+        /// two clocks, in two different files; do not plot them against each
+        /// other. `manifest` may be absent —
         /// a trace decodes into structure with no manifest at all, it just has
         /// no names in it.
         #[allow(clippy::too_many_arguments)]
