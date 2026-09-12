@@ -95,10 +95,6 @@ pub const MAX_CHARS_PER_SERVICE: usize = 16;
 /// wanting more than this wants `GattMonitorAll`, which is what that action
 /// is for.
 pub const MAX_MONITOR_TARGETS: usize = 16;
-/// `Study.decoders` (decision 52) — named payload layouts one
-/// study resolves out of the firmware repo's `study-structs.toml`. Bounded
-/// by what a study can actually reference: a decoder is only reachable
-/// through a tap's `StreamEncoding::Struct`, and there are at most
 /// Longest record magic a [`crate::records::RecordFraming`] may declare.
 /// `GWF1` and the WDS spill's are four bytes; eight leaves room without
 /// letting a "magic" become a header.
@@ -112,7 +108,11 @@ pub const MAX_RECORD_MAGIC_LEN: usize = 8;
 /// what an offset list is actually for; past that the count is the finding.
 pub const MAX_BAD_RECORDS_REPORTED: usize = 32;
 
-/// [`MAX_STREAMS_PER_STUDY`] taps.
+/// `Study.decoders` (decision 52) — named payload layouts one
+/// study resolves out of the firmware repo's `study-structs.toml`. Bounded
+/// by what a study can actually reference: a decoder is only reachable
+/// through a tap's `StreamEncoding::Struct`, and there are at most that
+/// many taps — the arity of the thing, not a capacity guess.
 pub const MAX_DECODERS_PER_STUDY: usize = MAX_STREAMS_PER_STUDY;
 /// `StructLayout.name` (interfaces/decoders.md) — the name a tap's decoder is
 /// referenced by in `study-structs.toml`.
