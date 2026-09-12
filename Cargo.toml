@@ -8,12 +8,17 @@ description = "Shared no_std data types (and the tools to work with them) for Em
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 # Plain `rlib` for local dev/test and for embarch-core/embarch-api's Cargo
-# dependency use. Producing the actual staticlib dev-bench firmware links
-# (decision 7) needs a real cross-compilation target/panic
-# handler that don't exist yet — that build adds `--crate-type staticlib`
-# (or a `[lib] crate-type` override) once the toolchain is set up; requesting
-# it unconditionally here breaks a plain host `cargo build`, which has no
-# panic_handler to resolve for a final staticlib artifact.
+# dependency use. The staticlib dev-bench firmware links (decision 7) is built
+# on demand instead: embarch-dev-bench's CMake passes `--crate-type staticlib`
+# with the target triple and `--features ffi`. Requesting it unconditionally
+# here would break a plain host `cargo build`, which has no panic_handler to
+# resolve for a final staticlib artifact — that handler is `#[cfg]`-gated to
+# `feature = "ffi", target_os = "none"` in src/ffi.rs.
+#
+# Corrected 2026-09-11 (tasks/suite/014): this comment used to say the target
+# and panic handler "don't exist yet". Both exist — embarch-dev-bench decision
+# 8 is closed and the handler is at src/ffi.rs:37. The conditional build is a
+# deliberate choice, not a gap waiting on a toolchain.
 
 [dependencies]
 serde = { version = "1.0.228", default-features = false, features = ["derive"] }

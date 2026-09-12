@@ -76,11 +76,15 @@ no-allocator path every consumer besides the host crates compiles.
 ## Status
 
 Types, wire format, and CRC/CSV tooling are implemented and tested against a
-stand-in host target (decision 3's accepted posture — no real
-`embarch-dev-bench` hardware exists yet). The nRF54 cross-compilation
-toolchain and `cbindgen` header generation needed to actually link this crate
-into dev-bench firmware remain open, blocked on that hardware existing
-(see open.md).
+stand-in host target. **The nRF54 cross-compilation toolchain landed** —
+`embarch-dev-bench` decision 20 records decision 8 as closed, and the real
+staticlib is linked on hardware workspaces — so this crate does link into
+dev-bench firmware today. What is still true is narrower and worth being
+exact about: **`cbindgen` header generation was never built.**
+`embarch-dev-bench/app/src/study_ffi.h` is hand-written and kept in step by
+hand. Corrected 2026-09-11 (`tasks/suite/014`); the earlier wording said the
+toolchain remained "blocked on that hardware existing", which stopped being
+true when the bench shipped.
 
 ## License
 
