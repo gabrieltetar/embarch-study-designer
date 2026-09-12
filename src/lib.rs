@@ -100,7 +100,10 @@ pub use gatt_names::{
 };
 pub use ids::{BleAddress, BleAddressKind, Uuid};
 #[cfg(feature = "study-ui")]
-pub use merged_actions::{merge_actions, BuiltInAction, DiscoverySources, MergedAction};
+// `BuiltInActionKind` is re-exported from `study_builder` below — one enum,
+// one export (`suite/017`). `merged_actions` re-exports it internally so its
+// own signatures read naturally; exporting it twice here is an error.
+pub use merged_actions::{merge_actions, DiscoverySources, MergedAction};
 pub use protocol::DevBenchMessage;
 #[cfg(feature = "study-ui")]
 pub use registry::{

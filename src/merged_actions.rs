@@ -16,47 +16,11 @@ use crate::gatt::GattServiceInfo;
 use crate::ids::Uuid;
 use crate::registry::{ActionRegistry, RegisteredAction};
 
-/// The built-in `Action` kinds every Study Designer row can always pick,
-/// independent of what's been discovered or registered.
-/// `DataExchange` isn't listed here — authoring one directly means already
-/// knowing a raw UUID + payload, exactly what decisions 34/35 exist to
-/// avoid requiring; it's still a real `Action` variant (`study::Action`),
-/// just not surfaced as a one-click row choice by this list.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum BuiltInAction {
-    BleConnect,
-    GattDiscover,
-    GattMonitorAll,
-    /// decision 36 — opens a capture window that stays armed
-    /// across the steps that follow it.
-    GattMonitorStart,
-    /// decision 36 — closes the window `GattMonitorStart`
-    /// opened.
-    GattMonitorStop,
-    /// decision 50 — elevates the link's security. Listed here
-    /// rather than left to `Raw`/`Registered`: it takes no UUID and no
-    /// payload, so it is exactly the shape this list is for, and an action
-    /// that exists on the wire but on no clickable row is an action nobody
-    /// can author (the failure this list's own existence is the answer to).
-    /// The level it asks for rides on the row, not on this enum — see
-    /// `study_builder::RowAction::BuiltIn::security_level`.
-    BleSecurity,
-    /// decision 51 — drops the bond mid-study.
-    BleUnbond,
-}
-
-impl BuiltInAction {
-    pub const ALL: [BuiltInAction; 7] = [
-        BuiltInAction::BleConnect,
-        BuiltInAction::BleSecurity,
-        BuiltInAction::BleUnbond,
-        BuiltInAction::GattDiscover,
-        BuiltInAction::GattMonitorAll,
-        BuiltInAction::GattMonitorStart,
-        BuiltInAction::GattMonitorStop,
-    ];
-}
+/// The built-in vocabulary is [`crate::study_builder::BuiltInActionKind`],
+/// and it lives there because that is the side the browser submits back —
+/// see that type's own doc comment for why this module no longer declares a
+/// second one (`suite/017`).
+pub use crate::study_builder::BuiltInActionKind;
 
 /// Which discovery source(s) reported a given, not-yet-registered
 /// characteristic — shown in the UI so an engineer can tell "found live and
@@ -70,12 +34,20 @@ pub struct DiscoverySources {
 
 /// One entry in the merged list a Study Designer table row picks from.
 /// Externally tagged over the wire (serde's default) — `{"BuiltIn":
-/// "ble_connect"}`, `{"Registered": {...}}`, `{"Unregistered": {...}}` —
-/// since `BuiltIn`'s own inner type serializes as a bare string, which
-/// can't participate in an internally-tagged representation.
+/// {"which": "ble_connect", "label": "…"}}`, `{"Registered": {...}}`,
+/// `{"Unregistered": {...}}`.
+///
+/// `BuiltIn` carried a bare string until `suite/017`; it carries its label
+/// now, because the browser renders what it is served rather than a
+/// hardcoded list of its own. That is a wire change with no stale consumer
+/// to break: the previous served built-ins were filtered out and discarded
+/// by the only client there is.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum MergedAction {
-    BuiltIn(BuiltInAction),
+    /// `label` is [`BuiltInActionKind::label`] — served rather than
+    /// restated in the browser, for the reason `embarch-ui` decision 17
+    /// gives about browser-side copies.
+    BuiltIn { which: BuiltInActionKind, label: &'static str },
     /// A characteristic with at least one engineer-registered action
     /// against it (`registry::RegisteredAction`) — shown by name, with its
     /// fields'/values' labels ready to click, never raw bytes.
@@ -153,8 +125,11 @@ pub fn merge_actions(
     let registered_uuids: std::collections::HashSet<Uuid> =
         registry.actions.iter().map(|a| a.uuid).collect();
 
-    let mut result: Vec<MergedAction> =
-        BuiltInAction::ALL.iter().copied().map(MergedAction::BuiltIn).collect();
+    let mut result: Vec<MergedAction> = BuiltInActionKind::ALL
+        .iter()
+        .copied()
+        .map(|which| MergedAction::BuiltIn { which, label: which.label() })
+        .collect();
 
     // Vendor-defined services, before the registry: they're the entries an
     // engineer is least likely to want to author by hand, so they come
@@ -225,20 +200,37 @@ mod tests {
     #[test]
     fn built_ins_always_present_even_with_nothing_else() {
         let merged = merge_actions(None, None, &ActionRegistry::default());
-        // Pinned against `BuiltInAction::ALL` rather than a bare literal, so
-        // adding a built-in (decision 36 added two) updates this in one
-        // place. Vendor entries (decision 41) are also unconditional, and
-        // counted the same way for the same reason.
+        // Pinned against `BuiltInActionKind::ALL` rather than a bare
+        // literal, so adding a built-in (decision 36 added two) updates this
+        // in one place. Vendor entries (decision 41) are also unconditional,
+        // and counted the same way for the same reason.
         let vendor_count: usize =
             crate::vendor::ALL.iter().map(|s| s.characteristics.len()).sum();
-        assert_eq!(merged.len(), BuiltInAction::ALL.len() + vendor_count);
+        assert_eq!(merged.len(), BuiltInActionKind::ALL.len() + vendor_count);
         assert_eq!(
-            merged.iter().filter(|a| matches!(a, MergedAction::BuiltIn(_))).count(),
-            BuiltInAction::ALL.len()
+            merged.iter().filter(|a| matches!(a, MergedAction::BuiltIn { .. })).count(),
+            BuiltInActionKind::ALL.len()
         );
         assert!(merged
             .iter()
-            .all(|a| matches!(a, MergedAction::BuiltIn(_) | MergedAction::Vendor { .. })));
+            .all(|a| matches!(a, MergedAction::BuiltIn { .. } | MergedAction::Vendor { .. })));
+    }
+
+    /// The defect `suite/017` closed: the served list held seven built-ins
+    /// while the submitted enum held nine, and nothing failed because the
+    /// browser discarded the served ones. Both sides are one enum now, so
+    /// this asserts the thing that was actually wrong — that every built-in
+    /// a row can submit is one a row can be offered — rather than a count.
+    #[test]
+    fn every_submittable_built_in_is_offered_with_a_label() {
+        let merged = merge_actions(None, None, &ActionRegistry::default());
+        for kind in BuiltInActionKind::ALL {
+            let offered = merged.iter().find(|a| matches!(a, MergedAction::BuiltIn { which, .. } if *which == kind));
+            let Some(MergedAction::BuiltIn { label, .. }) = offered else {
+                panic!("{kind:?} can be submitted but is never offered");
+            };
+            assert!(!label.is_empty(), "{kind:?} is offered with no label to render");
+        }
     }
 
     #[test]

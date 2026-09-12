@@ -28,11 +28,23 @@ use crate::limits::{
 use crate::registry::{ActionRegistry, RegisteredAction, RegisteredOperation};
 use crate::study::{Action, BleRole, GattOperation, Requirements, BleSecurityLevel, Step, Study};
 
-/// Which built-in `Action` a `RowAction::BuiltIn` row picks — a UI-facing
-/// enumeration distinct from `merged_actions::BuiltInAction` only in that
-/// this one is (de)serializable (it crosses the wire from the browser);
-/// the two are kept in sync by hand, not shared, since one lives in this
-/// crate's UI-input layer and the other in its UI-output layer.
+/// Which built-in `Action` a Study Designer row picks — **the single
+/// definition of the built-in vocabulary**, on both the served side
+/// (`merged_actions::MergedAction::BuiltIn`) and the submitted side
+/// (`RowAction::BuiltIn`).
+///
+/// It was two enums until `suite/017`: this one, and a
+/// `merged_actions::BuiltInAction` kept in sync by hand. The hand sync
+/// failed exactly as one would expect — the served copy still held **seven**
+/// variants after decision 53 added two, and nothing noticed, because the
+/// only consumer filtered the served built-ins out and rendered its own
+/// hardcoded list instead. A vocabulary that is computed and then discarded
+/// cannot be wrong in a way anyone sees.
+///
+/// So: one enum, and [`Self::label`] carries the prose the picker renders,
+/// which used to live only in the browser. Adding a built-in is one edit
+/// here — a new variant, its `ALL` entry, its `label` arm, and its
+/// `to_action` arm, all of which the compiler demands together.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BuiltInActionKind {
@@ -53,6 +65,67 @@ pub enum BuiltInActionKind {
     GattMonitorSelected,
     /// decision 53.
     GattMonitorSelectedStart,
+}
+
+impl BuiltInActionKind {
+    /// Every built-in, in the order the picker offers them.
+    ///
+    /// The order is the browser's old hardcoded one and is deliberate:
+    /// `BleConnect` first, then the two security/bond actions that belong
+    /// before the first GATT step on a DUT that requires an encrypted link,
+    /// then discovery, then the unfiltered monitors before the selective
+    /// ones — because that is the order they are reached for, pointing
+    /// `GattMonitorAll` at an unfamiliar DUT before narrowing to the
+    /// characteristics a study is actually about. `GattMonitorStop` last,
+    /// since it closes whatever any of them opened.
+    ///
+    /// `DataExchange` is deliberately absent: authoring one directly means
+    /// already knowing a raw UUID and payload, which is exactly what
+    /// decisions 34/35 exist to avoid requiring. It is still a real
+    /// `study::Action`, just not a one-click row choice.
+    pub const ALL: [BuiltInActionKind; 9] = [
+        BuiltInActionKind::BleConnect,
+        BuiltInActionKind::BleSecurity,
+        BuiltInActionKind::BleUnbond,
+        BuiltInActionKind::GattDiscover,
+        BuiltInActionKind::GattMonitorAll,
+        BuiltInActionKind::GattMonitorStart,
+        BuiltInActionKind::GattMonitorSelected,
+        BuiltInActionKind::GattMonitorSelectedStart,
+        BuiltInActionKind::GattMonitorStop,
+    ];
+
+    /// What the picker shows for this action.
+    ///
+    /// Server-side on purpose: `embarch-ui` decision 17 made the same call
+    /// for `MAX_MONITOR_TARGETS` and gave the reason — *a browser-side copy
+    /// of a limit is a number that drifts silently the day the limit moves*
+    /// — and a browser-side copy of a **name** drifts the same way. These
+    /// strings are the ones that were in `app.js`, moved rather than
+    /// rewritten, so the rendered picker is unchanged.
+    pub const fn label(self) -> &'static str {
+        match self {
+            BuiltInActionKind::BleConnect => "BleConnect — connect to the DUT",
+            BuiltInActionKind::BleSecurity => "BleSecurity — establish encryption/pairing",
+            BuiltInActionKind::BleUnbond => "BleUnbond — drop the bond (disconnects)",
+            BuiltInActionKind::GattDiscover => "GattDiscover — walk the GATT table",
+            BuiltInActionKind::GattMonitorAll => {
+                "GattMonitorAll — subscribe to everything + capture for this step"
+            }
+            BuiltInActionKind::GattMonitorStart => {
+                "GattMonitorStart — open a capture window on everything"
+            }
+            BuiltInActionKind::GattMonitorSelected => {
+                "GattMonitorSelected — subscribe to chosen characteristics + capture for this step"
+            }
+            BuiltInActionKind::GattMonitorSelectedStart => {
+                "GattMonitorSelectedStart — open a capture window on chosen characteristics"
+            }
+            BuiltInActionKind::GattMonitorStop => {
+                "GattMonitorStop — close the capture window"
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
