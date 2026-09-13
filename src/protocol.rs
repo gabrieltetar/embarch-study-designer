@@ -49,6 +49,19 @@ pub enum DevBenchMessage {
         /// (embarch-dev-bench decision 18) — e.g. `git describe` output, a
         /// board ID, a build timestamp, or some combination; the exact
         /// contents are dev-bench build-tooling's own concern.
+        ///
+        /// **This is the BENCH's build, and the suite has a second field of
+        /// the same name that is the DUT's** — [`Requirements::firmware_version`]
+        /// and [`Provenance::firmware_version`] (decision 74,
+        /// `tasks/suite/010`). A caller that reads this value and writes it
+        /// into `requires.firmware_version` has pinned a **DUT** requirement
+        /// to the **bench's** build, and in the normal no-reflash case
+        /// nothing ever checks it: `embarch-core` only compares
+        /// `requires.firmware_version` when a `flashed_firmware_version` is
+        /// supplied, so the wrong value is accepted and recorded as
+        /// `Declared`. **The field this one corresponds to is
+        /// `Requirements::dev_bench_version`, not the identically named
+        /// one.**
         firmware_version: String<MAX_FIRMWARE_VERSION_LEN>,
         /// Dev-bench's own factory-unique chip ID, hex-encoded lowercase —
         /// what Zephyr's `hwinfo_get_device_id` returns on the board that

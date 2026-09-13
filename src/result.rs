@@ -40,7 +40,12 @@ pub struct StudyResult {
 /// to close.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Provenance {
+    /// The **bench's** build, read off the live link (`HelloAck`).
     pub dev_bench_version: String<MAX_FIRMWARE_VERSION_LEN>,
+    /// The **DUT's** build — not the bench's, despite sharing a name with
+    /// `HelloAck`'s field (decision 74, `tasks/suite/010`). Its sibling
+    /// [`Provenance::firmware_source`] is what says whether anyone checked
+    /// it; `dev_bench_version` above is the one `HelloAck` feeds.
     pub firmware_version: String<MAX_FIRMWARE_VERSION_LEN>,
     pub dev_bench_source: VersionSource,
     pub firmware_source: VersionSource,

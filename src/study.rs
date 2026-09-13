@@ -248,10 +248,23 @@ pub const REQUIREMENT_ANY: &str = "any";
 /// The dev-bench and DUT firmware builds a `Study` is meant to run against
 /// (decision 40, interfaces/types.md).
 ///
-/// Two free-form strings, matching the shape `HelloAck.firmware_version`
-/// already uses (embarch-dev-bench decision 18: whatever the
-/// build embeds, typically `git describe --always --dirty --abbrev=8`).
-/// Both are mandatory and [`REQUIREMENT_ANY`] is an explicit legal value.
+/// Two free-form strings, matching the *shape*
+/// [`HelloAck::firmware_version`](crate::protocol::HostMsg) already uses
+/// (embarch-dev-bench decision 18: whatever the build embeds, typically
+/// `git describe --always --dirty --abbrev=8`). Both are mandatory and
+/// [`REQUIREMENT_ANY`] is an explicit legal value.
+///
+/// **A shared shape is not a shared subject, and this doc comment used to
+/// read as though it were** (decision 74, `tasks/suite/010`). `HelloAck`'s
+/// `firmware_version` is the **bench's** build; the field of that name here
+/// is the **DUT's**. The one that corresponds to `HelloAck`'s is
+/// [`Requirements::dev_bench_version`] — and `embarch-core` and
+/// `embarch-api` both do that mapping by hand, assigning
+/// `hello.firmware_version` into `dev_bench_version`. Copying `HelloAck`'s
+/// value into `firmware_version` instead is the mistake the name invites,
+/// and it is silent: the DUT requirement is only compared when the run
+/// supplies a `flashed_firmware_version`, so in the normal no-reflash case
+/// a wrong value is accepted and recorded as `Declared`.
 ///
 /// **The verification asymmetry is real and cannot be designed away.**
 /// dev-bench self-reports its version over `HelloAck`, so a dev-bench
