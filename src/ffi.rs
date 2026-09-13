@@ -212,7 +212,7 @@ pub unsafe extern "C" fn essd_study_decode_and_verify(
 }
 
 /// Decodes a postcard-encoded `Study` and verifies its `steps_crc`
-/// (superseding neither `essd_study_decode_and_verify` nor decision 19's
+/// (superseding neither `essd_study_decode_and_verify` nor decision 17's
 /// existing check -- this is a second, additive entry point for dev-bench's
 /// real per-`Study` dispatch, decision 21), then copies every step into
 /// `*out_study` as a C-friendly, fixed-layout struct so C code can iterate
