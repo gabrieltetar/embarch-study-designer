@@ -257,10 +257,11 @@ pub struct ProtocolOutcome {
 }
 
 
-/// The only on-device validation signal — did the action complete without a
-/// protocol-level error or timeout. Whether the *content* was correct is a
-/// separate, Core-side, post-hoc question (decision 19,
-/// decisions/removed.md).
+/// The only on-device validation signal, and the whole of it (decision 19's
+/// surviving half) — did the action complete without a protocol-level error
+/// or timeout. There is no separate check of whether the *content* was
+/// correct: decision 48 removed that post-hoc mechanism outright, and it was
+/// never used before that.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Outcome {
     Pass,

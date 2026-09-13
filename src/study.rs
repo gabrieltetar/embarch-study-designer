@@ -375,8 +375,10 @@ pub struct Step {
     pub delay_before_ms: u32,
 }
 
-/// interfaces/types.md. Content validation is handled entirely post-hoc by
-/// Core (decision 19) — there is no on-device validation `Action` variant.
+/// interfaces/types.md. There is no post-hoc content validation anywhere in
+/// this suite — decision 48 removed it outright — and no on-device
+/// validation `Action` variant; the real-time `Outcome` a step reports
+/// (decision 19's surviving half) is the whole of it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Action {
     BleAdvertise {

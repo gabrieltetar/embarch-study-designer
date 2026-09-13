@@ -17,11 +17,11 @@ pub const MAX_SERVICE_UUIDS: usize = 4;
 /// `BleAdvertise.local_name`; sized to fit inside a legacy 31-byte BLE
 /// advertising PDU alongside AD-structure/flags overhead.
 pub const MAX_LOCAL_NAME_LEN: usize = 26;
-/// `GattOperation::Write.payload`, `StepResult.captured_data`,
-/// `ExpectedValue::Equals`/`Contains`; sized above BLE 5's practical
-/// extended-MTU ceiling (247-byte ATT_MTU / 251-byte L2CAP payload).
+/// `GattOperation::Write.payload`, `StepResult.captured_data`; sized above
+/// BLE 5's practical extended-MTU ceiling (247-byte ATT_MTU / 251-byte
+/// L2CAP payload).
 pub const MAX_PAYLOAD_LEN: usize = 512;
-/// `Outcome::Fail.reason`, `ContentValidity::Invalid.reason`.
+/// `Outcome::Fail.reason`.
 pub const MAX_FAIL_REASON_LEN: usize = 64;
 /// `Sample::to_csv_row`'s returned buffer (interfaces/decoders.md): sized to
 /// comfortably fit `rx_utc_ms` (up to 20 ASCII digits for a `u64`), a
