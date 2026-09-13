@@ -249,7 +249,8 @@ pub const REQUIREMENT_ANY: &str = "any";
 /// (decision 40, interfaces/types.md).
 ///
 /// Two free-form strings, matching the *shape*
-/// [`HelloAck::firmware_version`](crate::protocol::HostMsg) already uses
+/// [`HelloAck`](crate::protocol::DevBenchMessage::HelloAck)'s
+/// `firmware_version` already uses
 /// (embarch-dev-bench decision 18: whatever the build embeds, typically
 /// `git describe --always --dirty --abbrev=8`). Both are mandatory and
 /// [`REQUIREMENT_ANY`] is an explicit legal value.

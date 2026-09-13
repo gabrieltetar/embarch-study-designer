@@ -51,8 +51,10 @@ pub enum DevBenchMessage {
         /// contents are dev-bench build-tooling's own concern.
         ///
         /// **This is the BENCH's build, and the suite has a second field of
-        /// the same name that is the DUT's** — [`Requirements::firmware_version`]
-        /// and [`Provenance::firmware_version`] (decision 74,
+        /// the same name that is the DUT's** —
+        /// [`Requirements`](crate::study::Requirements)`::firmware_version`
+        /// and [`Provenance`](crate::result::Provenance)`::firmware_version`
+        /// (decision 74,
         /// `tasks/suite/010`). A caller that reads this value and writes it
         /// into `requires.firmware_version` has pinned a **DUT** requirement
         /// to the **bench's** build, and in the normal no-reflash case
