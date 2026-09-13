@@ -20,7 +20,7 @@ section.
 | Module | Contents |
 |---|---|
 | `study` | `Study`, `Step`, `Action` (interfaces/types.md) |
-| `result` | `StudyResult`, `StepResult`, `Outcome` (interfaces/types.md) |
+| `result` | `StudyResult`, `StepResult`, `Outcome` (interfaces/result-types.md) |
 | `sample` | `Sample`, the shared power/waveform CSV row record (interfaces/decoders.md) |
 | `protocol` | `DevBenchMessage`, the Core<->dev-bench serial wire protocol (decisions 10, 12, 20) |
 | `crc` | `steps_crc`, the CRC-32 integrity seal over `Study.steps` (decision 17) |

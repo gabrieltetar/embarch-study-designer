@@ -1,4 +1,4 @@
-//! `StudyResult`/`StepResult`/`Outcome` — interfaces/types.md.
+//! `StudyResult`/`StepResult`/`Outcome` — interfaces/result-types.md.
 
 use heapless::{String, Vec};
 use serde::{Deserialize, Serialize};
@@ -20,7 +20,7 @@ pub struct StudyResult {
     pub study_name: String<MAX_STUDY_NAME_LEN>,
     pub steps: crate::bounded::Bounded<StepResult, MAX_STEPS_PER_STUDY>,
     /// What this run actually executed against, and how each version was
-    /// established (decision 40, interfaces/types.md). Closes a gap wider than
+    /// established (decision 40, interfaces/result-types.md). Closes a gap wider than
     /// the one it was raised for: before this, two runs of the same study
     /// against two different firmware builds produced results that were
     /// indistinguishable after the fact.
@@ -32,7 +32,7 @@ pub struct StudyResult {
 }
 
 /// What a `StudyResult` ran against, and **how each version was
-/// established** (decision 40, interfaces/types.md).
+/// established** (decision 40, interfaces/result-types.md).
 ///
 /// The source fields are not bookkeeping. A `Declared` DUT version is an
 /// assertion nobody checked; a result that rendered it identically to a
@@ -86,7 +86,7 @@ impl Provenance {
 }
 
 /// One version requirement a run was allowed to proceed in spite of
-/// (decision 40, interfaces/types.md).
+/// (decision 40, interfaces/result-types.md).
 ///
 /// Carries both strings because the whole content of an override is the gap
 /// between them: "this study asked for X, it ran against Y, and somebody

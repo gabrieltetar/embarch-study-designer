@@ -47,7 +47,7 @@ pub const MAX_FIRMWARE_VERSION_LEN: usize = 32;
 /// gives it, whose length is a per-SoC driver decision rather than something
 /// this crate gets to fix.
 pub const MAX_HARDWARE_ID_LEN: usize = 32;
-/// `Provenance.overrides` (decision 40, interfaces/types.md) — how many
+/// `Provenance.overrides` (decision 40, interfaces/result-types.md) — how many
 /// version requirements one run can have had waved through. Exactly two,
 /// and not a knob: there are two requirements (`dev_bench_version`,
 /// `firmware_version`) and an override names one of them, so this is the
