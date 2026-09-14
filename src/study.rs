@@ -21,11 +21,12 @@ use crate::streams::StreamTap;
 /// How loud dev-bench's own firmware should be **for the duration of one
 /// study** (embarch-dev-bench decision 39).
 ///
-/// **Why this is per-study and not a build-time setting.** Decision 38 turned
-/// `CONFIG_LOG` on in the bench firmware and forwarded every record to Core as
-/// a `LogLine`. That made the bench's own account of a run available for the
-/// first time, and it made it available *always* — which is the wrong default
-/// for a link the study protocol shares: at `Info` the Zephyr BT host is
+/// **Why this is per-study and not a build-time setting.** embarch-dev-bench
+/// decision 38 turned `CONFIG_LOG` on in the bench firmware and forwarded
+/// every record to Core as a `LogLine`. That made the bench's own account of
+/// a run available for the first time, and it made it available *always* —
+/// which is the wrong default for a link the study protocol shares: at
+/// `Info` the Zephyr BT host is
 /// genuinely chatty, and every 128-byte `LogLine` is ~1.3 ms of a 1 Mbaud wire
 /// that a timing measurement is also using. A compile-time level forced the
 /// choice to be made once, for every study, by whoever last edited `prj.conf`.
@@ -136,7 +137,7 @@ pub struct Study {
     /// authored before taps existed has no `streams`, and `0`
     /// is the genuine CRC-32/ISO-HDLC of zero bytes, not a sentinel standing
     /// in for one. Every submitter recomputes and overwrites it anyway
-    /// (embarch-api decision 26).
+    /// (embarch-api decisions 27/28).
     #[serde(default)]
     pub streams_crc: u32,
     /// `.eap` protocol manifests resolved into this study at build time
@@ -165,8 +166,8 @@ pub struct Study {
     /// third seal, computed via [`crate::crc::protocols_crc`].
     ///
     /// A **sibling** of `steps_crc`/`streams_crc` rather than a widening of
-    /// either, for the structural reason decision 39's amendment already
-    /// settled: each seal is carried immediately after the one contiguous
+    /// either, for the structural reason decision 17 already settled: each
+    /// seal is carried immediately after the one contiguous
     /// span it covers, so dev-bench's hand-written C digests one run of
     /// bytes per seal and a mismatch names which of the three is corrupt.
     ///
@@ -642,7 +643,7 @@ pub enum GattOperation {
     },
     /// Enable notifications/indications without waiting for one.
     Subscribe,
-    // `StreamCapture` was here (decisions 20/21) and is
+    // `StreamCapture` was here (decision 21) and is
     // **retired** by decision 39: a continuous capture of what a
     // characteristic streams is now a declared
     // `StreamSource::GattNotify` tap (interfaces/taps.md), not a per-step action kind.
