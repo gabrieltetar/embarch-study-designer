@@ -52,8 +52,9 @@
 //! use; under a repo-wide walk that stopped being true, and a malformed
 //! macro in some unrelated corner must not be able to blank the GATT table.
 //!
-//! Two failure modes decision 57 adds outright, both of which a repo-wide
-//! walk creates and a two-file read could not have:
+//! Two of the three failure modes decision 57 adds outright — the third,
+//! an empty walk, is [`ExtractError::NoSourceFilesFound`] above — both
+//! created by a repo-wide walk and impossible for a two-file read:
 //! [`ExtractError::DuplicateService`] (two definitions resolving to one
 //! service UUID — the `.claude/worktrees/` case, caught even if some future
 //! repo has it tracked rather than ignored) and
@@ -177,7 +178,8 @@ impl core::fmt::Display for ExtractError {
 impl std::error::Error for ExtractError {}
 
 /// Whether a recovered identifier named a service or a characteristic
-/// (decision 56, extended by decision 57).
+/// (decision 56 — services were folded in the same session characteristics
+/// were).
 ///
 /// One `symbols` list rather than two: a name lookup is keyed by UUID, and a
 /// service UUID and a characteristic UUID never collide, so a consumer that
@@ -262,8 +264,9 @@ pub struct ScanReport {
 /// wire-comparable shape a *live* `GattDiscover` fills in from an ATT
 /// response, and an ATT response carries no names. Hanging a source-only
 /// field off it would put a field on the wire that hardware can never
-/// populate, and break the byte-for-byte comparability between a static
-/// extraction and a live discovery that decision 33 exists to provide.
+/// populate, and break the comparability between a static extraction and a
+/// live discovery that decision 33 exists to provide — the two are compared
+/// as sets, not byte-for-byte (decision 57).
 // No `Eq`: `GattServiceInfo` is only `PartialEq`, matching every other
 // wire type in this crate.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -710,7 +713,7 @@ fn resolve_var(
 /// Every `BT_GATT_SERVICE_DEFINE(...)` block in one file, each appending one
 /// [`GattServiceInfo`] (interfaces/gatt-types.md) — characteristics in source order
 /// within a service. Also records the C identifier the service and each
-/// characteristic were declared under (decisions 56/57): both are already
+/// characteristic were declared under (decision 56): both are already
 /// in hand here to resolve the UUIDs at all, and both used to be dropped on
 /// the floor.
 ///
@@ -1005,9 +1008,10 @@ BT_GATT_SERVICE_DEFINE(sensor_bds,
         assert_eq!(chrc[1], extracted.services[1].characteristics[0].uuid);
     }
 
-    /// decision 57 extends 56 one level up: the *service*'s declaring
-    /// identifier was already in hand to resolve its UUID at all, and was
-    /// thrown away for exactly as long as the characteristic's was.
+    /// decision 56 covers the *service*'s declaring identifier too, one
+    /// level up from the characteristic: it was already in hand to resolve
+    /// its UUID at all, and was thrown away for exactly as long as the
+    /// characteristic's was.
     #[test]
     fn extraction_recovers_the_declaring_service_identifiers() {
         let extracted = two_file_fixture().unwrap();
