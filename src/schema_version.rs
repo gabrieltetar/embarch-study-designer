@@ -165,8 +165,8 @@
 ///   the staleness pattern that decision exists to avoid). Phase C producing
 ///   the first real manifest is what made both visible. `embarch-dev-bench`'s
 ///   firmware still had not been flashed when this landed, which is the same
-///   window decisions 29/39 were spent in and the reason this cost a reshape
-///   rather than a migration.
+///   window `embarch-dev-bench` decision 29 and this crate's decision 39 were
+///   spent in, and the reason this cost a reshape rather than a migration.
 /// - **v12** (decisions 44 **and** 50, one bump for the pair — the
 ///   standing one-bump-per-pass discipline). `Action` gains
 ///   `BleSecurity { level }` and `BleUnbond {}`, appended at
