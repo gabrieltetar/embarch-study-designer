@@ -742,7 +742,7 @@ mod tests {
         0x04, // ...4 bytes
         0xde, 0xad, 0xbe, 0xef,
         0x00, // gatt_services: None
-        0x00, // security_level: None (schema v12, decision 50)
+        0x00, // security_level: None (schema v12, decision 44)
         0x00, // protocol: None (schema v15, decision 62)
         // Nothing between `captured_data` and `gatt_services`: the two
         // retired refs are gone from the type and must be gone from the
@@ -1056,7 +1056,7 @@ mod tests {
             (Action::GattMonitorAll {}, 4),
             (Action::GattMonitorStart {}, 5),
             (Action::GattMonitorStop {}, 6),
-            // Schema v12 (decisions 50/51) -- appended at the
+            // Schema v12 (decisions 44/50) -- appended at the
             // end, never inserted, which is the whole reason these two
             // numbers are worth pinning rather than reading off the
             // declaration.
