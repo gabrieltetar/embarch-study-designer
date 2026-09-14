@@ -255,7 +255,7 @@ pub struct TableRow {
     pub timeout_ms: u32,
     #[serde(default)]
     pub continue_on_fail: bool,
-    /// The row's "when" — `Step::delay_before_ms` (decision 40).
+    /// The row's "when" — `Step::delay_before_ms` (decision 42).
     /// `#[serde(default)]` so a table saved before this field existed
     /// still loads, as 0 (start immediately), which is exactly what those
     /// studies did.
@@ -422,7 +422,7 @@ pub fn build_study(
         streams: HVec::new(),
         steps_crc: 0,
         // Both seals are left at 0 here, and both are overwritten by
-        // whoever submits (embarch-api decision 26). For
+        // whoever submits (decision 26). For
         // `streams_crc` that zero happens to already be correct — this
         // builder authors no taps, and 0 is the real CRC of an empty tap
         // list (`crate::crc::streams_crc`) — but it is not written *as* a
@@ -1508,7 +1508,7 @@ mod tests {
 
     /// A vendor row is a `DataExchange` like any other by the time it leaves
     /// here — dev-bench never learns the table exists, which is why decision
-    /// 39 needed no firmware change and no schema bump of its own.
+    /// 41 needed no firmware change and no schema bump of its own.
     #[test]
     fn a_vendor_row_and_the_equivalent_raw_row_build_the_identical_action() {
         let vendor = build_study(
