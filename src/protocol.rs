@@ -180,7 +180,7 @@ pub enum DevBenchMessage {
         /// **Appended after `dev_bench_log_level`, not inserted beside
         /// `streams_crc`.** postcard is positional, and this file's rule is
         /// that a new field goes on the end so the wire diff a human checks
-        /// is a suffix. The structural rule decision 39's amendment set —
+        /// is a suffix. Decision 17's structural rule —
         /// each seal immediately follows the one contiguous span it covers —
         /// is satisfied by `protocols_crc` sitting right after `protocols`,
         /// which is a property of this pair, not of where the pair sits.
