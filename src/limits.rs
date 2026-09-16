@@ -167,8 +167,10 @@ pub const MAX_PROTOCOLS_PER_STUDY: usize = 2;
 pub const MAX_PROTOCOL_NAME_LEN: usize = 32;
 /// `ProtocolDef.sources` (decision 58) — characteristic
 /// aliases one protocol block declares for itself. Sized against the real
-/// BDS download's three (`ctrl`/`status`/`data`, decision 57) with room for
-/// a protocol spanning two services.
+/// BDS download's two (`ctrl`/`status` — the manifest deliberately does not
+/// name the bulk data characteristic as a source; it belongs on a selective
+/// monitor window instead, interfaces/eap.md) with room for a protocol
+/// spanning two services.
 pub const MAX_SOURCES_PER_PROTOCOL: usize = 6;
 /// `ProtocolSource.name` — the alias a `write`/`frame` refers to.
 pub const MAX_SOURCE_NAME_LEN: usize = 24;

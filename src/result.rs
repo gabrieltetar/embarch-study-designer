@@ -191,7 +191,7 @@ pub struct StepResult {
     // now gets an auto-declared `GattTranscript` tap instead
     // (embarch-ui decision 15), and the file is the answer.
     /// The BLE security level the link was actually sitting at when this
-    /// step finished (decision 50) — `None` when there was no
+    /// step finished (decision 44) — `None` when there was no
     /// connection to ask about.
     ///
     /// **Populated for every step, not only for
