@@ -207,7 +207,7 @@ pub enum StreamEncoding {
     ///   study was written is a persisted record of resolved state consulted at
     ///   a later, unrelated moment — the write-ahead staleness pattern
     ///   embarch-topology decision 3 exists to eliminate, and
-    ///   the one decision 9 spent three paragraphs distinguishing itself from.
+    ///   the one embarch-outpost decision 9 spent three paragraphs distinguishing itself from.
     ///   A saved study would go stale on the next rebuild.
     ///
     /// Which manifest is a Core-side runtime question, answered by the flash
