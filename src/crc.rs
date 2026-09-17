@@ -141,15 +141,19 @@ pub fn protocols_crc(protocols: &[crate::eap::ProtocolDef]) -> Result<u32, Proto
     Ok(digest.finalize())
 }
 
-/// CRC-32/ISO-HDLC over an arbitrary byte run — the in-frame `crc32`
-/// primitive of decision 59's grammar, and the same digest the three
-/// study seals use.
+/// CRC-32/ISO-HDLC over an arbitrary byte run — the same algorithm
+/// decision 59's grammar names for its in-frame `crc32` primitive, and the
+/// same digest the three study seals use. That primitive itself is parsed
+/// and pinned but has no render consumer yet: `eap_parse`'s
+/// `ResolvedProtocol::render_layout` refuses it by name
+/// (`RenderUnimplemented`, decision 71) rather than silently rendering a
+/// flat, unchecked field.
 ///
-/// Exposed rather than kept private because a `crc32` frame primitive is
-/// applied host-side at render time ([`crate::eap_parse`]), which is a
-/// different module from the one sealing a `Study`, and this crate's answer
-/// to "two places need the identical computation" is one function, not two
-/// (decision 2).
+/// Exposed rather than kept private because a captured record's own
+/// CRC-32 is checked host-side by [`crate::records`]'s `RecordCheck`
+/// (decision 70) — a different module from the one sealing a `Study` —
+/// and this crate's answer to "two places need the identical computation"
+/// is one function, not two (decision 2).
 pub fn crc32_ieee(bytes: &[u8]) -> u32 {
     CRC32.checksum(bytes)
 }
