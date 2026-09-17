@@ -6,7 +6,7 @@
 //! **Why this lives here and not in `embarch-core`.** Every other rendered
 //! stream's row shape lives in this crate — [`crate::sample::Sample`],
 //! [`crate::gatt::GattTranscriptEntry`] — precisely so Core holds no column
-//! knowledge (embarch-core decision 30). An outpost trace is
+//! knowledge (embarch-core decision 38). An outpost trace is
 //! the third rendered encoding and gets the same treatment, which also means
 //! `embarch-api` and `embarch-ui` read a trace through the same code Core
 //! writes it with rather than through a second implementation.
