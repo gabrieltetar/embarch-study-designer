@@ -70,7 +70,7 @@ pub enum MergedAction {
     /// distinguish "Nordic defines this" from "your DUT has this". Never
     /// routed to the registration form: transcribing a UUID Zephyr itself
     /// publishes into a per-repo registry is exactly the busywork decision
-    /// 39 removes.
+    /// 41 removes.
     Vendor {
         service_id: &'static str,
         service_name: &'static str,
