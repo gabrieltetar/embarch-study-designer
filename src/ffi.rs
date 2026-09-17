@@ -60,7 +60,7 @@ pub enum EssdStatus {
 }
 
 /// Mirrors `Action::BleAdvertise` (interfaces/types.md), scoped to the fields
-/// dev-bench's initial dispatch pass actually needs (decision 21).
+/// dev-bench's initial dispatch pass actually needs (embarch-dev-bench decision 21).
 /// `service_uuids` is deliberately not carried into this struct -- an
 /// accepted v1 gap, not a silent bug: advertising still exercises the radio
 /// without needing UUIDs for this milestone's self-test (which submits
@@ -177,12 +177,16 @@ pub extern "C" fn essd_schema_version() -> u32 {
 /// not checked here.** A single `out_crc_matches` bool cannot say *which* of
 /// two seals failed, which is the property having two of them exists for —
 /// so folding both into it would quietly destroy the thing being added.
-/// Widening the C ABI instead would extend a surface that has no caller
-/// anywhere -- this `BleAdvertise`-scoped FFI decode surface is deliberately
-/// narrow -- which is the same posture embarch-topology decision 18's
-/// amendment takes toward `validate_signal`. The real Core<->dev-bench check
-/// is dev-bench's own C decoder in `serial_protocol.c`, which computes both
-/// seals over the spans it walks.
+/// Widening the C ABI instead would extend a surface that has no caller in
+/// any repo -- `essd_study_decode_and_verify` and `essd_study_decode_full`
+/// both, per decision 7's 2026-09-11 correction -- and that surface is
+/// itself proposed for retirement rather than widened (`tasks/suite/032`).
+/// **Not**, any longer, the same posture as `embarch-topology` decision 18:
+/// that decision's own 2026-09-11 amendment retracted the mutual citation
+/// this comment used to make as circular, and now says plainly that this
+/// crate's advertise-scoped decode surface "gets no such defence." The real
+/// Core<->dev-bench check is dev-bench's own C decoder in
+/// `serial_protocol.c`, which computes both seals over the spans it walks.
 ///
 /// # Safety
 /// `input` must point to `input_len` readable bytes, and `out_crc_matches`
@@ -214,7 +218,7 @@ pub unsafe extern "C" fn essd_study_decode_and_verify(
 /// Decodes a postcard-encoded `Study` and verifies its `steps_crc`
 /// (superseding neither `essd_study_decode_and_verify` nor decision 17's
 /// existing check -- this is a second, additive entry point for dev-bench's
-/// real per-`Study` dispatch, decision 21), then copies every step into
+/// real per-`Study` dispatch, embarch-dev-bench decision 21), then copies every step into
 /// `*out_study` as a C-friendly, fixed-layout struct so C code can iterate
 /// steps/read fields without touching Rust-owned memory directly.
 ///
