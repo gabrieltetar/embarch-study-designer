@@ -189,7 +189,7 @@ pub fn find_by_uuid(
     })
 }
 
-/// The **service** a UUID names, or `None` (decision 57).
+/// The **service** a UUID names, or `None` (decision 56).
 ///
 /// The service-level counterpart to [`find_by_uuid`], added when service
 /// identifiers stopped being thrown away: a picker that groups

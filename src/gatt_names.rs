@@ -80,7 +80,7 @@ pub struct GattNameBook {
     /// service resolves against a different half of [`crate::vendor`]'s
     /// table ([`crate::vendor::find_service_by_uuid`], not
     /// [`crate::vendor::find_by_uuid`]), so one map would have to guess
-    /// which lookup a UUID wanted (decision 57).
+    /// which lookup a UUID wanted (decision 56).
     service_symbols: HashMap<Uuid, String>,
 }
 
@@ -123,7 +123,7 @@ impl GattNameBook {
     }
 
     /// This *service*'s name, or `None` — the group-header counterpart to
-    /// [`Self::get`] (decision 57). Same two sources, same precedence:
+    /// [`Self::get`] (decision 56). Same two sources, same precedence:
     /// a vendor-published service name beats one repo's spelling of it.
     pub fn service(&self, service_uuid: Uuid) -> Option<GattName> {
         if let Some(service) = crate::vendor::find_service_by_uuid(service_uuid) {
@@ -266,7 +266,7 @@ mod tests {
         assert!(GattNameBook::new().get(uuid("0000dead-0000-1000-8000-00805f9b34fb")).is_none());
     }
 
-    /// decision 57: a service gets a name the same way a characteristic
+    /// decision 56: a service gets a name the same way a characteristic
     /// does, from the identifier `parse_gatt_services` already had in hand.
     #[test]
     fn a_service_is_named_from_its_declaring_identifier() {
