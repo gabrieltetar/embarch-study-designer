@@ -22,10 +22,16 @@ use crate::limits::MAX_CSV_ROW_LEN;
 /// to reach them changed.
 ///
 /// `rx_utc_ms` is the record's own arrival stamp, taken by whichever node
-/// received the bytes — dev-bench's local clock for a dev-bench-mediated tap,
-/// seeded and periodically resynced from Core's `host_utc_ms` on every
-/// `Hello` (decision 12); Core's own clock for a
-/// `StreamSource::Signal` tap it reads directly.
+/// received the bytes — dev-bench's local clock for a dev-bench-mediated tap;
+/// Core's own clock for a `StreamSource::Signal` tap it reads directly.
+///
+/// The dev-bench half is designed to seed and resync from Core's
+/// `host_utc_ms` on every `Hello` (decision 12), **but that half is not
+/// implemented in firmware** (decision 72): dev-bench stamps
+/// `k_uptime_get()` with no offset applied anywhere, so a dev-bench-mediated
+/// tap's `rx_utc_ms` is milliseconds since the bench booted, not UTC, and is
+/// not comparable with `core_rx_utc_ms` or any other `*_utc_ms` value in this
+/// suite.
 ///
 /// `value`'s real-world shape (a single scalar vs. multiple hardware-specific
 /// fields, e.g. separate current/voltage) is still open (open.md);
