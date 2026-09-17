@@ -11,10 +11,12 @@
 #     allocator. Under `--features alloc` the same type is 2,128 bytes.
 #   * A debug-profile test that builds a handful of those values overflows
 #     2 MiB. [Measured 2026-09-02, decision 63] on rustc 1.97.1: 2 MiB and
-#     3 MiB abort, 4 MiB passed 108/108 then; the suite has grown since —
-#     [measured 2026-09-16] 4 MiB passes 125/125. The size is a *requirement*
-#     of the configuration
-#     under test, not a defect to shrink — `bounded.rs`'s
+#     3 MiB abort, 4 MiB passes. Decision 63's "108/108" counts the **lib**
+#     binary only; `tests/firmware_test_vectors.rs` already added 9 more then,
+#     so the combined total was 117. [Re-measured 2026-09-16] 4 MiB still
+#     passes, 116 lib + 9 integration = 125 — same basis, so the growth is 8,
+#     not the 17 the two raw figures suggest. The size is a *requirement* of
+#     the configuration under test, not a defect to shrink — `bounded.rs`'s
 #     `the_no_std_build_keeps_its_fixed_capacity_arrays` asserts it stays
 #     inline, so "make the type smaller" is not available here.
 #
