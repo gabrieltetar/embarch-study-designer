@@ -85,10 +85,9 @@
 //! CRC-16s (ANSI, CCITT, ITU, each with its own seed and reflection), the
 //! design named none of them, and neither worked protocol uses one. Guessing
 //! which would be exactly the inference this suite refuses everywhere else;
-//! shipping all four would be four primitives with no caller, the shape
-//! `embarch-core` decision 30's settlement 2 already records as a
-//! mistake. It is one line to add the day a real frame needs a named
-//! variant.
+//! shipping all four would be four primitives with no caller — decision 59
+//! already refuses exactly this, in the same words, for the same reason. It
+//! is one line to add the day a real frame needs a named variant.
 
 use std::collections::HashMap;
 use std::fmt;
