@@ -10,8 +10,10 @@
 #     and decision 46 deliberately keeps it that way on the build with no
 #     allocator. Under `--features alloc` the same type is 2,128 bytes.
 #   * A debug-profile test that builds a handful of those values overflows
-#     2 MiB. [Measured 2026-09-02] on rustc 1.97.1: 2 MiB and 3 MiB abort,
-#     4 MiB passes 107/107. The size is a *requirement* of the configuration
+#     2 MiB. [Measured 2026-09-02, decision 63] on rustc 1.97.1: 2 MiB and
+#     3 MiB abort, 4 MiB passed 108/108 then; the suite has grown since —
+#     [measured 2026-09-16] 4 MiB passes 125/125. The size is a *requirement*
+#     of the configuration
 #     under test, not a defect to shrink — `bounded.rs`'s
 #     `the_no_std_build_keeps_its_fixed_capacity_arrays` asserts it stays
 #     inline, so "make the type smaller" is not available here.

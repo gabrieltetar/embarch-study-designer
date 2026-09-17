@@ -39,7 +39,7 @@
 //! nowhere else. What crosses the wire is the resolved definition, indexed by
 //! [`crate::study::Action::RunProtocol`].
 //!
-//! The expression set is three operand forms, one arithmetic operation and
+//! The expression set is four operand forms, one arithmetic operation and
 //! six comparisons ([`Expr`], [`Condition`]). There is no nesting, no
 //! boolean connective, no user-defined function, and no way to express a
 //! loop that is not a state transition. That is a deliberate ceiling, not an
