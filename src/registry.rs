@@ -33,11 +33,13 @@ use heapless::String as HString;
 use heapless::Vec as HVec;
 
 /// The GATT-level operation a [`RegisteredAction`] performs. A subset of
-/// `study::GattOperation` (no `StreamCapture`, decision 35's own "doesn't
-/// need it here" call) — kept as its own type rather than reusing
-/// `GattOperation` directly, since a registered action doesn't carry that
-/// enum's per-call timeout fields (`Notify { timeout_ms }`, `Indicate
-/// { timeout_ms }` — those belong on the `Step`, not the registry entry).
+/// `study::GattOperation` (no `StreamCapture`, which decision 39 folded into
+/// the tap model as `StreamSource::GattNotify` rather than a step-level
+/// action this registry would ever enumerate) — kept as its own type rather
+/// than reusing `GattOperation` directly, since a registered action doesn't
+/// carry that enum's per-call timeout fields (`Notify { timeout_ms }`,
+/// `Indicate { timeout_ms }` — those belong on the `Step`, not the registry
+/// entry).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RegisteredOperation {
