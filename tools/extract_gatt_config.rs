@@ -5,8 +5,8 @@
 //! connecting dev-bench to it.
 //!
 //! Prints `{ "services": [...], "names": {...}, "service_names": {...},
-//! "scan": {...} }` — the names half added by decision 56, the
-//! service names and the scan report by decision 57.
+//! "scan": {...} }` — the names half and the service names added by
+//! decision 56, the scan report by decision 57.
 //!
 //! `scan` is the half worth eyeballing after a firmware repo grows a file:
 //! it names every source that actually contributed, so "the extractor never
@@ -38,7 +38,7 @@ struct Output {
     /// Keyed by hyphenated characteristic UUID — the form the rest of the
     /// suite already renders and compares in.
     names: std::collections::BTreeMap<String, GattName>,
-    /// Keyed by hyphenated service UUID (decision 57).
+    /// Keyed by hyphenated service UUID (decision 56).
     service_names: std::collections::BTreeMap<String, GattName>,
     /// What the walk read and what it pruned (decision 57).
     scan: ScanReport,

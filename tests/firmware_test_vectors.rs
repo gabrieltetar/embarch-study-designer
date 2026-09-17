@@ -270,7 +270,7 @@ fn dump_step_result_wire_bytes() {
 }
 
 /// Dumps a `StudyStart` carrying schema v12's two new actions
-/// (decisions 50/51), so dev-bench's
+/// (decisions 44/50), so dev-bench's
 /// hand-written C decoder is pinned against bytes this crate produced rather
 /// than against its own encoder — decision 36's both-languages rule, applied
 /// to a new record the pass that adds it rather than a version later (which
