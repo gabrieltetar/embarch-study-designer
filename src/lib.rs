@@ -49,6 +49,10 @@ pub mod gatt;
 pub mod eap_interp;
 #[cfg(feature = "eap-parse")]
 pub mod eap_parse;
+/// The `.eap` files of one firmware repo on disk — the layer between
+/// [`eap_parse`] and an editor that has to render what is wrong with them.
+#[cfg(feature = "eap-parse")]
+pub mod eap_repo;
 #[cfg(feature = "gatt-extract")]
 pub mod gatt_extract;
 /// Characteristic display names (decision 56) — `std`-only, so a
@@ -85,6 +89,18 @@ pub use eap::{
     WriteField,
 };
 pub use decoder::{DecodeError, ScalarType, StructField, StructLayout};
+// The parser, the reference interpreter and the on-disk repo layer never got
+// root re-exports, so every host consumer reached into the modules by path
+// while every other authoring type sat here. One list.
+#[cfg(feature = "eap-parse")]
+pub use eap_interp::{Event as InterpEvent, Run as ProtocolRun, Step as InterpStep};
+#[cfg(feature = "eap-parse")]
+pub use eap_parse::{parse as parse_eap, resolve as resolve_eap, EapError, EapErrorKind, EapFile, ResolvedProtocol};
+#[cfg(feature = "eap-parse")]
+pub use eap_repo::{
+    protocol_path, protocols_dir, scan as scan_protocols, BlockOutcome, FileError, ProtocolFile,
+    RepoError, RepoProtocols,
+};
 pub use gatt::{
     GattCharacteristicInfo, GattDirection, GattEventKind, GattServiceInfo, GattTarget,
     GattTranscriptEntry,
