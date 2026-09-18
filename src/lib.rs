@@ -110,6 +110,12 @@ pub use registry::{
     ActionField, ActionFieldValue, ActionRegistry, RegisteredAction, RegisteredOperation,
     RegistryError, StructRegistry,
 };
+// A `RecordCheck` is authored by a host (it rides on `StreamTap`) and a
+// `RecordReport` is read by one (it comes back on `StreamRef`), so both sit
+// at the root beside every other type that crosses a host's hands. Only
+// `verify_records` itself stays module-scoped — it runs in Core, not in an
+// authoring UI.
+pub use records::{RecordCheck, RecordFraming, RecordReport};
 pub use result::{
     Outcome, ProtocolOutcome, Provenance, StepResult, StudyResult, VersionOverride, VersionSource,
     VersionSubject,

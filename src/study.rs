@@ -64,6 +64,41 @@ pub enum DevBenchLogLevel {
 }
 
 impl DevBenchLogLevel {
+    /// Every level, quietest first — which is also the order a picker should
+    /// offer them, because the axis is one-dimensional and the cost rises
+    /// monotonically along it.
+    ///
+    /// **Served, not restated.** Same reason [`crate::decoder::ScalarType`]'s
+    /// `ALL` is public and `BuiltInActionKind::label` lives on this side: a
+    /// browser-side copy of a name drifts the day a variant is appended, and
+    /// these variants are appended rather than reordered by rule, so a stale
+    /// copy would map a label onto the wrong discriminant rather than merely
+    /// omitting one.
+    pub const ALL: [DevBenchLogLevel; 5] = [
+        DevBenchLogLevel::Off,
+        DevBenchLogLevel::Error,
+        DevBenchLogLevel::Warn,
+        DevBenchLogLevel::Info,
+        DevBenchLogLevel::Debug,
+    ];
+
+    /// What a picker shows for this level: the variant's own JSON spelling,
+    /// then what choosing it costs.
+    ///
+    /// The variant name is the spelling deliberately — these serialize as
+    /// bare PascalCase (`"Warn"`), with **no `rename_all`**, and every saved
+    /// study on disk carries that spelling. A label that renamed them in the
+    /// picker would be a second vocabulary for the same five values.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Off => "Off — nothing, not even the fatal-error dump",
+            Self::Error => "Error — errors only",
+            Self::Warn => "Warn — errors and warnings (the default)",
+            Self::Info => "Info — adds the BT host's own account of the link",
+            Self::Debug => "Debug — everything the firmware was built with",
+        }
+    }
+
     /// The Zephyr severity number this maps to (`LOG_LEVEL_NONE` = 0 through
     /// `LOG_LEVEL_DBG` = 4), which is what dev-bench passes to
     /// `log_filter_set`.
@@ -743,5 +778,55 @@ mod tests {
             .unwrap()
             .join()
             .unwrap();
+    }
+}
+
+#[cfg(test)]
+mod log_level_vocabulary_tests {
+    use super::DevBenchLogLevel;
+
+    /// **The five levels serialize as bare PascalCase, and must keep doing
+    /// so.** There is no `rename_all` behind `"Warn"` — it is the variant
+    /// name — and every saved study on disk carries that spelling in its
+    /// `dev_bench_log_level` field. Adding `rename_all = "snake_case"` here
+    /// would be a one-line change that silently stops every one of them from
+    /// loading, so the spelling is pinned rather than left to nobody
+    /// noticing.
+    #[test]
+    fn the_json_spelling_is_bare_pascal_case() {
+        for (level, spelling) in [
+            (DevBenchLogLevel::Off, "Off"),
+            (DevBenchLogLevel::Error, "Error"),
+            (DevBenchLogLevel::Warn, "Warn"),
+            (DevBenchLogLevel::Info, "Info"),
+            (DevBenchLogLevel::Debug, "Debug"),
+        ] {
+            assert_eq!(serde_json::to_value(level).unwrap(), spelling);
+        }
+    }
+
+    /// `ALL` is every variant, quietest first, and its order is the
+    /// discriminant order — which is also the postcard encoding's, so a
+    /// picker built from it cannot offer a label against the wrong value.
+    #[test]
+    fn all_is_every_level_quietest_first() {
+        assert_eq!(DevBenchLogLevel::ALL.len(), 5);
+        for (i, level) in DevBenchLogLevel::ALL.into_iter().enumerate() {
+            assert_eq!(level.zephyr_level() as usize, i);
+            assert!(level.label().starts_with(match level {
+                DevBenchLogLevel::Off => "Off",
+                DevBenchLogLevel::Error => "Error",
+                DevBenchLogLevel::Warn => "Warn",
+                DevBenchLogLevel::Info => "Info",
+                DevBenchLogLevel::Debug => "Debug",
+            }));
+        }
+    }
+
+    /// The default is `Warn`, and a picker built from `ALL` offers it.
+    #[test]
+    fn warn_is_the_default_and_is_offered() {
+        assert_eq!(DevBenchLogLevel::default(), DevBenchLogLevel::Warn);
+        assert!(DevBenchLogLevel::ALL.contains(&DevBenchLogLevel::default()));
     }
 }

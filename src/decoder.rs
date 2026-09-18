@@ -115,31 +115,46 @@ impl ScalarType {
         }
     }
 
+    /// Every scalar type, in the order a picker should offer them: the two
+    /// one-byte widths, then each larger width little-endian before
+    /// big-endian, integers before floats.
+    ///
+    /// **Public because a host serves this list rather than restating it.**
+    /// A layout editor needs the eighteen spellings, and an eighteen-entry
+    /// array retyped in JavaScript is the same drift `embarch-ui` decision 17
+    /// argues about limits and `suite/017` closed for action labels — one
+    /// copy, served, is the answer this suite keeps arriving at. A host that
+    /// is served an empty list renders an empty picker, which is a refusal;
+    /// it must not fall back to a guessed eighteen.
+    ///
+    /// [`parse`](Self::parse) iterates this rather than holding its own copy,
+    /// so a nineteenth variant becomes parseable and offerable in one edit.
+    pub const ALL: [ScalarType; 18] = [
+        ScalarType::U8,
+        ScalarType::I8,
+        ScalarType::U16Le,
+        ScalarType::U16Be,
+        ScalarType::I16Le,
+        ScalarType::I16Be,
+        ScalarType::U32Le,
+        ScalarType::U32Be,
+        ScalarType::I32Le,
+        ScalarType::I32Be,
+        ScalarType::U64Le,
+        ScalarType::U64Be,
+        ScalarType::I64Le,
+        ScalarType::I64Be,
+        ScalarType::F32Le,
+        ScalarType::F32Be,
+        ScalarType::F64Le,
+        ScalarType::F64Be,
+    ];
+
     /// Parses the spelling [`as_str`](Self::as_str) produces. `None` for
     /// anything else — a hand-edited `study-structs.toml` typo is named,
     /// never silently defaulted to a plausible width.
     pub fn parse(text: &str) -> Option<ScalarType> {
-        const ALL: [ScalarType; 18] = [
-            ScalarType::U8,
-            ScalarType::I8,
-            ScalarType::U16Le,
-            ScalarType::U16Be,
-            ScalarType::I16Le,
-            ScalarType::I16Be,
-            ScalarType::U32Le,
-            ScalarType::U32Be,
-            ScalarType::I32Le,
-            ScalarType::I32Be,
-            ScalarType::U64Le,
-            ScalarType::U64Be,
-            ScalarType::I64Le,
-            ScalarType::I64Be,
-            ScalarType::F32Le,
-            ScalarType::F32Be,
-            ScalarType::F64Le,
-            ScalarType::F64Be,
-        ];
-        ALL.into_iter().find(|t| t.as_str() == text)
+        Self::ALL.into_iter().find(|t| t.as_str() == text)
     }
 
     /// Reads this field out of `bytes`, which must be exactly
@@ -627,3 +642,32 @@ mod tests {
         assert_eq!(ScalarType::parse(""), None);
     }
 }
+
+#[cfg(test)]
+mod scalar_vocabulary_tests {
+    use super::ScalarType;
+
+    /// `ALL` is the served picker list and `parse` iterates it, so a variant
+    /// missing from `ALL` is a spelling nothing can author *and* nothing can
+    /// load. Distinct spellings, all of them parsing back, and the count.
+    #[test]
+    fn all_is_complete_and_its_spellings_are_distinct() {
+        assert_eq!(ScalarType::ALL.len(), 18);
+        let mut seen: heapless::Vec<&str, 18> = heapless::Vec::new();
+        for t in ScalarType::ALL {
+            assert_eq!(ScalarType::parse(t.as_str()), Some(t));
+            assert!(!seen.contains(&t.as_str()), "duplicate spelling {}", t.as_str());
+            seen.push(t.as_str()).unwrap();
+        }
+    }
+
+    /// Anything that is not one of the eighteen is named, never defaulted to
+    /// a plausible width.
+    #[test]
+    fn an_unknown_spelling_is_refused() {
+        assert_eq!(ScalarType::parse("u24le"), None);
+        assert_eq!(ScalarType::parse("U8"), None);
+        assert_eq!(ScalarType::parse(""), None);
+    }
+}
+
