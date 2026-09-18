@@ -328,7 +328,23 @@ pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 15;
 ///   host-side check from there would have cost a firmware reflash for a
 ///   check no firmware runs. So [`DEV_BENCH_WIRE_SCHEMA_VERSION`] stays at
 ///   15 and the two numbers legitimately diverge again, as they did at v16.
-pub const HOST_TYPE_SCHEMA_VERSION: u32 = 18;
+/// - **v19** — host-only, same posture as v18: `Requirements` gained
+///   `build` (the DUT firmware a study builds for itself) and `outpost`
+///   (the trace mode it needs the DUT to be in). `requires` is host-side
+///   only by construction — decisions 17/39/40 keep it off `StudyStart` —
+///   so dev-bench neither parses nor emits either field, and
+///   [`DEV_BENCH_WIRE_SCHEMA_VERSION`] stays at 15. Both fields cross
+///   `embarch-api`/`embarch-ui` -> `embarch-core` as JSON, which is the hop
+///   this number guards.
+///
+///   Both carry `#[serde(default)]` and both default to `None`, so a study
+///   saved before them still loads as what it always was — but the number
+///   moves anyway, because the rule is a change to a type crossing the hop,
+///   not a change that breaks it. A `Study` submitted *with* a build spec
+///   to a Core too old to run the pre-flight would otherwise be accepted
+///   and silently run unchecked, which is exactly the drift the constant
+///   exists to refuse.
+pub const HOST_TYPE_SCHEMA_VERSION: u32 = 19;
 
 /// [`HOST_TYPE_SCHEMA_VERSION`]'s triggers are a strict superset of
 /// [`DEV_BENCH_WIRE_SCHEMA_VERSION`]'s (decision 12's

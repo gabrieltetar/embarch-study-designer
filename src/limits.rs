@@ -227,6 +227,38 @@ pub const MAX_REMEMBER_PER_ARM: usize = 2;
 /// and occasionally an argument; this is sized for the argument.
 pub const MAX_WRITE_FIELDS: usize = 6;
 
+// --- The per-study firmware build spec (`Requirements.build`) -----------
+//
+// Sized against a real target repo rather than guessed at: the nRF DUT
+// firmware this suite builds declares thirteen snippets, whose longest name
+// is 17 characters, and the two board strings in daily use here are
+// `nrf54l15dk/nrf54l15/cpuapp` (26) and `esp32c5_devkitc/esp32c5/hpcore`
+// (30). Every cap below is roughly double the measured case, the same
+// posture the rest of this file takes, and a value proving too small is an
+// ordinary version-bumped change.
+
+/// `BuildSpec.board`, `.variant`, `.revision`, `.app` — the four narrowing
+/// axes `embarch-firmware-build`'s `resolve::Selection` carries, each a
+/// west target component. Bounded together because they are one tuple's
+/// worth of the same kind of name, and the longest real one measured is 30
+/// characters.
+pub const MAX_BUILD_TARGET_FIELD_LEN: usize = 64;
+/// `BuildSpec.snippets` entries — one `-S` name, which is a directory name
+/// under an app's `snippets/`.
+pub const MAX_SNIPPET_NAME_LEN: usize = 32;
+/// `BuildSpec.snippets` — how many `-S` flags one build composes.
+///
+/// **This is an ordered list, not a set** (`embarch-decision-reversals.md`
+/// row 109), so the cap bounds a sequence: the same name twice is a
+/// question for the resolver, not something this capacity decides.
+pub const MAX_SNIPPETS_PER_BUILD: usize = 8;
+/// `BuildSpec.extra_args` entries — one opaque `west build` flag. Sized for
+/// a `-DCONFIG_...=y` (the longest outpost one is 38 characters) with room
+/// for a short path.
+pub const MAX_BUILD_EXTRA_ARG_LEN: usize = 96;
+/// `BuildSpec.extra_args` — how many such flags one build carries.
+pub const MAX_BUILD_EXTRA_ARGS: usize = 8;
+
 // --- Advisory dev-bench capacities -------------------------------------
 //
 // **Nothing in this crate branches on the three constants below.** They are

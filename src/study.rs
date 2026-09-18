@@ -12,9 +12,10 @@ use crate::bounded::Bounded;
 use crate::gatt::GattTarget;
 use crate::ids::{BleAddress, Uuid};
 use crate::limits::{
+    MAX_BUILD_EXTRA_ARGS, MAX_BUILD_EXTRA_ARG_LEN, MAX_BUILD_TARGET_FIELD_LEN,
     MAX_DECODERS_PER_STUDY, MAX_FIRMWARE_VERSION_LEN, MAX_LOCAL_NAME_LEN, MAX_MONITOR_TARGETS,
     MAX_NAME_LEN, MAX_PAYLOAD_LEN, MAX_PROTOCOLS_PER_STUDY, MAX_SERVICE_UUIDS,
-    MAX_STREAMS_PER_STUDY, MAX_STUDY_NAME_LEN,
+    MAX_SNIPPETS_PER_BUILD, MAX_SNIPPET_NAME_LEN, MAX_STREAMS_PER_STUDY, MAX_STUDY_NAME_LEN,
 };
 use crate::streams::StreamTap;
 
@@ -315,6 +316,199 @@ pub const REQUIREMENT_ANY: &str = "any";
 pub struct Requirements {
     pub dev_bench_version: String<MAX_FIRMWARE_VERSION_LEN>,
     pub firmware_version: String<MAX_FIRMWARE_VERSION_LEN>,
+    /// The DUT firmware this study builds and flashes for itself before it
+    /// runs, if it does (`embarch-ui` decision 11, reversed).
+    ///
+    /// **A declaration, resolved every time, never a pinned artifact.**
+    /// What is stored is the *selection* — board, app, snippets — not an
+    /// identifier for a build directory somebody produced once. A pinned
+    /// build id would be the write-ahead staleness pattern
+    /// `embarch-topology` decision 3 exists to eliminate: a study would
+    /// carry a claim about a directory that a later `west build`, a moved
+    /// tree, or a pruned build root can quietly falsify, and nothing would
+    /// notice until the wrong image was on the board.
+    ///
+    /// **It does not name a project**, and that is what keeps a study
+    /// portable. Which configured `[[projects]]` entry is the DUT is a
+    /// property of the bench the run happens on — `embarch-api`'s
+    /// `reflash::dut_project` already takes it per-run for the same reason
+    /// — so a study carries the target selection and the run supplies the
+    /// repo it is selected within.
+    ///
+    /// `None`, the default, is every study that existed before this field:
+    /// the DUT is whatever somebody already flashed, which is what those
+    /// studies always did.
+    #[serde(default)]
+    pub build: Option<BuildSpec>,
+    /// Which outpost trace mode this study needs the DUT to be running in,
+    /// checked against the header frame's `flags` byte before step 1.
+    ///
+    /// **This is the readback path the doc comment above says does not
+    /// exist.** The asymmetry it describes — dev-bench self-reports, the
+    /// DUT reports nothing — is true of a DUT with no outpost compiled in.
+    /// One that *has* an outpost puts a header frame on the wire carrying
+    /// both a `build_id` and this flags byte, so a study can verify the
+    /// firmware *and* its mode in a single pre-flight read, and
+    /// `firmware_version` stops being unverifiable for that class of run.
+    ///
+    /// `None` is every study that does not care, which includes every
+    /// study that existed before this field.
+    #[serde(default)]
+    pub outpost: Option<OutpostModeRequirement>,
+}
+
+/// The DUT firmware a study builds for itself (`Requirements.build`).
+///
+/// Field-for-field the narrowing selection `embarch-firmware-build`'s
+/// `resolve::Selection` already takes, in owned, bounded form so it can sit
+/// inside a `Study`. Keeping the shapes identical is deliberate: the
+/// resolver is the one thing that knows what a selection means, and a study
+/// that carried some other set of axes would need a translation layer whose
+/// only job would be to lose information.
+///
+/// **Snippets are an ordered list, not a set** — see
+/// [`BuildSpec::snippets`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BuildSpec {
+    /// Each `None` means "don't narrow on this axis", which the resolver
+    /// then fills from the project's own `default_target` — the same three
+    /// states an omitted call-time parameter already has. An empty string
+    /// is not that; it is refused by [`BuildSpec::validate`].
+    #[serde(default)]
+    pub board: Option<String<MAX_BUILD_TARGET_FIELD_LEN>>,
+    #[serde(default)]
+    pub variant: Option<String<MAX_BUILD_TARGET_FIELD_LEN>>,
+    #[serde(default)]
+    pub revision: Option<String<MAX_BUILD_TARGET_FIELD_LEN>>,
+    #[serde(default)]
+    pub app: Option<String<MAX_BUILD_TARGET_FIELD_LEN>>,
+    /// The `-S` flags, **in the order west will apply them**.
+    ///
+    /// `embarch-decision-reversals.md` row 109 is why the order is stored
+    /// rather than normalised: the BLE-shell snippet re-points the shell
+    /// backend and switches the traced UART off, so the outpost overlay has
+    /// to come second or the tracer loses its own UART. Two orderings of
+    /// the same names are two different images, and the resolver treats
+    /// them that way down to the build directory.
+    ///
+    /// Empty means "take the project's configured `default_snippets`", not
+    /// "build with none" — the reserved literal `"none"` alone is how a
+    /// study says none over a configured default (`embarch-api` decision
+    /// 21). Both readings are legitimate, which is why there is a literal
+    /// instead of an empty list standing in for one.
+    #[serde(default)]
+    pub snippets: Vec<String<MAX_SNIPPET_NAME_LEN>, MAX_SNIPPETS_PER_BUILD>,
+    /// Opaque `west build` passthrough flags, also in order. Same
+    /// empty-means-the-configured-default rule as `snippets`.
+    #[serde(default)]
+    pub extra_args: Vec<String<MAX_BUILD_EXTRA_ARG_LEN>, MAX_BUILD_EXTRA_ARGS>,
+}
+
+impl BuildSpec {
+    /// A blank axis, a blank snippet name or a blank flag is the
+    /// nobody-filled-this-in case, refused here for the same reason a blank
+    /// `firmware_version` is: it is not the same statement as leaving the
+    /// field out, and accepting it would make the two indistinguishable.
+    ///
+    /// **What this does not check is anything that needs the repo.**
+    /// Whether a board exists, whether an app declares a snippet by that
+    /// name, whether the composition builds at all — those are the
+    /// resolver's, against a live scan, and restating any of them here
+    /// would be a second copy that goes stale the moment the tree does.
+    pub fn validate(&self) -> Result<(), RequirementsError> {
+        for axis in [&self.board, &self.variant, &self.revision, &self.app] {
+            if axis.as_ref().is_some_and(|v| v.trim().is_empty()) {
+                return Err(RequirementsError::BlankBuildAxis);
+            }
+        }
+        if self.snippets.iter().any(|s| s.trim().is_empty()) {
+            return Err(RequirementsError::BlankSnippetName);
+        }
+        if self.extra_args.iter().any(|a| a.trim().is_empty()) {
+            return Err(RequirementsError::BlankBuildArg);
+        }
+        // The reserved literal means "no snippets"; mixed with real names
+        // it means neither thing clearly. `embarch-api` decision 21 refuses
+        // that at resolve time, and refusing it here too is what stops an
+        // authoring UI from saving a study that can only ever fail at the
+        // moment the build starts.
+        if self.snippets.len() > 1 && self.snippets.iter().any(|s| s == NO_SNIPPETS) {
+            return Err(RequirementsError::MixedNoSnippetsLiteral);
+        }
+        Ok(())
+    }
+}
+
+/// The reserved snippet literal meaning "build with genuinely no snippets",
+/// mirroring `embarch-firmware-build`'s `resolve::NO_SNIPPETS`
+/// (`embarch-api` decision 21).
+///
+/// **Mirrored rather than imported, because the dependency direction does
+/// not exist**: this crate is `no_std` and sits *below* the build machinery
+/// — `embarch-firmware-build` depends on nothing here and nothing here can
+/// depend on it. What that buys is that an authoring UI refuses the
+/// ambiguous list at save time instead of at build time; what it costs is a
+/// second copy of one word, named here so the next reader can check it.
+pub const NO_SNIPPETS: &str = "none";
+
+/// Which outpost trace mode a study needs the DUT to be in
+/// (`Requirements.outpost`), as two masks over
+/// [`crate::outpost::OutpostHeader::flags`].
+///
+/// **Two masks rather than one, because a flag's clear state can be the
+/// requirement.** `TRACE_SELF` is the standing example and its own doc
+/// comment says so: clear means the trace deliberately omits the outpost's
+/// own drain thread and UART interrupt, so a study that reasons about
+/// unaccounted-for intervals needs it *off*, and a single "required" mask
+/// could not ask for that.
+///
+/// A bit named in neither mask is genuinely not cared about — the third
+/// state, and the common one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OutpostModeRequirement {
+    /// Bits that must be **set** in the header's flags byte.
+    #[serde(default)]
+    pub required_set: u8,
+    /// Bits that must be **clear**.
+    #[serde(default)]
+    pub required_clear: u8,
+}
+
+impl OutpostModeRequirement {
+    /// Whether a header's flags byte satisfies this requirement.
+    ///
+    /// Lives here, beside the declaration, for the same reason
+    /// [`requirement_satisfied`] does: Core's pre-flight holds no
+    /// independent copy of the comparison rule.
+    pub const fn satisfied_by(&self, flags: u8) -> bool {
+        (flags & self.required_set) == self.required_set && (flags & self.required_clear) == 0
+    }
+
+    /// Which required-set bits are missing from `flags`, and which
+    /// required-clear bits are present — the two halves a refusal names, so
+    /// the message says what is wrong rather than only that something is.
+    pub const fn unmet(&self, flags: u8) -> (u8, u8) {
+        (self.required_set & !flags, self.required_clear & flags)
+    }
+
+    /// A bit cannot be required both set and clear. That is not a firmware
+    /// that will never be built — it is a declaration with no satisfying
+    /// firmware at all, which is a typo, and it is caught here rather than
+    /// after a rebuild and a reset.
+    pub fn validate(&self) -> Result<(), RequirementsError> {
+        if self.required_set & self.required_clear != 0 {
+            return Err(RequirementsError::ContradictoryOutpostFlags);
+        }
+        Ok(())
+    }
+
+    /// True when this requirement says nothing at all. An empty requirement
+    /// is legal and harmless, but it is also indistinguishable in effect
+    /// from `None`, so a caller checking "does this study need an outpost"
+    /// has to ask this rather than just whether the field is present.
+    pub const fn is_empty(&self) -> bool {
+        self.required_set == 0 && self.required_clear == 0
+    }
 }
 
 impl Requirements {
@@ -322,7 +516,12 @@ impl Requirements {
     /// with no DUT involved, said out loud.
     pub fn any() -> Self {
         let any = String::try_from(REQUIREMENT_ANY).expect("REQUIREMENT_ANY fits");
-        Requirements { dev_bench_version: any.clone(), firmware_version: any }
+        Requirements {
+            dev_bench_version: any.clone(),
+            firmware_version: any,
+            build: None,
+            outpost: None,
+        }
     }
 
     /// `POST /study`'s pre-flight check (decision 18): a blank
@@ -335,7 +534,49 @@ impl Requirements {
         if self.firmware_version.trim().is_empty() {
             return Err(RequirementsError::BlankFirmwareVersion);
         }
+        if let Some(build) = &self.build {
+            build.validate()?;
+        }
+        if let Some(outpost) = &self.outpost {
+            outpost.validate()?;
+        }
         Ok(())
+    }
+}
+
+/// Whether a study's outpost mode requirement is one this study could ever
+/// satisfy, given the taps it declares.
+///
+/// **A mode requirement with no outpost trace tap can never be met, and
+/// that is a typo rather than a run that fails informatively.** The flags
+/// byte arrives in the header frame of an outpost capture; a study that
+/// declares no such tap opens nothing to read it from, so the pre-flight
+/// has nothing to check and the requirement is a statement with no subject.
+/// Refusing it at submit is the difference between "you forgot the tap" at
+/// authoring time and a reset DUT timing out waiting for a frame nobody
+/// asked for.
+///
+/// Separate from [`Requirements::validate`] because it is the only rule
+/// here that needs a field outside `requires` — Core and an authoring UI
+/// both call it alongside, rather than each holding their own copy of the
+/// cross-check.
+pub fn outpost_requirement_is_satisfiable(
+    requires: &Requirements,
+    streams: &[StreamTap],
+) -> Result<(), RequirementsError> {
+    let Some(outpost) = &requires.outpost else {
+        return Ok(());
+    };
+    if outpost.is_empty() {
+        return Ok(());
+    }
+    let has_trace_tap = streams
+        .iter()
+        .any(|tap| matches!(tap.encoding, crate::streams::StreamEncoding::OutpostTrace));
+    if has_trace_tap {
+        Ok(())
+    } else {
+        Err(RequirementsError::OutpostRequirementWithoutTrace)
     }
 }
 
@@ -351,6 +592,21 @@ pub fn requirement_satisfied(required: &str, actual: &str) -> bool {
 pub enum RequirementsError {
     BlankDevBenchVersion,
     BlankFirmwareVersion,
+    /// A `build` axis was present but blank.
+    BlankBuildAxis,
+    /// A `build.snippets` entry was blank.
+    BlankSnippetName,
+    /// A `build.extra_args` entry was blank.
+    BlankBuildArg,
+    /// `build.snippets` mixes the reserved `"none"` literal with real names
+    /// (`embarch-api` decision 21).
+    MixedNoSnippetsLiteral,
+    /// `outpost` requires the same bit both set and clear.
+    ContradictoryOutpostFlags,
+    /// `outpost` declares a mode, but the study opens no outpost trace tap
+    /// to read a header frame from — see
+    /// [`outpost_requirement_is_satisfiable`].
+    OutpostRequirementWithoutTrace,
 }
 
 impl core::fmt::Display for RequirementsError {
@@ -358,6 +614,46 @@ impl core::fmt::Display for RequirementsError {
         let field = match self {
             RequirementsError::BlankDevBenchVersion => "dev_bench_version",
             RequirementsError::BlankFirmwareVersion => "firmware_version",
+            // The four below are not blank-version errors and each says its
+            // own thing; the shared sentence would be wrong for them.
+            RequirementsError::BlankBuildAxis => {
+                return write!(
+                    f,
+                    "requires.build names a board/variant/revision/app that is blank; omit the \
+                     field to leave that axis unnarrowed, which is not the same statement as \
+                     naming an empty one"
+                )
+            }
+            RequirementsError::BlankSnippetName => {
+                return write!(f, "requires.build.snippets contains a blank entry")
+            }
+            RequirementsError::BlankBuildArg => {
+                return write!(f, "requires.build.extra_args contains a blank entry")
+            }
+            RequirementsError::MixedNoSnippetsLiteral => {
+                return write!(
+                    f,
+                    "requires.build.snippets mixes the reserved literal \"{NO_SNIPPETS}\" with \
+                     real snippet names, which could mean either \"build with no snippets\" or \
+                     \"build with those\" — pass [\"{NO_SNIPPETS}\"] alone to force none over the \
+                     project's configured default_snippets, or pass just the names you want"
+                )
+            }
+            RequirementsError::ContradictoryOutpostFlags => {
+                return write!(
+                    f,
+                    "requires.outpost asks for the same flag bit both set and clear, which no \
+                     firmware can satisfy"
+                )
+            }
+            RequirementsError::OutpostRequirementWithoutTrace => {
+                return write!(
+                    f,
+                    "requires.outpost declares a trace mode, but this study opens no outpost \
+                     trace tap — the mode is read from that capture's header frame, so there \
+                     would be nothing to check it against"
+                )
+            }
         };
         write!(
             f,
@@ -777,6 +1073,10 @@ mod tests {
                 let with = r#"{"name":"s","requires":{"dev_bench_version":"any",
                     "firmware_version":"any"},"steps":[],"steps_crc":0}"#;
                 let study: Study = serde_json::from_str(with).unwrap();
+                // This equality is also what pins the 2026-09-18 additions
+                // as backward-compatible: `Requirements::any()` has
+                // `build: None, outpost: None`, so a saved study written
+                // before either field existed still parses to exactly it.
                 assert_eq!(study.requires, Requirements::any());
                 // `streams`, unlike `requires`, defaults: a saved study
                 // authored before taps existed captured nothing, and still
@@ -791,6 +1091,193 @@ mod tests {
             .unwrap()
             .join()
             .unwrap();
+    }
+
+    fn snippets(names: &[&str]) -> Vec<String<MAX_SNIPPET_NAME_LEN>, MAX_SNIPPETS_PER_BUILD> {
+        names.iter().map(|n| String::try_from(*n).unwrap()).collect()
+    }
+
+    fn spec_with(snippet_names: &[&str]) -> BuildSpec {
+        BuildSpec {
+            board: None,
+            variant: None,
+            revision: None,
+            app: None,
+            snippets: snippets(snippet_names),
+            extra_args: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_build_spec_that_narrows_nothing_is_legal() {
+        // Every axis `None` means "take the project's own default_target",
+        // which is the common case on a single-board bench — not an
+        // under-specified study.
+        let mut requires = Requirements::any();
+        requires.build = Some(spec_with(&[]));
+        assert_eq!(requires.validate(), Ok(()));
+    }
+
+    #[test]
+    fn a_blank_build_axis_is_not_the_same_as_an_absent_one() {
+        let mut spec = spec_with(&[]);
+        spec.board = Some(String::try_from("   ").unwrap());
+        let mut requires = Requirements::any();
+        requires.build = Some(spec);
+        assert_eq!(requires.validate(), Err(RequirementsError::BlankBuildAxis));
+    }
+
+    #[test]
+    fn a_blank_snippet_or_flag_is_refused() {
+        let mut requires = Requirements::any();
+        requires.build = Some(spec_with(&[""]));
+        assert_eq!(requires.validate(), Err(RequirementsError::BlankSnippetName));
+
+        let mut spec = spec_with(&[]);
+        spec.extra_args.push(String::try_from(" ").unwrap()).unwrap();
+        let mut requires = Requirements::any();
+        requires.build = Some(spec);
+        assert_eq!(requires.validate(), Err(RequirementsError::BlankBuildArg));
+    }
+
+    /// `embarch-api` decision 21's ambiguity, refused at authoring time
+    /// instead of at the moment the build starts.
+    #[test]
+    fn the_none_literal_mixed_with_real_names_is_refused_here_too() {
+        let mut requires = Requirements::any();
+        requires.build = Some(spec_with(&[NO_SNIPPETS, "ble-shell"]));
+        assert_eq!(requires.validate(), Err(RequirementsError::MixedNoSnippetsLiteral));
+
+        // Alone it is the legal way to say "no snippets over a configured
+        // default", so it must not be caught by the same rule.
+        let mut requires = Requirements::any();
+        requires.build = Some(spec_with(&[NO_SNIPPETS]));
+        assert_eq!(requires.validate(), Ok(()));
+    }
+
+    /// Two orderings of the same names are two different specs, because
+    /// west applies `-S` in order (reversals row 109). Nothing in this type
+    /// or its validation may normalise that away.
+    #[test]
+    fn snippet_order_is_part_of_the_spec() {
+        let forwards = spec_with(&["ble-shell", "outpost"]);
+        let backwards = spec_with(&["outpost", "ble-shell"]);
+        assert_ne!(forwards, backwards);
+        assert_eq!(forwards.validate(), Ok(()));
+        assert_eq!(backwards.validate(), Ok(()));
+    }
+
+    #[test]
+    fn an_outpost_requirement_reads_both_set_and_clear_bits() {
+        use crate::outpost::HeaderFlags;
+        let needs = OutpostModeRequirement {
+            required_set: HeaderFlags::TRACE_THREADS | HeaderFlags::TRACE_ISRS,
+            required_clear: HeaderFlags::TRACE_SELF,
+        };
+        assert_eq!(needs.validate(), Ok(()));
+
+        // Exactly right.
+        assert!(needs.satisfied_by(HeaderFlags::TRACE_THREADS | HeaderFlags::TRACE_ISRS));
+        // More than asked for, on a bit nobody named — still satisfied, and
+        // that is the third state doing its job.
+        assert!(needs.satisfied_by(
+            HeaderFlags::TRACE_THREADS | HeaderFlags::TRACE_ISRS | HeaderFlags::TRACE_GPIO
+        ));
+        // A required bit missing.
+        assert!(!needs.satisfied_by(HeaderFlags::TRACE_THREADS));
+        // **The clear half is the point**: this firmware traces everything
+        // asked for and also itself, which is what the study said it must
+        // not do.
+        assert!(!needs.satisfied_by(
+            HeaderFlags::TRACE_THREADS | HeaderFlags::TRACE_ISRS | HeaderFlags::TRACE_SELF
+        ));
+    }
+
+    #[test]
+    fn unmet_names_which_half_failed() {
+        use crate::outpost::HeaderFlags;
+        let needs = OutpostModeRequirement {
+            required_set: HeaderFlags::TRACE_THREADS | HeaderFlags::TRACE_MARKERS,
+            required_clear: HeaderFlags::TRACE_SELF,
+        };
+        let flags = HeaderFlags::TRACE_THREADS | HeaderFlags::TRACE_SELF;
+        assert_eq!(needs.unmet(flags), (HeaderFlags::TRACE_MARKERS, HeaderFlags::TRACE_SELF));
+        // Satisfied means nothing unmet, in both halves.
+        assert_eq!(
+            needs.unmet(HeaderFlags::TRACE_THREADS | HeaderFlags::TRACE_MARKERS),
+            (0, 0)
+        );
+    }
+
+    #[test]
+    fn a_bit_required_both_set_and_clear_has_no_satisfying_firmware() {
+        use crate::outpost::HeaderFlags;
+        let mut requires = Requirements::any();
+        requires.outpost = Some(OutpostModeRequirement {
+            required_set: HeaderFlags::TRACE_SELF,
+            required_clear: HeaderFlags::TRACE_SELF,
+        });
+        assert_eq!(requires.validate(), Err(RequirementsError::ContradictoryOutpostFlags));
+    }
+
+    #[test]
+    fn a_mode_requirement_needs_a_trace_tap_to_be_read_from() {
+        use crate::outpost::HeaderFlags;
+        use crate::streams::{StreamEncoding, StreamScope, StreamSource, StreamTap};
+
+        let mut requires = Requirements::any();
+        requires.outpost = Some(OutpostModeRequirement {
+            required_set: HeaderFlags::TRACE_THREADS,
+            required_clear: 0,
+        });
+
+        assert_eq!(
+            outpost_requirement_is_satisfiable(&requires, &[]),
+            Err(RequirementsError::OutpostRequirementWithoutTrace)
+        );
+
+        let trace = StreamTap {
+            id: 0,
+            name: String::try_from("trace").unwrap(),
+            source: StreamSource::Signal { name: String::try_from("outpost").unwrap() },
+            encoding: StreamEncoding::OutpostTrace,
+            scope: StreamScope::WholeStudy,
+        };
+        assert_eq!(
+            outpost_requirement_is_satisfiable(&requires, core::slice::from_ref(&trace)),
+            Ok(())
+        );
+
+        // A tap that is not a trace does not supply a header frame.
+        let mut text = trace;
+        text.encoding = StreamEncoding::Text;
+        assert_eq!(
+            outpost_requirement_is_satisfiable(&requires, &[text]),
+            Err(RequirementsError::OutpostRequirementWithoutTrace)
+        );
+
+        // And a requirement that asks for nothing is not a requirement, so
+        // it needs no tap.
+        let mut empty = Requirements::any();
+        empty.outpost = Some(OutpostModeRequirement { required_set: 0, required_clear: 0 });
+        assert_eq!(outpost_requirement_is_satisfiable(&empty, &[]), Ok(()));
+        assert_eq!(outpost_requirement_is_satisfiable(&Requirements::any(), &[]), Ok(()));
+    }
+
+    /// One bit-to-name table, so a refusal in Core and a picker in the UI
+    /// cannot disagree about what a flag is called.
+    #[test]
+    fn every_header_flag_bit_is_named_exactly_once() {
+        use crate::outpost::HeaderFlags;
+        let mut covered = 0u8;
+        for (bit, name) in HeaderFlags::NAMED {
+            assert_eq!(bit.count_ones(), 1, "{name} is not a single bit");
+            assert_eq!(covered & bit, 0, "{name} repeats a bit already named");
+            covered |= bit;
+            assert_eq!(HeaderFlags::bit(name), Some(bit));
+        }
+        assert_eq!(covered, 0xFF, "the table does not cover the whole flags byte");
+        assert_eq!(HeaderFlags::bit("trace_everything"), None);
     }
 }
 

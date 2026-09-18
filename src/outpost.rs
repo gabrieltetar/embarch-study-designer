@@ -238,6 +238,43 @@ impl HeaderFlags {
     /// thread never ran" would be deriving a firmware build option from a
     /// measurement, which is the class of thing decision 35 forbids.
     pub const TRACE_SELF: u8 = 1 << 7;
+
+    /// Every bit above, paired with the name a human reads it by — the
+    /// spelling used in a study's declaration, in a pre-flight refusal, and
+    /// in the picker that authors one.
+    ///
+    /// **One table, because the alternative is three.** A mode requirement
+    /// is authored in `embarch-ui`, checked in `embarch-core`, and stored
+    /// in a `Study`; each of those would otherwise carry its own `match`
+    /// from bit to label, and the one that fell behind would name a flag
+    /// wrongly in exactly the message an engineer is reading because
+    /// something already went wrong.
+    ///
+    /// Ordered by bit position, so a renderer walking it produces the byte
+    /// in its natural reading order rather than an arbitrary one.
+    pub const NAMED: [(u8, &'static str); 8] = [
+        (Self::TRACE_THREADS, "trace_threads"),
+        (Self::TRACE_ISRS, "trace_isrs"),
+        (Self::TRACE_IDLE, "trace_idle"),
+        (Self::TRACE_MARKERS, "trace_markers"),
+        (Self::ISR_IDENTIFY, "isr_identify"),
+        (Self::OVERFLOW_BLOCK, "overflow_block"),
+        (Self::TRACE_GPIO, "trace_gpio"),
+        (Self::TRACE_SELF, "trace_self"),
+    ];
+
+    /// The bit a name in [`HeaderFlags::NAMED`] stands for, or `None` for a
+    /// name this build does not know.
+    ///
+    /// Unknown is deliberately not "zero": a declaration naming a flag that
+    /// does not exist must be refused, and folding it into an all-clear
+    /// mask would make it silently satisfiable by every firmware.
+    pub fn bit(name: &str) -> Option<u8> {
+        Self::NAMED
+            .iter()
+            .find(|(_, known)| *known == name)
+            .map(|(bit, _)| *bit)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

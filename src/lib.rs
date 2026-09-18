@@ -311,6 +311,24 @@ mod tests {
         demanding.requires = Requirements {
             dev_bench_version: heapless::String::try_from("g-dev-bench-9f9f9f9f").unwrap(),
             firmware_version: heapless::String::try_from("g-dut-1a1a1a1a-dirty").unwrap(),
+            // The two host-only additions of 2026-09-18 differ too, so this
+            // test covers them the same way it covers the version strings:
+            // neither may reach dev-bench.
+            build: Some(crate::study::BuildSpec {
+                board: Some(heapless::String::try_from("nrf54l15dk/nrf54l15/cpuapp").unwrap()),
+                variant: None,
+                revision: None,
+                app: Some(heapless::String::try_from("widget").unwrap()),
+                snippets: heapless::Vec::from_slice(&[
+                    heapless::String::try_from("ble-shell").unwrap(),
+                ])
+                .unwrap(),
+                extra_args: heapless::Vec::new(),
+            }),
+            outpost: Some(crate::study::OutpostModeRequirement {
+                required_set: crate::outpost::HeaderFlags::TRACE_THREADS,
+                required_clear: crate::outpost::HeaderFlags::TRACE_SELF,
+            }),
         };
         assert_ne!(plain.requires, demanding.requires, "the two studies must actually differ");
         assert_eq!(plain.steps_crc, demanding.steps_crc);
