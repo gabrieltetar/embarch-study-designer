@@ -576,9 +576,22 @@ pub enum Action {
     /// `StreamEncoding::Struct { decoder }` uses against `Study.decoders`
     /// (decision 52) — and `entry_state` indexes that protocol's own
     /// `states`, so one manifest can be entered at more than one point
-    /// without a firmware comparing strings. Both are range-checked by
-    /// [`crate::eap::validate_protocol`] and by Core's pre-flight, before
-    /// either reaches a hand-written C array subscript.
+    /// without a firmware comparing strings.
+    ///
+    /// **Neither index is checked by [`crate::eap::validate_protocol`]**,
+    /// which never sees an `Action`: it takes a `ProtocolDef` and checks
+    /// that protocol's own internal references (frame sources, `goto`
+    /// targets, session variables). An earlier version of this comment
+    /// claimed it range-checked both of these, which it could not have.
+    /// What does check them, both before either reaches a hand-written C
+    /// array subscript:
+    ///
+    /// - `study_builder::build_study`, which resolves both from names an
+    ///   author picked and therefore cannot emit an out-of-range index in
+    ///   the first place, and which additionally refuses a terminal entry
+    ///   state.
+    /// - Core's own pre-flight, which range-checks a submitted `Study`
+    ///   however it was authored — including one written by hand.
     RunProtocol { protocol: u8, entry_state: u8 },
 }
 

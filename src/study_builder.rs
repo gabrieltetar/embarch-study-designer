@@ -22,8 +22,8 @@ use crate::bounded::Bounded;
 use crate::gatt::GattTarget;
 use crate::ids::Uuid;
 use crate::limits::{
-    MAX_LOCAL_NAME_LEN, MAX_MONITOR_TARGETS, MAX_NAME_LEN, MAX_PAYLOAD_LEN, MAX_STEPS_PER_STUDY,
-    MAX_STUDY_NAME_LEN,
+    MAX_LOCAL_NAME_LEN, MAX_MONITOR_TARGETS, MAX_NAME_LEN, MAX_PAYLOAD_LEN,
+    MAX_PROTOCOLS_PER_STUDY, MAX_STEPS_PER_STUDY, MAX_STUDY_NAME_LEN,
 };
 use crate::registry::{ActionRegistry, RegisteredAction, RegisteredOperation};
 use crate::study::{Action, BleRole, GattOperation, Requirements, BleSecurityLevel, Step, Study};
@@ -65,6 +65,16 @@ pub enum BuiltInActionKind {
     GattMonitorSelected,
     /// decision 53.
     GattMonitorSelectedStart,
+    /// decision 60 — takes `protocol` and `entry_state` from the same
+    /// [`RowAction::BuiltIn`] row, exactly as decision 44 took
+    /// `security_level` and decision 53 took `targets`.
+    ///
+    /// **A served built-in rather than a `RowAction` variant of its own.**
+    /// Every other authoring choice this row makes is a field beside
+    /// `which`, and a picker built from [`Self::ALL`] costs a browser
+    /// nothing to offer one more entry. Lowering stays in `resolve_action`,
+    /// where every other row lowers.
+    RunProtocol,
 }
 
 impl BuiltInActionKind {
@@ -79,11 +89,18 @@ impl BuiltInActionKind {
     /// characteristics a study is actually about. `GattMonitorStop` last,
     /// since it closes whatever any of them opened.
     ///
+    /// `RunProtocol` goes **after** `GattMonitorSelectedStart` and **before**
+    /// `GattMonitorStop` by that same logic: a protocol run is normally
+    /// bracketed by a capture window — the machine drives the control point
+    /// while the monitor records what comes back on the data characteristic
+    /// — so it is reached for after the step that opens one and before the
+    /// step that closes it.
+    ///
     /// `DataExchange` is deliberately absent: authoring one directly means
     /// already knowing a raw UUID and payload, which is exactly what
     /// decisions 34/35 exist to avoid requiring. It is still a real
     /// `study::Action`, just not a one-click row choice.
-    pub const ALL: [BuiltInActionKind; 9] = [
+    pub const ALL: [BuiltInActionKind; 10] = [
         BuiltInActionKind::BleConnect,
         BuiltInActionKind::BleSecurity,
         BuiltInActionKind::BleUnbond,
@@ -92,6 +109,7 @@ impl BuiltInActionKind {
         BuiltInActionKind::GattMonitorStart,
         BuiltInActionKind::GattMonitorSelected,
         BuiltInActionKind::GattMonitorSelectedStart,
+        BuiltInActionKind::RunProtocol,
         BuiltInActionKind::GattMonitorStop,
     ];
 
@@ -120,6 +138,9 @@ impl BuiltInActionKind {
             }
             BuiltInActionKind::GattMonitorSelectedStart => {
                 "GattMonitorSelectedStart — open a capture window on chosen characteristics"
+            }
+            BuiltInActionKind::RunProtocol => {
+                "RunProtocol — hand the link to a declared .eap state machine"
             }
             BuiltInActionKind::GattMonitorStop => {
                 "GattMonitorStop — close the capture window"
@@ -174,6 +195,36 @@ pub enum RowAction {
         /// everything is exactly the flood this action exists to avoid.
         #[serde(default)]
         targets: Vec<TargetInput>,
+        /// Only meaningful for `RunProtocol` — which declared protocol this
+        /// step hands the link to (decision 60).
+        ///
+        /// **By name, not by index and not by file.** The name is enough
+        /// because `eap_repo::RepoProtocols::defs` refuses a repo
+        /// whose `.eap` files declare the same protocol name twice, so
+        /// within one firmware repo a name resolves to exactly one block.
+        /// Carrying the *index* instead would make a saved study depend on
+        /// how many protocols happened to precede it in whatever list built
+        /// it — a study that silently means something else after an
+        /// unrelated row is deleted.
+        ///
+        /// Absent or blank is refused ([`BuildStudyError::NoProtocolNamed`]),
+        /// the same way a selective monitor naming no characteristic is:
+        /// there is no defensible default protocol.
+        #[serde(default)]
+        protocol: Option<String>,
+        /// Only meaningful for `RunProtocol` — which of that protocol's
+        /// states the run starts in, by name (decision 60).
+        ///
+        /// Absent means the protocol's **first declared state**, which is
+        /// how a manifest is normally entered and what an author who has
+        /// only ever written one entry point means. `entry_state` exists so
+        /// one manifest can be entered at more than one point; an author who
+        /// wants the second point says so.
+        ///
+        /// A terminal state is refused even when it is the first one — see
+        /// [`BuildStudyError::EntryStateIsTerminal`].
+        #[serde(default)]
+        entry_state: Option<String>,
     },
     /// References a `RegisteredAction` by name, plus — for a `Write` — which
     /// value the engineer picked per field: field name -> that field's
@@ -294,6 +345,30 @@ pub enum BuildStudyError {
         operation: RegisteredOperation,
         properties: u8,
     },
+    /// A `RunProtocol` row that names no protocol. The sibling of
+    /// [`Self::NoMonitorTargets`], and refused for the same reason: there is
+    /// no defensible default, so an unset picker is the not-thought-about
+    /// case rather than a choice.
+    NoProtocolNamed,
+    /// A `RunProtocol` row names a protocol no `.eap` file in this repo
+    /// declares — a typo, a deleted file, or a saved study loaded against a
+    /// different repo.
+    UnknownProtocol { name: String, known: Vec<String> },
+    /// The rows between them name more distinct protocols than one study
+    /// carries ([`crate::limits::MAX_PROTOCOLS_PER_STUDY`]).
+    TooManyProtocols { max: usize, actual: usize, named: Vec<String> },
+    /// A `RunProtocol` row names an entry state that protocol does not
+    /// declare — most often a state renamed in the `.eap` after the study
+    /// was saved.
+    UnknownEntryState { protocol: String, state: String, known: Vec<String> },
+    /// The entry state exists and is terminal, so the run would reach its
+    /// outcome without doing anything.
+    ///
+    /// Refused rather than run, in decision 15's shape: a step that passes
+    /// instantly and captures nothing is worse than one that does not run,
+    /// because it reports success. This is the first caller
+    /// [`crate::eap::ProtocolError::EntryStateIsTerminal`] has ever had.
+    EntryStateIsTerminal { protocol: String, state: String },
 }
 
 impl std::fmt::Display for BuildStudyError {
@@ -360,11 +435,46 @@ impl std::fmt::Display for BuildStudyError {
                 "{service}/{characteristic} doesn't declare {operation:?} \
                  (its properties byte is {properties:#04x})"
             ),
+            BuildStudyError::NoProtocolNamed => write!(
+                f,
+                "a RunProtocol step names no protocol; pick one of this repo's .eap protocols"
+            ),
+            BuildStudyError::UnknownProtocol { name, known } => write!(
+                f,
+                "no .eap protocol named '{name}' in this repo ({})",
+                list_or_none(known, "this repo declares no protocols")
+            ),
+            BuildStudyError::TooManyProtocols { max, actual, named } => write!(
+                f,
+                "this study's steps name {actual} distinct protocols ({}), but one study \
+                 carries at most {max}",
+                named.join(", ")
+            ),
+            BuildStudyError::UnknownEntryState { protocol, state, known } => write!(
+                f,
+                "protocol '{protocol}' has no state named '{state}' ({})",
+                list_or_none(known, "it declares no states")
+            ),
+            BuildStudyError::EntryStateIsTerminal { protocol, state } => write!(
+                f,
+                "'{state}' is a terminal state of protocol '{protocol}', so the run would \
+                 reach its outcome immediately and capture nothing"
+            ),
         }
     }
 }
 
 impl std::error::Error for BuildStudyError {}
+
+/// `known: a, b, c` or a sentence saying there are none — so an error about
+/// a name nothing matches never reads `(known: )`.
+fn list_or_none(known: &[String], empty: &str) -> String {
+    if known.is_empty() {
+        empty.to_string()
+    } else {
+        format!("known: {}", known.join(", "))
+    }
+}
 
 fn heapless_string<const N: usize>(
     value: &str,
@@ -377,24 +487,48 @@ fn heapless_string<const N: usize>(
     })
 }
 
-/// Builds a real `Study` from a submitted table. `steps_crc` is left `0` —
-/// whichever `embarch-api` call actually submits this `Study`
-/// (`run-study`/`run_study`) recomputes and overwrites it unconditionally
+/// Builds a real `Study` from a submitted table. All three seals are left
+/// `0` — whichever `embarch-api` call actually submits this `Study`
+/// (`run-study`/`run_study`) recomputes and overwrites them unconditionally
 /// regardless of what's given (decision 26), so there's
-/// nothing for this offline function to compute it against yet.
+/// nothing for this offline function to compute them against yet.
+///
+/// `protocols` is everything this firmware repo's `.eap` files declare —
+/// typically `eap_repo::RepoProtocols::defs` (that module is behind the
+/// `eap-parse` feature, which this one does not imply). It is a **catalogue
+/// to resolve against, not the study's own list**: what a study carries is
+/// derived here, from the rows, as the distinct protocols its `RunProtocol`
+/// steps name, in first-mention order.
+///
+/// **Derived rather than authored, on purpose.** `Study.protocols` is by
+/// definition what a `RunProtocol` step can reach, so a separately-authored
+/// list could only ever be a write-ahead copy of one that is already
+/// implied — which is the staleness pattern
+/// `embarch-decision-reversals.md` row 37 exists to reject. Carrying every
+/// protocol in the repo instead would blow past
+/// [`MAX_PROTOCOLS_PER_STUDY`] on a repo with three handshakes and would
+/// change a study's bytes when an unrelated file is added.
 pub fn build_study(
     study_name: &str,
     requires: Requirements,
     rows: &[TableRow],
     registry: &ActionRegistry,
+    protocols: &[crate::eap::ProtocolDef],
 ) -> Result<Study, BuildStudyError> {
     if rows.len() > MAX_STEPS_PER_STUDY {
         return Err(BuildStudyError::TooManySteps { max: MAX_STEPS_PER_STUDY, actual: rows.len() });
     }
 
+    // First pass: which protocols do the rows name, in first-mention order.
+    // Done before the row loop because `resolve_action` lowers a name to an
+    // index into *this* list, so the list has to exist first -- and because
+    // "more than two distinct protocols" is a property of the table, not of
+    // any one row, so no per-row check could find it.
+    let carried = carried_protocols(rows, protocols)?;
+
     let mut steps: crate::bounded::StepList = crate::bounded::StepList::new();
     for row in rows {
-        let action = resolve_action(&row.action, registry)?;
+        let action = resolve_action(&row.action, registry, &carried)?;
         let step = Step {
             name: heapless_string::<MAX_NAME_LEN>(&row.name, "step name")?,
             action,
@@ -408,8 +542,20 @@ pub fn build_study(
         let _ = steps.push(step);
     }
 
+    let mut study_protocols: Bounded<crate::eap::ProtocolDef, MAX_PROTOCOLS_PER_STUDY> =
+        Bounded::new();
+    for def in &carried {
+        // Capacity checked in `carried_protocols`, so this cannot fail.
+        let _ = study_protocols.push((*def).clone());
+    }
+
     Ok(Study {
-        protocols: Default::default(),
+        protocols: study_protocols,
+        // The third seal, left 0 exactly as its two siblings below are, and
+        // for the same reason (decision 26): the seal belongs to whoever
+        // submits. Pinned by a test, because a builder that "helpfully"
+        // sealed here would be the one place a study could be built sealed
+        // and then mutated.
         protocols_crc: 0,
         name: heapless_string::<MAX_STUDY_NAME_LEN>(study_name, "study name")?,
         // Taken from the caller rather than defaulted here on purpose
@@ -480,9 +626,120 @@ fn resolve_targets(
     Ok(out)
 }
 
-fn resolve_action(row_action: &RowAction, registry: &ActionRegistry) -> Result<Action, BuildStudyError> {
+/// The distinct protocols this table's `RunProtocol` rows name, in
+/// first-mention order, resolved against the repo's catalogue.
+///
+/// First-mention order rather than the catalogue's, so a study's carried
+/// list is a property of the study and not of how its repo's files happen to
+/// be sorted.
+fn carried_protocols<'a>(
+    rows: &[TableRow],
+    protocols: &'a [crate::eap::ProtocolDef],
+) -> Result<Vec<&'a crate::eap::ProtocolDef>, BuildStudyError> {
+    let mut carried: Vec<&crate::eap::ProtocolDef> = Vec::new();
+    let mut named: Vec<String> = Vec::new();
+    for row in rows {
+        let RowAction::BuiltIn { which: BuiltInActionKind::RunProtocol, protocol, .. } = &row.action
+        else {
+            continue;
+        };
+        let name = match protocol.as_deref().map(str::trim) {
+            None | Some("") => return Err(BuildStudyError::NoProtocolNamed),
+            Some(name) => name,
+        };
+        if named.iter().any(|n| n == name) {
+            continue;
+        }
+        let def = protocols.iter().find(|p| p.name.as_str() == name).ok_or_else(|| {
+            BuildStudyError::UnknownProtocol {
+                name: name.to_string(),
+                known: protocols.iter().map(|p| p.name.to_string()).collect(),
+            }
+        })?;
+        named.push(name.to_string());
+        carried.push(def);
+    }
+    if carried.len() > MAX_PROTOCOLS_PER_STUDY {
+        return Err(BuildStudyError::TooManyProtocols {
+            max: MAX_PROTOCOLS_PER_STUDY,
+            actual: carried.len(),
+            named,
+        });
+    }
+    Ok(carried)
+}
+
+/// Lowers a `RunProtocol` row's two names into the pair of indices
+/// [`Action::RunProtocol`] carries.
+///
+/// Both are indices on the wire so a hand-written C interpreter compares no
+/// strings; both are names here so a saved study does not depend on list
+/// position. This function is the whole of the conversion.
+fn resolve_run_protocol(
+    protocol: &Option<String>,
+    entry_state: &Option<String>,
+    carried: &[&crate::eap::ProtocolDef],
+) -> Result<Action, BuildStudyError> {
+    let name = match protocol.as_deref().map(str::trim) {
+        None | Some("") => return Err(BuildStudyError::NoProtocolNamed),
+        Some(name) => name,
+    };
+    // `carried_protocols` already refused an unknown name, so this lookup
+    // cannot miss -- but it is written as a lookup rather than an index
+    // handed in, so the two passes cannot drift apart silently.
+    let index = carried
+        .iter()
+        .position(|p| p.name.as_str() == name)
+        .ok_or_else(|| BuildStudyError::UnknownProtocol {
+            name: name.to_string(),
+            known: carried.iter().map(|p| p.name.to_string()).collect(),
+        })?;
+    let def = carried[index];
+
+    let state_index = match entry_state.as_deref().map(str::trim) {
+        // The first declared state: how a manifest is normally entered.
+        None | Some("") => 0usize,
+        Some(state) => def
+            .states
+            .iter()
+            .position(|s| s.name.as_str() == state)
+            .ok_or_else(|| BuildStudyError::UnknownEntryState {
+                protocol: name.to_string(),
+                state: state.to_string(),
+                known: def.states.iter().map(|s| s.name.to_string()).collect(),
+            })?,
+    };
+
+    let state = def.states.get(state_index).ok_or_else(|| BuildStudyError::UnknownEntryState {
+        protocol: name.to_string(),
+        state: entry_state.clone().unwrap_or_default(),
+        known: def.states.iter().map(|s| s.name.to_string()).collect(),
+    })?;
+    if matches!(state.kind, crate::eap::StateKind::Terminal(_)) {
+        return Err(BuildStudyError::EntryStateIsTerminal {
+            protocol: name.to_string(),
+            state: state.name.to_string(),
+        });
+    }
+
+    Ok(Action::RunProtocol { protocol: index as u8, entry_state: state_index as u8 })
+}
+
+fn resolve_action(
+    row_action: &RowAction,
+    registry: &ActionRegistry,
+    carried: &[&crate::eap::ProtocolDef],
+) -> Result<Action, BuildStudyError> {
     match row_action {
-        RowAction::BuiltIn { which, role, target_name, security_level, targets } => Ok(match which {
+        RowAction::BuiltIn {
+            which,
+            role,
+            target_name,
+            security_level,
+            targets,
+            protocol,
+            entry_state,
+        } => Ok(match which {
             BuiltInActionKind::BleConnect => Action::BleConnect {
                 role: match role {
                     RoleChoice::Central => BleRole::Central,
@@ -514,6 +771,9 @@ fn resolve_action(row_action: &RowAction, registry: &ActionRegistry) -> Result<A
             }
             BuiltInActionKind::GattMonitorSelectedStart => {
                 Action::GattMonitorSelectedStart { targets: resolve_targets(targets)? }
+            }
+            BuiltInActionKind::RunProtocol => {
+                resolve_run_protocol(protocol, entry_state, carried)?
             }
         }),
         RowAction::Registered { name, field_choices } => {
@@ -747,6 +1007,8 @@ mod tests {
                 role: RoleChoice::Central,
                 target_name: None,
                 security_level: None,
+                protocol: None,
+                entry_state: None,
             },
             timeout_ms: 1_000,
             continue_on_fail: false,
@@ -782,6 +1044,8 @@ mod tests {
                     role: RoleChoice::Central,
                     target_name: None,
                     security_level: None,
+                    protocol: None,
+                    entry_state: None,
                 },
                 timeout_ms: 1_000,
                 continue_on_fail: false,
@@ -807,6 +1071,8 @@ mod tests {
                 role: RoleChoice::Central,
                 target_name: None,
                 security_level: None,
+                protocol: None,
+                entry_state: None,
             },
             timeout_ms: 1_000,
             continue_on_fail: false,
@@ -833,7 +1099,15 @@ mod tests {
         rows: &[TableRow],
         registry: &ActionRegistry,
     ) -> Result<Study, BuildStudyError> {
-        super::build_study(study_name, Requirements::any(), rows, registry)
+        super::build_study(study_name, Requirements::any(), rows, registry, &[])
+    }
+
+    /// The same shim with a protocol catalogue, for the `RunProtocol` tests.
+    fn build_study_with(
+        rows: &[TableRow],
+        protocols: &[crate::eap::ProtocolDef],
+    ) -> Result<Study, BuildStudyError> {
+        super::build_study("s", Requirements::any(), rows, &ActionRegistry::default(), protocols)
     }
 
     fn uuid(byte: u8) -> Uuid {
@@ -871,6 +1145,8 @@ mod tests {
                     role: RoleChoice::Central,
                     target_name: None,
                     security_level: None,
+                    protocol: None,
+                    entry_state: None,
                 },
                 timeout_ms: 10_000,
                 continue_on_fail: false,
@@ -884,6 +1160,8 @@ mod tests {
                     role: RoleChoice::Central,
                     target_name: None,
                     security_level: None,
+                    protocol: None,
+                    entry_state: None,
                 },
                 timeout_ms: 5_000,
                 continue_on_fail: false,
@@ -908,6 +1186,8 @@ mod tests {
                 role: RoleChoice::Central,
                 target_name: None,
                 security_level: Some(BleSecurityLevel::L2),
+                protocol: None,
+                entry_state: None,
             },
             timeout_ms: 10_000,
             continue_on_fail: false,
@@ -932,6 +1212,8 @@ mod tests {
                 role: RoleChoice::Central,
                 target_name: None,
                 security_level: Some(BleSecurityLevel::L1),
+                protocol: None,
+                entry_state: None,
             },
             timeout_ms: 5_000,
             continue_on_fail: false,
@@ -945,7 +1227,7 @@ mod tests {
     fn built_in_ble_connect_defaults_to_central_role() {
         let rows = vec![TableRow {
             name: "connect".to_string(),
-            action: RowAction::BuiltIn { targets: Vec::new(), which: BuiltInActionKind::BleConnect, role: RoleChoice::Central , target_name: None, security_level: None },
+            action: RowAction::BuiltIn { targets: Vec::new(), which: BuiltInActionKind::BleConnect, role: RoleChoice::Central , target_name: None, security_level: None, protocol: None, entry_state: None },
             timeout_ms: 20_000,
             continue_on_fail: false,
             delay_before_ms: 0,
@@ -966,14 +1248,14 @@ mod tests {
         let rows = vec![
             TableRow {
                 name: "discover".to_string(),
-                action: RowAction::BuiltIn { targets: Vec::new(), which: BuiltInActionKind::GattDiscover, role: RoleChoice::Central , target_name: None, security_level: None },
+                action: RowAction::BuiltIn { targets: Vec::new(), which: BuiltInActionKind::GattDiscover, role: RoleChoice::Central , target_name: None, security_level: None, protocol: None, entry_state: None },
                 timeout_ms: 15_000,
                 continue_on_fail: false,
                 delay_before_ms: 0,
             },
             TableRow {
                 name: "monitor".to_string(),
-                action: RowAction::BuiltIn { targets: Vec::new(), which: BuiltInActionKind::GattMonitorAll, role: RoleChoice::Central , target_name: None, security_level: None },
+                action: RowAction::BuiltIn { targets: Vec::new(), which: BuiltInActionKind::GattMonitorAll, role: RoleChoice::Central , target_name: None, security_level: None, protocol: None, entry_state: None },
                 timeout_ms: 15_000,
                 continue_on_fail: false,
                 delay_before_ms: 0,
@@ -1394,6 +1676,8 @@ mod tests {
                     role: RoleChoice::Central,
                     target_name: None,
                     security_level: None,
+                    protocol: None,
+                    entry_state: None,
                 },
                 timeout_ms: 10_000,
                 continue_on_fail: false,
@@ -1407,6 +1691,8 @@ mod tests {
                     role: RoleChoice::Central,
                     target_name: None,
                     security_level: None,
+                    protocol: None,
+                    entry_state: None,
                 },
                 timeout_ms: 5_000,
                 continue_on_fail: false,
@@ -1423,7 +1709,7 @@ mod tests {
         let rows: Vec<TableRow> = (0..MAX_STEPS_PER_STUDY + 1)
             .map(|i| TableRow {
                 name: format!("s{i}"),
-                action: RowAction::BuiltIn { targets: Vec::new(), which: BuiltInActionKind::GattDiscover, role: RoleChoice::Central , target_name: None, security_level: None },
+                action: RowAction::BuiltIn { targets: Vec::new(), which: BuiltInActionKind::GattDiscover, role: RoleChoice::Central , target_name: None, security_level: None, protocol: None, entry_state: None },
                 timeout_ms: 1_000,
                 continue_on_fail: false,
                 delay_before_ms: 0,
@@ -1453,7 +1739,7 @@ mod tests {
     fn round_trip_body() {
         let rows = vec![TableRow {
             name: "connect".to_string(),
-            action: RowAction::BuiltIn { targets: Vec::new(), which: BuiltInActionKind::BleConnect, role: RoleChoice::Central , target_name: None, security_level: None },
+            action: RowAction::BuiltIn { targets: Vec::new(), which: BuiltInActionKind::BleConnect, role: RoleChoice::Central , target_name: None, security_level: None, protocol: None, entry_state: None },
             timeout_ms: 20_000,
             continue_on_fail: false,
             delay_before_ms: 0,
@@ -1661,7 +1947,7 @@ mod tests {
     fn delay_before_ms_is_covered_by_steps_crc() {
         let mut row = TableRow {
             name: "connect".to_string(),
-            action: RowAction::BuiltIn { targets: Vec::new(), which: BuiltInActionKind::BleConnect, role: RoleChoice::Central , target_name: None, security_level: None },
+            action: RowAction::BuiltIn { targets: Vec::new(), which: BuiltInActionKind::BleConnect, role: RoleChoice::Central , target_name: None, security_level: None, protocol: None, entry_state: None },
             timeout_ms: 20_000,
             continue_on_fail: false,
             delay_before_ms: 0,
@@ -1686,6 +1972,8 @@ mod tests {
                 role: RoleChoice::Central,
                 target_name: target_name.map(str::to_string),
                 security_level: None,
+                protocol: None,
+                entry_state: None,
             },
             timeout_ms: 20_000,
             continue_on_fail: false,
@@ -1764,6 +2052,8 @@ mod tests {
                 role: RoleChoice::Central,
                 target_name: Some("the client S11".to_string()),
                 security_level: None,
+                protocol: None,
+                entry_state: None,
             },
             timeout_ms: 10_000,
             continue_on_fail: false,
@@ -1771,5 +2061,257 @@ mod tests {
         };
         let study = build_study("s", &[row], &ActionRegistry::default()).unwrap();
         assert_eq!(study.steps[0].action, Action::GattMonitorStart {});
+    }
+
+    // --- RunProtocol (decision 60) -------------------------------------
+
+    fn protocol_def(name: &str, states: &[(&str, bool)]) -> crate::eap::ProtocolDef {
+        let mut out: Bounded<crate::eap::StateDef, { crate::limits::MAX_STATES_PER_PROTOCOL }> =
+            Bounded::new();
+        for (state, terminal) in states {
+            out.push(crate::eap::StateDef {
+                name: heapless::String::try_from(*state).unwrap(),
+                kind: if *terminal {
+                    crate::eap::StateKind::Terminal(crate::eap::TerminalOutcome::Pass)
+                } else {
+                    crate::eap::StateKind::Active(crate::eap::ActiveState {
+                        on_enter: None,
+                        on_event: HVec::new(),
+                        on_timeout: None,
+                    })
+                },
+            })
+            .unwrap();
+        }
+        crate::eap::ProtocolDef {
+            name: heapless::String::try_from(name).unwrap(),
+            sources: HVec::new(),
+            frames: HVec::new(),
+            session: HVec::new(),
+            states: out,
+        }
+    }
+
+    fn run_row(protocol: Option<&str>, entry_state: Option<&str>) -> TableRow {
+        TableRow {
+            name: "handshake".to_string(),
+            action: RowAction::BuiltIn {
+                targets: Vec::new(),
+                which: BuiltInActionKind::RunProtocol,
+                role: RoleChoice::Central,
+                target_name: None,
+                security_level: None,
+                protocol: protocol.map(str::to_string),
+                entry_state: entry_state.map(str::to_string),
+            },
+            timeout_ms: 30_000,
+            continue_on_fail: false,
+            delay_before_ms: 0,
+        }
+    }
+
+    /// The carried list is derived from the rows, not from the catalogue:
+    /// a repo with three protocols and a study naming one carries one.
+    #[test]
+    fn the_study_carries_only_the_protocols_its_rows_name() {
+        let repo = [
+            protocol_def("unused", &[("go", false), ("done", true)]),
+            protocol_def("bds", &[("start", false), ("done", true)]),
+            protocol_def("also-unused", &[("go", false), ("done", true)]),
+        ];
+        let study = build_study_with(&[run_row(Some("bds"), Some("start"))], &repo).unwrap();
+        assert_eq!(study.protocols.len(), 1);
+        assert_eq!(study.protocols[0].name.as_str(), "bds");
+        assert_eq!(
+            study.steps[0].action,
+            Action::RunProtocol { protocol: 0, entry_state: 0 }
+        );
+    }
+
+    /// Two rows naming one protocol carry it once, and the second row's
+    /// index points at that one copy. Duplicated carriage would blow the
+    /// two-protocol cap on a study that names two.
+    #[test]
+    fn two_rows_naming_one_protocol_carry_it_once() {
+        let repo = [protocol_def("bds", &[("start", false), ("mid", false), ("done", true)])];
+        let study = build_study_with(
+            &[run_row(Some("bds"), Some("start")), run_row(Some("bds"), Some("mid"))],
+            &repo,
+        )
+        .unwrap();
+        assert_eq!(study.protocols.len(), 1);
+        assert_eq!(study.steps[0].action, Action::RunProtocol { protocol: 0, entry_state: 0 });
+        assert_eq!(study.steps[1].action, Action::RunProtocol { protocol: 0, entry_state: 1 });
+    }
+
+    /// First-mention order, not catalogue order — a study's carried list is
+    /// a property of the study, not of how its repo's files sort.
+    #[test]
+    fn the_carried_list_is_in_first_mention_order() {
+        let repo = [
+            protocol_def("alpha", &[("go", false), ("done", true)]),
+            protocol_def("beta", &[("go", false), ("done", true)]),
+        ];
+        let study =
+            build_study_with(&[run_row(Some("beta"), None), run_row(Some("alpha"), None)], &repo)
+                .unwrap();
+        assert_eq!(study.protocols[0].name.as_str(), "beta");
+        assert_eq!(study.protocols[1].name.as_str(), "alpha");
+        assert_eq!(study.steps[0].action, Action::RunProtocol { protocol: 0, entry_state: 0 });
+        assert_eq!(study.steps[1].action, Action::RunProtocol { protocol: 1, entry_state: 0 });
+    }
+
+    /// An absent entry state is the protocol's first declared state.
+    #[test]
+    fn an_absent_entry_state_is_the_first_declared_state() {
+        let repo = [protocol_def("bds", &[("start", false), ("done", true)])];
+        for entry in [None, Some("")] {
+            let study = build_study_with(&[run_row(Some("bds"), entry)], &repo).unwrap();
+            assert_eq!(study.steps[0].action, Action::RunProtocol { protocol: 0, entry_state: 0 });
+        }
+    }
+
+    #[test]
+    fn a_row_naming_no_protocol_is_refused() {
+        let repo = [protocol_def("bds", &[("go", false), ("done", true)])];
+        for missing in [None, Some(""), Some("  ")] {
+            let err = build_study_with(&[run_row(missing, None)], &repo).unwrap_err();
+            assert_eq!(err, BuildStudyError::NoProtocolNamed);
+            assert_eq!(
+                err.to_string(),
+                "a RunProtocol step names no protocol; pick one of this repo's .eap protocols"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unknown_protocol_is_refused_and_names_what_is_known() {
+        let repo = [protocol_def("bds", &[("go", false), ("done", true)])];
+        let err = build_study_with(&[run_row(Some("bdz"), None)], &repo).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "no .eap protocol named 'bdz' in this repo (known: bds)"
+        );
+
+        // A repo with no protocols at all says so rather than rendering an
+        // empty list.
+        let err = build_study_with(&[run_row(Some("bds"), None)], &[]).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "no .eap protocol named 'bds' in this repo (this repo declares no protocols)"
+        );
+    }
+
+    #[test]
+    fn more_distinct_protocols_than_one_study_carries_is_refused() {
+        let repo: Vec<_> = ["a", "b", "c"]
+            .iter()
+            .map(|n| protocol_def(n, &[("go", false), ("done", true)]))
+            .collect();
+        let rows: Vec<_> =
+            ["a", "b", "c"].iter().map(|n| run_row(Some(n), None)).collect();
+        let err = build_study_with(&rows, &repo).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "this study's steps name 3 distinct protocols (a, b, c), but one study \
+                 carries at most {MAX_PROTOCOLS_PER_STUDY}"
+            )
+        );
+    }
+
+    #[test]
+    fn an_unknown_entry_state_is_refused_and_names_the_states_there_are() {
+        let repo = [protocol_def("bds", &[("start", false), ("done", true)])];
+        let err = build_study_with(&[run_row(Some("bds"), Some("begin"))], &repo).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "protocol 'bds' has no state named 'begin' (known: start, done)"
+        );
+    }
+
+    /// Decision 15's shape: a step that passes instantly and captures
+    /// nothing is worse than one that does not run, because it reports
+    /// success. The first caller `ProtocolError::EntryStateIsTerminal` has
+    /// ever had.
+    #[test]
+    fn a_terminal_entry_state_is_refused() {
+        let repo = [protocol_def("bds", &[("start", false), ("done", true)])];
+        let err = build_study_with(&[run_row(Some("bds"), Some("done"))], &repo).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "'done' is a terminal state of protocol 'bds', so the run would reach its \
+             outcome immediately and capture nothing"
+        );
+
+        // Including when it is the first state, which is what an absent
+        // entry_state resolves to.
+        let only_terminal = [protocol_def("odd", &[("done", true)])];
+        let err = build_study_with(&[run_row(Some("odd"), None)], &only_terminal).unwrap_err();
+        assert!(matches!(err, BuildStudyError::EntryStateIsTerminal { .. }), "{err}");
+    }
+
+    /// The seal belongs to whoever submits (decision 26). A builder that
+    /// sealed here would be the one place a study could be built sealed and
+    /// then mutated.
+    #[test]
+    fn the_builder_leaves_protocols_crc_at_zero_even_when_it_carries_one() {
+        let repo = [protocol_def("bds", &[("go", false), ("done", true)])];
+        let study = build_study_with(&[run_row(Some("bds"), None)], &repo).unwrap();
+        assert!(!study.protocols.is_empty());
+        assert_eq!(study.protocols_crc, 0);
+        // And 0 is *not* the right seal for this study, so the zero is a
+        // deferral rather than a value that happens to be correct.
+        assert_ne!(crate::crc::protocols_crc(&study.protocols).unwrap(), 0);
+    }
+
+    /// A saved study written before these two fields existed still loads,
+    /// as a row that names nothing — which is refused loudly if it is a
+    /// `RunProtocol` row and ignored if it is not.
+    #[test]
+    fn an_old_sidecar_without_the_two_new_fields_still_loads() {
+        let json = r#"{"kind":"built_in","which":"gatt_discover"}"#;
+        let action: RowAction = serde_json::from_str(json).unwrap();
+        assert!(matches!(
+            action,
+            RowAction::BuiltIn {
+                which: BuiltInActionKind::GattDiscover,
+                protocol: None,
+                entry_state: None,
+                ..
+            }
+        ));
+    }
+
+    /// Both fields survive a round trip through the sidecar — the hole
+    /// `embarch-ui` decision 17 records as having silently dropped monitor
+    /// targets, one feature later.
+    #[test]
+    fn both_new_fields_round_trip_through_serde() {
+        let action = RowAction::BuiltIn {
+            targets: Vec::new(),
+            which: BuiltInActionKind::RunProtocol,
+            role: RoleChoice::Central,
+            target_name: None,
+            security_level: None,
+            protocol: Some("bds".to_string()),
+            entry_state: Some("start".to_string()),
+        };
+        let back: RowAction =
+            serde_json::from_str(&serde_json::to_string(&action).unwrap()).unwrap();
+        assert_eq!(back, action);
+    }
+
+    /// `RunProtocol` is offered by the picker, between the step that opens a
+    /// capture window and the step that closes one.
+    #[test]
+    fn run_protocol_is_in_all_between_the_monitors_and_the_stop() {
+        let all = BuiltInActionKind::ALL;
+        let run = all.iter().position(|k| *k == BuiltInActionKind::RunProtocol).unwrap();
+        let selected_start =
+            all.iter().position(|k| *k == BuiltInActionKind::GattMonitorSelectedStart).unwrap();
+        let stop = all.iter().position(|k| *k == BuiltInActionKind::GattMonitorStop).unwrap();
+        assert!(selected_start < run && run < stop);
+        assert!(BuiltInActionKind::RunProtocol.label().starts_with("RunProtocol — "));
     }
 }
