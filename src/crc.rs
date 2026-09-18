@@ -141,6 +141,37 @@ pub fn protocols_crc(protocols: &[crate::eap::ProtocolDef]) -> Result<u32, Proto
     Ok(digest.finalize())
 }
 
+/// How many bytes a `Study`'s `protocols` field occupies on the wire to
+/// dev-bench, **length prefix included**.
+///
+/// Not a seal and not a limit of this crate's: it exists so a host can
+/// compare a study it has built against
+/// [`crate::limits::DEV_BENCH_MAX_PROTOCOLS_WIRE_LEN`], the one advisory
+/// dev-bench cap that mirrors no count here and therefore cannot be checked
+/// by counting anything. The comparison is a **warning**, never a gate — see
+/// that constant.
+///
+/// **The whole field, not the sum of its elements.** [`protocols_crc`]
+/// digests each `ProtocolDef` separately and never encodes the sequence
+/// header, because a seal only has to be reproducible. The 3 KB cap bounds
+/// the encoded `protocols` *span* of a `StudyStart` frame, which is
+/// postcard's varint element count followed by the elements — so this
+/// serializes the slice itself. Serializing the elements and summing would
+/// under-report by the prefix, which is the kind of off-by-a-header that
+/// makes an advisory read "within caps" right up to the frame dev-bench
+/// refuses.
+///
+/// Measured with postcard's `Size` flavor rather than into a scratch buffer:
+/// at this crate's ceilings the encoding is ~15 KB, and a 16 KB stack array
+/// on a constrained target to learn a length is the wrong trade. `Size`
+/// counts bytes as they are produced and allocates nothing.
+pub fn protocols_wire_len(
+    protocols: &[crate::eap::ProtocolDef],
+) -> Result<usize, ProtocolTooLargeError> {
+    postcard::serialize_with_flavor(&protocols, postcard::ser_flavors::Size::default())
+        .map_err(|_| ProtocolTooLargeError)
+}
+
 /// CRC-32/ISO-HDLC over an arbitrary byte run — the same algorithm
 /// decision 59's grammar names for its in-frame `crc32` primitive, and the
 /// same digest the three study seals use. That primitive itself is parsed
@@ -284,5 +315,69 @@ mod tests {
             })
             .unwrap();
         assert!(streams_crc(&widest).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod wire_len_tests {
+    use super::*;
+    use crate::eap::{ActiveState, ProtocolDef, StateDef, StateKind, TerminalOutcome};
+
+    fn protocol(name: &str) -> ProtocolDef {
+        let mut states = crate::bounded::Bounded::new();
+        states
+            .push(StateDef {
+                name: heapless::String::try_from("go").unwrap(),
+                kind: StateKind::Active(ActiveState {
+                    on_enter: None,
+                    on_event: Vec::new(),
+                    on_timeout: None,
+                }),
+            })
+            .unwrap();
+        states
+            .push(StateDef {
+                name: heapless::String::try_from("done").unwrap(),
+                kind: StateKind::Terminal(TerminalOutcome::Pass),
+            })
+            .unwrap();
+        ProtocolDef {
+            name: heapless::String::try_from(name).unwrap(),
+            sources: Vec::new(),
+            frames: Vec::new(),
+            session: Vec::new(),
+            states,
+        }
+    }
+
+    /// The empty field still costs its length prefix. A `protocols_wire_len`
+    /// that summed element encodings would answer 0 here, which is the shape
+    /// of the off-by-a-header this function's doc comment is about.
+    #[test]
+    fn the_empty_field_is_one_byte_of_length_prefix() {
+        assert_eq!(protocols_wire_len(&[]).unwrap(), 1);
+    }
+
+    /// Whole-field, not sum-of-elements: two protocols encode to the sum of
+    /// their own encodings **plus** the one-byte varint count.
+    #[test]
+    fn the_prefix_is_included() {
+        let a = protocol("a");
+        let b = protocol("bb");
+        let one =
+            postcard::serialize_with_flavor(&a, postcard::ser_flavors::Size::default()).unwrap();
+        let two =
+            postcard::serialize_with_flavor(&b, postcard::ser_flavors::Size::default()).unwrap();
+        assert_eq!(protocols_wire_len(&[a, b]).unwrap(), one + two + 1);
+    }
+
+    /// A real-shaped manifest is nowhere near the advisory cap — the
+    /// comparison the cap exists for is meaningful, not permanently true or
+    /// permanently false.
+    #[test]
+    fn a_small_manifest_is_far_under_the_advisory_cap() {
+        let len = protocols_wire_len(&[protocol("bds")]).unwrap();
+        assert!(len < crate::limits::DEV_BENCH_MAX_PROTOCOLS_WIRE_LEN);
+        assert!(len > 1);
     }
 }

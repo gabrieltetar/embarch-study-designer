@@ -226,3 +226,59 @@ pub const MAX_REMEMBER_PER_ARM: usize = 2;
 /// (decision 61). A control-point write is a one-byte opcode
 /// and occasionally an argument; this is sized for the argument.
 pub const MAX_WRITE_FIELDS: usize = 6;
+
+// --- Advisory dev-bench capacities -------------------------------------
+//
+// **Nothing in this crate branches on the three constants below.** They are
+// mirrors of caps that live in `embarch-dev-bench`'s own headers, served to
+// an authoring UI so it can *warn* that a study is past what the bench this
+// suite ships will accept. They are advisory, never a gate: the bench on
+// somebody's desk may be a different build with different caps, and a host
+// that refused to author a study its own bench would run would be enforcing
+// a number it cannot see.
+//
+// Distinct from every other constant in this module, all of which bound a
+// value this crate itself constructs or validates. These bound a value
+// *dev-bench* refuses, and the refusal stays dev-bench's — a `StudyStart`
+// past one of them is rejected at decode with the limit named, which is the
+// disclosed-capacity posture those headers already take.
+//
+// The same drift risk every mirrored constant has applies: these are copies,
+// and the originals are cited by path so the next reader can check them.
+
+/// `DBM_MAX_STEPS_PER_STUDY`
+/// (`embarch-dev-bench/app/src/serial_protocol.h:54`), embarch-dev-bench
+/// decision 27 — a dev-bench-internal capacity cap well below this crate's
+/// own [`MAX_STEPS_PER_STUDY`] of 64, because `struct dbm_step`'s action
+/// union at 64 slots does not fit that board's RAM.
+///
+/// **Advisory, never a gate; nothing here branches on it.**
+pub const DEV_BENCH_MAX_STEPS_PER_STUDY: usize = 16;
+
+/// `EAP_MAX_EVENT_ARMS_PER_STATE`
+/// (`embarch-dev-bench/app/src/eap.h:90`), embarch-dev-bench decision 41 —
+/// half this crate's own [`MAX_EVENT_ARMS_PER_STATE`] of 4, because an
+/// event arm is the heaviest thing a state holds and it is multiplied by
+/// states, by protocols, and again by two static `struct dev_bench_message`
+/// copies.
+///
+/// **Advisory, never a gate; nothing here branches on it.**
+pub const DEV_BENCH_MAX_EVENT_ARMS_PER_STATE: usize = 2;
+
+/// `DBM_MAX_PROTOCOLS_WIRE_LEN`
+/// (`embarch-dev-bench/app/src/serial_protocol.h:113-129`),
+/// embarch-dev-bench decision 41 — the largest postcard-encoded
+/// `Study.protocols` span that firmware will accept, in bytes.
+///
+/// **The one constant here that mirrors no crate constant at all**, and
+/// deliberately so: dev-bench's own comment argues that the count caps
+/// multiply into a wire bound nothing would ever send (~7.4 KB for a single
+/// `ProtocolDef` at the ceilings, almost all of it names the firmware
+/// discards), where the real worked protocol — the BDS batch download — is
+/// 398 bytes including the whole rest of the `StudyStart`. So there is
+/// nothing on this side to derive it from; a host that wants to warn about
+/// it has to measure the encoding, which is what
+/// [`crate::crc::protocols_wire_len`] is for.
+///
+/// **Advisory, never a gate; nothing here branches on it.**
+pub const DEV_BENCH_MAX_PROTOCOLS_WIRE_LEN: usize = 3072;

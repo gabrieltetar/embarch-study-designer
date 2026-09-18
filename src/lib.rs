@@ -75,8 +75,8 @@ pub mod study_builder;
 pub mod vendor;
 
 pub use crc::{
-    protocols_crc, steps_crc, streams_crc, ProtocolTooLargeError, StepTooLargeError,
-    StreamTapTooLargeError,
+    protocols_crc, protocols_wire_len, steps_crc, streams_crc, ProtocolTooLargeError,
+    StepTooLargeError, StreamTapTooLargeError,
 };
 pub use eap::{
     validate_protocol, ActiveState, CompareOp, Condition, EventArm, Expr, FrameDef, FrameMatch,
