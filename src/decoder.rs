@@ -178,6 +178,59 @@ impl ScalarType {
     /// A DUT counter that large is not a real value this suite will compare,
     /// and a silently negative one would be the plausible-wrong-number
     /// failure again.
+    /// Read this field as an `f64` — never `None`, unlike
+    /// [`read_i64`](Self::read_i64): every width this crate declares fits
+    /// losslessly or acceptably-lossily into an `f64` (a `u64`/`i64` past
+    /// 2^53 loses precision, the same way any other language's "just use a
+    /// double" does), so there is no width this has to refuse.
+    ///
+    /// Decoded straight from the native type and cast, not routed through
+    /// [`read_i64`]'s `.min(i64::MAX as u64)` clamp — that clamp exists only
+    /// so a caller needing a signed `i64` (`.eap` guard comparisons) never
+    /// sees a `u64` wrap negative. `f64` has no such caller-shaped need: a
+    /// `u64` cast straight to `f64` is already the nearest representable
+    /// value, clamping it first would just move *where* the precision loss
+    /// happens.
+    ///
+    /// Added for [`StructLayout::chart_value`] — a live chart wants a plain
+    /// number for every declared width, floats included, which `read_i64`
+    /// structurally cannot give it.
+    ///
+    /// `bytes` must be at least [`width`](Self::width) long — the same
+    /// precondition this type's own `render` already carries, since a caller
+    /// (`chart_value`) is expected to bounds-check once, the way `row` does,
+    /// rather than have every per-field decode repeat that check.
+    pub fn read_f64(self, bytes: &[u8]) -> f64 {
+        macro_rules! le_be {
+            ($ty:ty, $n:expr, $be:expr) => {{
+                let mut buf = [0u8; $n];
+                buf.copy_from_slice(&bytes[..$n]);
+                let v = if $be { <$ty>::from_be_bytes(buf) } else { <$ty>::from_le_bytes(buf) };
+                v as f64
+            }};
+        }
+        match self {
+            ScalarType::U8 => bytes[0] as f64,
+            ScalarType::I8 => bytes[0] as i8 as f64,
+            ScalarType::U16Le => le_be!(u16, 2, false),
+            ScalarType::U16Be => le_be!(u16, 2, true),
+            ScalarType::I16Le => le_be!(i16, 2, false),
+            ScalarType::I16Be => le_be!(i16, 2, true),
+            ScalarType::U32Le => le_be!(u32, 4, false),
+            ScalarType::U32Be => le_be!(u32, 4, true),
+            ScalarType::I32Le => le_be!(i32, 4, false),
+            ScalarType::I32Be => le_be!(i32, 4, true),
+            ScalarType::U64Le => le_be!(u64, 8, false),
+            ScalarType::U64Be => le_be!(u64, 8, true),
+            ScalarType::I64Le => le_be!(i64, 8, false),
+            ScalarType::I64Be => le_be!(i64, 8, true),
+            ScalarType::F32Le => le_be!(f32, 4, false),
+            ScalarType::F32Be => le_be!(f32, 4, true),
+            ScalarType::F64Le => le_be!(f64, 8, false),
+            ScalarType::F64Be => le_be!(f64, 8, true),
+        }
+    }
+
     pub fn read_i64(self, bytes: &[u8]) -> Option<i64> {
         if bytes.len() < self.width() {
             return None;
@@ -319,6 +372,17 @@ pub struct StructLayout {
     /// bytes remain. Empty means "no repeating part", not "repeat nothing".
     #[serde(default)]
     pub repeat: Vec<StructField, MAX_STRUCT_FIELDS>,
+    /// The one field, of `header` or `repeat`, whose value Core pushes live
+    /// (`StudyEvent::StructChartValue`) the instant it decodes a row —
+    /// separate from the rendered CSV, which every field still reaches
+    /// regardless of this. Named by [`StructField::name`].
+    ///
+    /// `None` — the ordinary starting state most layouts leave this in — is
+    /// "no live chart for this layout", not an oversight: charting is opt-in
+    /// per layout, and exactly one field, because a live chart is one line
+    /// on one axis, not every numeric column charted at once.
+    #[serde(default)]
+    pub chart_field: Option<String<MAX_STRUCT_FIELD_NAME_LEN>>,
 }
 
 /// Why a [`StructLayout`] can't be used, or can't decode a payload.
@@ -465,6 +529,48 @@ impl StructLayout {
         Ok(out)
     }
 
+    /// The `chart_field`'s value for row `index` of `payload`, or `None`
+    /// when no `chart_field` is declared, it names no field in this layout,
+    /// or `payload` is too short for row `index` to exist at all (mirrors
+    /// `row()`'s own bounds — never panics, never guesses).
+    ///
+    /// Purely additive: called *alongside* [`row`](Self::row), never in
+    /// place of it. A `None` here costs a live chart one missing point,
+    /// nothing more — the raw bytes on disk and the rendered CSV row are
+    /// unaffected either way.
+    pub fn chart_value(&self, payload: &[u8], index: usize) -> Option<f64> {
+        let field_name = self.chart_field.as_ref()?;
+        let count = self.row_count(payload).ok()?;
+        if index >= count {
+            return None;
+        }
+        // Header fields are read once at a fixed offset, mirroring `row()`.
+        let mut at = 0usize;
+        for field in &self.header {
+            let width = field.ty.width();
+            if &field.name == field_name {
+                return payload.get(at..at + width).map(|bytes| field.ty.read_f64(bytes));
+            }
+            at += width;
+        }
+        // Repeat fields are read at header_width() + index * repeat_width(),
+        // plus the field's own offset within one repetition — the same
+        // arithmetic `row()` uses.
+        at = self.header_width() + index * self.repeat_width();
+        for field in &self.repeat {
+            let width = field.ty.width();
+            if &field.name == field_name {
+                return payload.get(at..at + width).map(|bytes| field.ty.read_f64(bytes));
+            }
+            at += width;
+        }
+        // `chart_field` names nothing in this layout. Reachable only when a
+        // hand-edited or otherwise-unvalidated layout skipped
+        // `StructDef::to_layout`'s own check (`registry.rs`), which refuses
+        // exactly this at authoring time.
+        None
+    }
+
     /// The empty decoded columns a row carries when the payload didn't match
     /// this layout — one empty field per column, so a failed row still lines
     /// up with the header instead of shifting every later column left.
@@ -497,7 +603,19 @@ mod tests {
             name: String::try_from(name).unwrap(),
             header: Vec::from_slice(header).unwrap(),
             repeat: Vec::from_slice(repeat).unwrap(),
+            chart_field: None,
         }
+    }
+
+    fn layout_with_chart(
+        name: &str,
+        header: &[StructField],
+        repeat: &[StructField],
+        chart_field: &str,
+    ) -> StructLayout {
+        let mut l = layout(name, header, repeat);
+        l.chart_field = Some(String::try_from(chart_field).unwrap());
+        l
     }
 
     #[test]
@@ -640,6 +758,100 @@ mod tests {
         }
         assert_eq!(ScalarType::parse("u24le"), None);
         assert_eq!(ScalarType::parse(""), None);
+    }
+
+    #[test]
+    fn chart_value_reads_a_header_field() {
+        let l = layout_with_chart(
+            "batt",
+            &[field("percent", ScalarType::U8), field("mv", ScalarType::U16Le)],
+            &[],
+            "mv",
+        );
+        // percent=97, mv=3700 (0x0e74 little-endian)
+        assert_eq!(l.chart_value(&[97, 0x74, 0x0e], 0), Some(3700.0));
+    }
+
+    #[test]
+    fn chart_value_reads_a_repeat_field_and_differs_per_row() {
+        let l = layout_with_chart(
+            "ppg",
+            &[field("seq", ScalarType::U16Le)],
+            &[field("green", ScalarType::I16Le), field("red", ScalarType::I16Le)],
+            "green",
+        );
+        let payload = [
+            0x29, 0x00, // seq = 41
+            0x01, 0x00, 0x02, 0x00, // green 1, red 2
+            0xff, 0xff, 0xfe, 0xff, // green -1, red -2
+        ];
+        assert_eq!(l.chart_value(&payload, 0), Some(1.0));
+        assert_eq!(l.chart_value(&payload, 1), Some(-1.0));
+    }
+
+    #[test]
+    fn chart_value_is_none_when_no_chart_field_is_declared() {
+        let l = layout("batt", &[field("percent", ScalarType::U8)], &[]);
+        assert_eq!(l.chart_value(&[97], 0), None);
+    }
+
+    #[test]
+    fn chart_value_is_none_when_chart_field_names_nothing_in_the_layout() {
+        // Reachable only from a layout that skipped `StructDef::to_layout`'s
+        // own check -- `chart_value` still refuses to guess rather than
+        // panicking or picking the nearest name.
+        let mut l = layout("batt", &[field("percent", ScalarType::U8)], &[]);
+        l.chart_field = Some(String::try_from("does_not_exist").unwrap());
+        assert_eq!(l.chart_value(&[97], 0), None);
+    }
+
+    #[test]
+    fn chart_value_is_none_for_a_row_index_the_payload_cannot_hold() {
+        let l = layout_with_chart(
+            "ppg",
+            &[field("seq", ScalarType::U16Le)],
+            &[field("green", ScalarType::I16Le)],
+            "green",
+        );
+        let payload = [0x29, 0x00, 0x01, 0x00]; // seq + exactly one repetition
+        assert_eq!(l.chart_value(&payload, 0), Some(1.0));
+        // Row 1 does not exist -- must not panic or invent a value.
+        assert_eq!(l.chart_value(&payload, 1), None);
+    }
+
+    #[test]
+    fn chart_value_is_none_when_the_payload_is_too_short_to_decode_at_all() {
+        let l = layout_with_chart("batt", &[field("percent", ScalarType::U8)], &[], "percent");
+        assert_eq!(l.chart_value(&[], 0), None);
+    }
+
+    #[test]
+    fn read_f64_never_returns_none_and_matches_read_i64_for_integers() {
+        // Unlike `read_i64`, every width -- floats included -- produces a
+        // value. For the integer widths the two must agree once cast.
+        let i64be_bytes = 0x0020_0000_0000_0001i64.to_be_bytes();
+        let cases: [(ScalarType, &[u8]); 4] = [
+            (ScalarType::U8, &[200][..]),
+            (ScalarType::I8, &[0xff][..]),
+            (ScalarType::U16Le, &[0x01, 0x02][..]),
+            (ScalarType::I64Be, &i64be_bytes[..]),
+        ];
+        for (ty, bytes) in cases {
+            assert_eq!(ty.read_f64(bytes), ty.read_i64(bytes).unwrap() as f64);
+        }
+        // Floats: `read_i64` refuses these, `read_f64` decodes them.
+        assert_eq!(ScalarType::F32Be.read_f64(&[0x3f, 0x80, 0x00, 0x00]), 1.0);
+        assert_eq!(ScalarType::F64Le.read_f64(&1.5f64.to_le_bytes()), 1.5);
+    }
+
+    #[test]
+    fn read_f64_does_not_clamp_a_large_u64_the_way_read_i64_does() {
+        // `read_i64` saturates a u64 above i64::MAX; `read_f64` has no such
+        // caller-shaped need and casts straight through, losing only the
+        // ordinary f64 precision a value this large already implies.
+        let bytes = u64::MAX.to_le_bytes();
+        assert_eq!(ScalarType::U64Le.read_f64(&bytes), u64::MAX as f64);
+        assert_eq!(ScalarType::U64Le.read_i64(&bytes), Some(i64::MAX));
     }
 }
 

@@ -218,6 +218,12 @@ pub enum RegistryError {
     /// Two `[[struct]]` entries share a name, so a tap referencing it would
     /// resolve to whichever happened to come first.
     DuplicateStructLayout { name: String },
+    /// A `[[struct]]` entry's `chart_field` names something that is neither
+    /// a `header` nor a `repeat` field of that same entry. Caught here, at
+    /// authoring time, for the same reason [`RegistryError::UnknownStructLayout`]
+    /// is: the alternative is a study that runs, decodes, and simply never
+    /// pushes a live chart value, with nothing to say why.
+    UnknownChartField { layout_name: String, field: String },
 }
 
 /// The operation's name as an error message should say it — the `serde`
@@ -306,6 +312,11 @@ impl std::fmt::Display for RegistryError {
                 f,
                 "two structs are both named '{name}'; a tap referencing it could resolve to \
                  either"
+            ),
+            RegistryError::UnknownChartField { layout_name, field } => write!(
+                f,
+                "struct '{layout_name}' declares chart_field '{field}', which is not a header or \
+                 repeat field of that struct"
             ),
         }
     }
@@ -484,6 +495,12 @@ pub struct StructDef {
     /// row per repetition. Absent means "no repeating part".
     #[serde(default)]
     pub repeat: Vec<StructFieldDef>,
+    /// Mirrors [`crate::decoder::StructLayout::chart_field`] — the one
+    /// `header`/`repeat` field, named by [`StructFieldDef::name`], whose
+    /// value Core pushes live while a study runs. Absent means no live
+    /// chart for this layout, same as the wire type's own default.
+    #[serde(default)]
+    pub chart_field: Option<String>,
 }
 
 /// One named scalar in a [`StructDef`]. `ty` is the spelling
@@ -571,11 +588,27 @@ impl StructDef {
                 max: MAX_DECODER_NAME_LEN,
             }
         })?;
-        Ok(StructLayout {
-            name,
-            header: self.group(&self.header, "header")?,
-            repeat: self.group(&self.repeat, "repeat")?,
-        })
+        let header = self.group(&self.header, "header")?;
+        let repeat = self.group(&self.repeat, "repeat")?;
+        let chart_field = match &self.chart_field {
+            None => None,
+            Some(text) => {
+                if !header.iter().chain(repeat.iter()).any(|f| f.name.as_str() == text) {
+                    return Err(RegistryError::UnknownChartField {
+                        layout_name: self.name.clone(),
+                        field: text.clone(),
+                    });
+                }
+                Some(HString::try_from(text.as_str()).map_err(|_| {
+                    RegistryError::StructLayoutTooLarge {
+                        layout_name: self.name.clone(),
+                        what: "chart_field",
+                        max: MAX_STRUCT_FIELD_NAME_LEN,
+                    }
+                })?)
+            }
+        };
+        Ok(StructLayout { name, header, repeat, chart_field })
     }
 
     fn group(
@@ -1154,6 +1187,7 @@ repeat = [
     { name = "green", type = "i32le" },
     { name = "red", type = "i32le" },
 ]
+chart_field = "green"
 
 [[struct]]
 name = "battery"
@@ -1172,9 +1206,43 @@ header = [{ name = "percent", type = "u8" }]
             ppg.column_header().unwrap().as_str(),
             "rep_index,seq,timestamp,green,red"
         );
+        assert_eq!(ppg.chart_field.as_ref().unwrap().as_str(), "green");
         let battery = registry.resolve("battery").unwrap();
         assert_eq!(battery.repeat_width(), 0);
         assert_eq!(battery.row_count(&[42]).unwrap(), 1);
+        assert!(battery.chart_field.is_none());
+    }
+
+    #[test]
+    fn a_chart_field_naming_nothing_in_the_struct_is_refused() {
+        let raw = r#"
+[[struct]]
+name = "t"
+header = [{ name = "v", type = "u8" }]
+chart_field = "does_not_exist"
+"#;
+        let registry: StructRegistry = toml::from_str(raw).unwrap();
+        match registry.validate() {
+            Err(RegistryError::UnknownChartField { layout_name, field }) => {
+                assert_eq!(layout_name, "t");
+                assert_eq!(field, "does_not_exist");
+            }
+            other => panic!("expected UnknownChartField, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_chart_field_naming_a_repeat_field_is_accepted() {
+        let raw = r#"
+[[struct]]
+name = "t"
+header = [{ name = "seq", type = "u16le" }]
+repeat = [{ name = "sample", type = "i16le" }]
+chart_field = "sample"
+"#;
+        let registry: StructRegistry = toml::from_str(raw).unwrap();
+        let layout = registry.resolve("t").unwrap();
+        assert_eq!(layout.chart_field.unwrap().as_str(), "sample");
     }
 
     #[test]
@@ -1238,7 +1306,8 @@ header = [{ name = "w", type = "u8" }]
         // A truncated column header renders a CSV whose columns don't say
         // what they hold, which is worse than refusing to build the study.
         let long = "x".repeat(MAX_DECODER_NAME_LEN + 1);
-        let def = StructDef { name: long, header: Vec::new(), repeat: Vec::new() };
+        let def =
+            StructDef { name: long, header: Vec::new(), repeat: Vec::new(), chart_field: None };
         assert!(matches!(
             def.to_layout(),
             Err(RegistryError::StructLayoutTooLarge { what: "name", .. })
@@ -1250,6 +1319,7 @@ header = [{ name = "w", type = "u8" }]
                 .map(|i| StructFieldDef { name: std::format!("f{i}"), ty: "u8".to_string() })
                 .collect(),
             repeat: Vec::new(),
+            chart_field: None,
         };
         assert!(matches!(
             too_many.to_layout(),

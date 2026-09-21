@@ -1699,7 +1699,10 @@ fn lower_layout(f: &AstFrame, structs: &[AstStruct]) -> Result<StructLayout, Low
         return Err(LowerGap::NotFlat);
     }
     let name = HString::try_from(f.name.as_str()).map_err(|_| LowerGap::NotFlat)?;
-    Ok(StructLayout { name, header, repeat })
+    // `.eap` frame definitions have no notion of a live chart field —
+    // `chart_field` is a `study-structs.toml`/registry-authored concern
+    // (`registry::StructDef`), not something a wire-frame grammar declares.
+    Ok(StructLayout { name, header, repeat, chart_field: None })
 }
 
 #[cfg(test)]
