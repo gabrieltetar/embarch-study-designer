@@ -70,7 +70,7 @@
 //! engineer can eyeball is the part that makes "the file you expected isn't
 //! in here" visible instead of inferred.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -253,6 +253,36 @@ pub struct ScanReport {
     /// Files with a scanned extension that weren't valid UTF-8, repo-relative.
     /// Skipping them is right; skipping them quietly is not.
     pub unreadable: Vec<PathBuf>,
+    /// Properties aliases a characteristic actually reached for that carry
+    /// more than one definition, sorted by name. Empty on a repo with no
+    /// config-gated properties, which is most of them.
+    pub conditional_properties: Vec<ConditionalProperties>,
+}
+
+/// A `#define`d properties alias that the scan found defined more than once
+/// — the `#if`/`#else` shape — and a characteristic then used.
+///
+/// **Reported as the union of its branches, and named here rather than
+/// merged quietly.** The scan does not evaluate preprocessor conditionals
+/// (decision 57), so which branch a given build compiled is not a fact in
+/// the source; picking one would be a guess indistinguishable from an
+/// answer, and failing would blank a table over a characteristic that exists
+/// in every build. The union is the honest reading — *the source declares
+/// this characteristic as one of these* — and it is only safe because it is
+/// visible, which is what this field is for.
+///
+/// Recorded at the point of *use*, like every other loud failure in this
+/// module: a repo-wide walk reads plenty of conditional macros nothing
+/// reaches for, and listing those would be the defensive posture decision 57
+/// warns turns a scanner into a broken tool.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ConditionalProperties {
+    /// The alias as the source spells it, e.g. `WDS_CHRC_TX_PROP`.
+    pub name: String,
+    /// Each distinct properties byte it was defined as, ascending.
+    pub branches: Vec<u8>,
+    /// What the extraction used: the union over `branches`.
+    pub used: u8,
 }
 
 /// What an extraction produced: the wire-shaped GATT table, plus the source
@@ -475,6 +505,7 @@ fn walk_sources(repo_root: &Path) -> Result<(Vec<SourceFile>, ScanReport), Extra
         sources: Vec::new(),
         blocked_dirs,
         unreadable,
+        conditional_properties: Vec::new(),
     };
     Ok((files, report))
 }
@@ -568,23 +599,46 @@ fn extract_from_files(
         }
     }
 
+    // Properties aliases, same local-then-repo-wide shape as the variables
+    // above. The repo-wide map is resolved from every file's `#define`s at
+    // once, because the alias and the `BT_GATT_SERVICE_DEFINE` that uses it
+    // are routinely in a header and a `.c` respectively.
+    let mut props_raw: Vec<(String, String)> = Vec::new();
+    let mut props_by_file: HashMap<&Path, HashMap<String, PropertyAlias>> = HashMap::new();
+    for file in files {
+        let raw = parse_property_aliases(&file.text);
+        props_raw.extend(raw.iter().cloned());
+        props_by_file.insert(file.path.as_path(), resolve_property_aliases(&raw));
+    }
+    let props_repo_wide = resolve_property_aliases(&props_raw);
+
     let mut services: heapless::Vec<GattServiceInfo, MAX_DISCOVERED_SERVICES> = heapless::Vec::new();
     let mut symbols: Vec<GattSymbol> = Vec::new();
+    let mut conditional: Vec<ConditionalProperties> = Vec::new();
     for file in files {
         let empty = HashMap::new();
         let local = vars_by_file.get(file.path.as_path()).unwrap_or(&empty);
+        let no_props = HashMap::new();
+        let props = PropertyAliases {
+            local: props_by_file.get(file.path.as_path()).unwrap_or(&no_props),
+            repo_wide: &props_repo_wide,
+        };
         let found = parse_gatt_services(
             &file.text,
             local,
             &vars_repo_wide,
+            &props,
             &mut services,
             &mut symbols,
+            &mut conditional,
         )?;
         if let Some(entry) = counts.get_mut(file.path.as_path()) {
             entry.services = found;
         }
     }
 
+    conditional.sort_by(|a, b| a.name.cmp(&b.name));
+    report.conditional_properties = conditional;
     report.sources = {
         let mut contributing: Vec<ScannedSource> = counts
             .into_values()
@@ -722,8 +776,10 @@ fn parse_gatt_services(
     src: &str,
     local_vars: &HashMap<String, MaybeUuidBytes>,
     repo_wide_vars: &RepoWide<MaybeUuidBytes>,
+    props: &PropertyAliases<'_>,
     services: &mut heapless::Vec<GattServiceInfo, MAX_DISCOVERED_SERVICES>,
     symbols: &mut Vec<GattSymbol>,
+    conditional: &mut Vec<ConditionalProperties>,
 ) -> Result<usize, ExtractError> {
     let primary_re = Regex::new(r"BT_GATT_PRIMARY_SERVICE\(\s*&(\w+)\s*\)").unwrap();
     let chrc_re =
@@ -771,8 +827,29 @@ fn parse_gatt_services(
             let mut properties = 0u8;
             for token in props_expr.split('|') {
                 let token = token.trim();
-                properties |= chrc_property_bit(token)
-                    .ok_or_else(|| ExtractError::UnparseableProperties(token.to_string()))?;
+                properties |= match chrc_property_bit(token) {
+                    Some(bit) => bit,
+                    // Not a `BT_GATT_CHRC_*` macro, so it is either a
+                    // `#define`d alias for one or the loud failure this arm
+                    // has always been.
+                    None => {
+                        let alias = props
+                            .get(token)
+                            .ok_or_else(|| {
+                                ExtractError::UnparseableProperties(token.to_string())
+                            })?;
+                        if alias.branches.len() > 1
+                            && !conditional.iter().any(|c| c.name == token)
+                        {
+                            conditional.push(ConditionalProperties {
+                                name: token.to_string(),
+                                branches: alias.branches.iter().copied().collect(),
+                                used: alias.bits(),
+                            });
+                        }
+                        alias.bits()
+                    }
+                };
             }
 
             characteristics
@@ -798,6 +875,48 @@ fn parse_gatt_services(
 
     Ok(found)
 }
+/// How many rounds [`resolve_property_aliases`] will chase an alias that is
+/// defined in terms of another alias. Bounded rather than run to a fixpoint:
+/// a chain deeper than this is not something a GATT table does, and an
+/// unbounded loop over text nobody vetted is not something this scanner
+/// should offer.
+const MAX_ALIAS_DEPTH: usize = 8;
+
+/// A `#define`d characteristic-properties alias, and every properties byte
+/// the scan saw it defined as.
+///
+/// Several is the ordinary case, not a corruption: the reference DUT's
+/// `WDS_CHRC_TX_PROP` is `BT_GATT_CHRC_INDICATE` under
+/// `CONFIG_WDS_CONFIRMED_TX` and `BT_GATT_CHRC_NOTIFY` without it, and the
+/// scan does not evaluate preprocessor conditionals (decision 57).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct PropertyAlias {
+    branches: BTreeSet<u8>,
+}
+
+impl PropertyAlias {
+    /// The union over every branch — see [`ConditionalProperties`] for why
+    /// that, rather than a pick.
+    fn bits(&self) -> u8 {
+        self.branches.iter().fold(0u8, |acc, bit| acc | bit)
+    }
+}
+
+/// Where a properties token is looked up: the using file first, then the
+/// whole repo. Same order, and the same reason, as the UUID variables above
+/// — a `#define` next to the `BT_GATT_SERVICE_DEFINE` that uses it describes
+/// that block, and must not be outvoted by a same-named macro elsewhere.
+struct PropertyAliases<'a> {
+    local: &'a HashMap<String, PropertyAlias>,
+    repo_wide: &'a HashMap<String, PropertyAlias>,
+}
+
+impl PropertyAliases<'_> {
+    fn get(&self, token: &str) -> Option<&PropertyAlias> {
+        self.local.get(token).or_else(|| self.repo_wide.get(token))
+    }
+}
+
 /// Bluetooth Core Spec characteristic-properties bits — the same encoding
 /// documented on [`crate::gatt::GattCharacteristicInfo::properties`] for the
 /// live `GattDiscover` path (bit 0 = broadcast ... bit 7 =
@@ -815,6 +934,76 @@ fn chrc_property_bit(token: &str) -> Option<u8> {
         "BT_GATT_CHRC_EXT_PROP" => Some(0x80),
         _ => None,
     }
+}
+
+/// Every `#define NAME <a> | <b>` whose right-hand side is nothing but
+/// `|`-separated identifiers, as raw text.
+///
+/// Deliberately broader than "mentions `BT_GATT_CHRC_`": an alias defined in
+/// terms of another alias mentions neither, and dropping it here would make
+/// it unresolvable later for a reason nothing could report.
+/// [`resolve_property_aliases`] is what decides which of these are actually
+/// properties — a `#define` that never resolves to properties bits simply
+/// never lands in its map.
+fn parse_property_aliases(src: &str) -> Vec<(String, String)> {
+    let flattened = join_backslash_continuations(src);
+    let re = Regex::new(r"(?m)^[ \t]*#[ \t]*define[ \t]+(\w+)[ \t]+([^\r\n]+)").unwrap();
+    let identifiers_only = Regex::new(r"^\w+(?:\s*\|\s*\w+)*$").unwrap();
+    re.captures_iter(&flattened)
+        .filter_map(|caps| {
+            let rhs = strip_trailing_comment(&caps[2]);
+            identifiers_only.is_match(rhs).then(|| (caps[1].to_string(), rhs.to_string()))
+        })
+        .collect()
+}
+
+/// A `#define`'s value up to its trailing `//` or `/* */` comment. Trimmed
+/// because the value is compared token-for-token, and `BT_GATT_CHRC_NOTIFY
+/// /* the unconfirmed path */` is the same definition as the bare token.
+fn strip_trailing_comment(rhs: &str) -> &str {
+    let end = [rhs.find("//"), rhs.find("/*")].into_iter().flatten().min().unwrap_or(rhs.len());
+    rhs[..end].trim()
+}
+
+/// Folds the raw `#define`s into "this name means these properties bits",
+/// following aliases of aliases up to [`MAX_ALIAS_DEPTH`].
+///
+/// A name defined more than once accumulates *both* values rather than the
+/// last one read. That is the whole point: two definitions of one name is
+/// what a `#if`/`#else` looks like to a scanner that does not evaluate
+/// conditionals, and picking one would be this crate deciding which Kconfig
+/// the DUT was built with — a build fact it cannot read out of source
+/// (decision 57's own line about handle order, applied to properties).
+fn resolve_property_aliases(raw: &[(String, String)]) -> HashMap<String, PropertyAlias> {
+    let mut out: HashMap<String, PropertyAlias> = HashMap::new();
+    for _ in 0..MAX_ALIAS_DEPTH {
+        let mut changed = false;
+        for (name, rhs) in raw {
+            let Some(bits) = property_expr_bits(rhs, &out) else { continue };
+            if out.entry(name.clone()).or_default().branches.insert(bits) {
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    out
+}
+
+/// A `|`-separated properties expression → its bits, or `None` if any token
+/// is neither a `BT_GATT_CHRC_*` macro nor an alias already resolved to one.
+///
+/// `None` rather than "the bits we recognized": a token contributing zero
+/// bits silently is the failure [`chrc_property_bit`] already refuses, and
+/// half-reading an expression is the same defect one level up.
+fn property_expr_bits(expr: &str, known: &HashMap<String, PropertyAlias>) -> Option<u8> {
+    let mut bits = 0u8;
+    for token in expr.split('|') {
+        let token = token.trim();
+        bits |= chrc_property_bit(token).or_else(|| known.get(token).map(PropertyAlias::bits))?;
+    }
+    Some(bits)
 }
 /// Returns the slice of `src` starting at `src[open_paren_idx] == '('`
 /// through its matching close, inclusive of both parens — tracking nesting
@@ -1286,6 +1475,87 @@ BT_GATT_SERVICE_DEFINE(s{i:02}, BT_GATT_PRIMARY_SERVICE(&s{i:02}_service_uuid),)
             vec![PathBuf::from("embarch")],
             "the hard block reports what it pruned rather than pruning silently"
         );
+    }
+
+    /// The reference DUT's `WDS_CHRC_TX_PROP`: one name, two definitions,
+    /// `#if IS_ENABLED(CONFIG_WDS_CONFIRMED_TX)` deciding which. Before this,
+    /// one such macro in one service blanked the *whole* table — a
+    /// characteristic that exists in every build taking four services down
+    /// with it.
+    #[test]
+    fn a_config_gated_properties_alias_is_unioned_and_reported() {
+        let gated = FIXTURE_BLE_C.replace(
+            "BT_GATT_CHRC_NOTIFY,\n                           BT_GATT_PERM_NONE",
+            "FX_TX_PROP,\n                           BT_GATT_PERM_NONE",
+        );
+        let gated = format!(
+            "#if IS_ENABLED(CONFIG_FX_CONFIRMED_TX)\n\
+             #define FX_TX_PROP BT_GATT_CHRC_INDICATE  /* confirmed */\n\
+             #else\n\
+             #define FX_TX_PROP BT_GATT_CHRC_NOTIFY\n\
+             #endif\n{gated}"
+        );
+        let out =
+            extract_files(&[("lib/ble/ble_def.h", FIXTURE_DEF_H), ("lib/ble/ble.c", &gated)])
+                .expect("a config-gated properties macro must not blank the table");
+        let notify_or_indicate = 0x10 | 0x20;
+        assert!(
+            out.services
+                .iter()
+                .flat_map(|s| s.characteristics.iter())
+                .any(|c| c.properties & notify_or_indicate == notify_or_indicate),
+            "the union of both branches is what the characteristic carries"
+        );
+        // Named, not merged quietly: the union is only defensible because a
+        // reader can see it was one.
+        assert_eq!(
+            out.scan.conditional_properties,
+            vec![ConditionalProperties {
+                name: "FX_TX_PROP".to_string(),
+                branches: vec![0x10, 0x20],
+                used: 0x30,
+            }]
+        );
+    }
+
+    /// An alias with exactly one definition is an ordinary spelling of a
+    /// properties bit, and reporting it would bury the `#if` case this
+    /// report exists to surface.
+    #[test]
+    fn a_single_definition_alias_resolves_without_being_reported() {
+        let aliased = FIXTURE_BLE_C.replace(
+            "BT_GATT_CHRC_NOTIFY,\n                           BT_GATT_PERM_NONE",
+            "FX_TX_PROP,\n                           BT_GATT_PERM_NONE",
+        );
+        let aliased = format!("#define FX_TX_PROP BT_GATT_CHRC_NOTIFY\n{aliased}");
+        let out =
+            extract_files(&[("lib/ble/ble_def.h", FIXTURE_DEF_H), ("lib/ble/ble.c", &aliased)])
+                .expect("a plain alias resolves");
+        assert!(out.scan.conditional_properties.is_empty(), "nothing conditional to report");
+        assert!(
+            out.services.iter().flat_map(|s| s.characteristics.iter()).any(|c| c.properties
+                & 0x10
+                != 0),
+            "and it still resolved to notify"
+        );
+    }
+
+    /// A conditional macro a `BT_GATT_SERVICE_DEFINE` never reaches for is
+    /// not reported — the same point-of-use rule decision 57 applies to
+    /// unresolvable symbols, since a repo-wide walk reads plenty of both.
+    #[test]
+    fn an_unused_conditional_alias_is_not_reported() {
+        let unused = format!(
+            "#if IS_ENABLED(CONFIG_SOMETHING)\n\
+             #define FX_UNUSED_PROP BT_GATT_CHRC_INDICATE\n\
+             #else\n\
+             #define FX_UNUSED_PROP BT_GATT_CHRC_NOTIFY\n\
+             #endif\n{FIXTURE_BLE_C}"
+        );
+        let out =
+            extract_files(&[("lib/ble/ble_def.h", FIXTURE_DEF_H), ("lib/ble/ble.c", &unused)])
+                .unwrap();
+        assert!(out.scan.conditional_properties.is_empty());
     }
 
     #[test]

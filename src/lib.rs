@@ -108,7 +108,7 @@ pub use gatt::{
 #[cfg(feature = "gatt-extract")]
 pub use gatt_extract::{
     ZephyrBleDefExtractor, ExtractError, ExtractedGatt, GattConfigExtractor, GattSymbol,
-    GattSymbolKind, ScanReport, ScannedSource, SCAN_BLOCKED_DIR_NAMES,
+    GattSymbolKind, ConditionalProperties, ScanReport, ScannedSource, SCAN_BLOCKED_DIR_NAMES,
 };
 #[cfg(feature = "std")]
 pub use gatt_names::{
