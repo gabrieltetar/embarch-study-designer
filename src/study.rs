@@ -1059,7 +1059,7 @@ mod tests {
         // Run on a deliberately larger stack: deserializing a `Study` at all
         // needs ~75 KiB of inline `heapless` arrays plus serde's own frames,
         // and overflows libtest's default stack in a debug build. That is
-        // spec.md §7's long-standing note, not something this test
+        // spec.md §6's long-standing note, not something this test
         // introduces — `embarch-api` closed its own exposure the same way
         // (embarch-api decision 36).
         std::thread::Builder::new()
