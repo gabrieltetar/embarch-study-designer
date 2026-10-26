@@ -665,6 +665,57 @@ impl core::fmt::Display for RequirementsError {
 #[cfg(feature = "std")]
 impl std::error::Error for RequirementsError {}
 
+/// A `Notify` or `Indicate` step whose own wait budget is 0 (decision 83).
+/// dev-bench treats the operation's `timeout_ms` as a deadline of its own, and
+/// 0 is a deadline already past, so the step could only report `TimedOut`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WaitBudgetError {
+    /// Index of the step in [`Study::steps`].
+    pub step: usize,
+    /// `"Notify"` or `"Indicate"`.
+    pub operation: &'static str,
+}
+
+impl core::fmt::Display for WaitBudgetError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "step {} is a {} with a wait budget of 0 ms, which waits for nothing",
+            self.step, self.operation
+        )
+    }
+}
+
+impl Study {
+    /// Refuses a `Notify`/`Indicate` step whose operation `timeout_ms` is 0
+    /// (decision 83). Additive: nothing calls it implicitly, so a consumer
+    /// that validates a submitted study opts in by calling it.
+    pub fn validate_wait_budgets(&self) -> Result<(), WaitBudgetError> {
+        for (step, s) in self.steps.iter().enumerate() {
+            if let Some(operation) = s.zero_wait_operation() {
+                return Err(WaitBudgetError { step, operation });
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Step {
+    /// `Some("Notify" | "Indicate")` when this step waits on a notification
+    /// with an operation budget of 0.
+    pub fn zero_wait_operation(&self) -> Option<&'static str> {
+        match &self.action {
+            Action::DataExchange { operation: GattOperation::Notify { timeout_ms: 0 }, .. } => {
+                Some("Notify")
+            }
+            Action::DataExchange { operation: GattOperation::Indicate { timeout_ms: 0 }, .. } => {
+                Some("Indicate")
+            }
+            _ => None,
+        }
+    }
+}
+
 /// interfaces/types.md.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Step {

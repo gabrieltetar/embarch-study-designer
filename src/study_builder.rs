@@ -332,6 +332,9 @@ pub enum BuildStudyError {
     UnparseableUuid { which: &'static str, value: String },
     PayloadTooLong { max: usize, actual: usize },
     PayloadOnNonWrite,
+    /// A Notify or Indicate row whose timeout is 0: the operation would wait
+    /// for nothing (decision 83).
+    ZeroWaitBudget { step: String, operation: &'static str },
     /// A selective monitor row that names no characteristic.
     NoMonitorTargets,
     /// More characteristics than one step can carry
@@ -417,6 +420,11 @@ impl std::fmt::Display for BuildStudyError {
             BuildStudyError::PayloadOnNonWrite => {
                 write!(f, "a payload was given for an operation that isn't a Write")
             }
+            BuildStudyError::ZeroWaitBudget { step, operation } => write!(
+                f,
+                "step '{step}' is a {operation} with a timeout of 0 ms, which waits for \
+                 nothing; give it the time to wait for the notification"
+            ),
             BuildStudyError::NoMonitorTargets => write!(
                 f,
                 "a selective GATT monitor step names no characteristic; pick at least one, or \
@@ -536,7 +544,7 @@ pub fn build_study(
 
     let mut steps: crate::bounded::StepList = crate::bounded::StepList::new();
     for row in rows {
-        let action = resolve_action(&row.action, registry, &carried)?;
+        let action = resolve_action(&row.action, registry, &carried, row.timeout_ms)?;
         if !crate::sample::csv_cell_ok(&row.name) {
             return Err(BuildStudyError::NameBreaksCsv { value: row.name.clone() });
         }
@@ -547,6 +555,9 @@ pub fn build_study(
             continue_on_fail: row.continue_on_fail,
             delay_before_ms: row.delay_before_ms,
         };
+        if let Some(operation) = step.zero_wait_operation() {
+            return Err(BuildStudyError::ZeroWaitBudget { step: row.name.clone(), operation });
+        }
         // Capacity already checked above (rows.len() <= MAX_STEPS_PER_STUDY),
         // so this can't actually fail -- .ok() rather than .unwrap() only to
         // avoid a panic if that invariant ever drifts.
@@ -740,6 +751,7 @@ fn resolve_action(
     row_action: &RowAction,
     registry: &ActionRegistry,
     carried: &[&crate::eap::ProtocolDef],
+    step_timeout_ms: u32,
 ) -> Result<Action, BuildStudyError> {
     match row_action {
         RowAction::BuiltIn {
@@ -793,7 +805,7 @@ fn resolve_action(
                 .iter()
                 .find(|a| &a.name == name)
                 .ok_or_else(|| BuildStudyError::UnknownRegisteredAction(name.clone()))?;
-            let operation = resolve_operation(registered, field_choices)?;
+            let operation = resolve_operation(registered, field_choices, step_timeout_ms)?;
             Ok(Action::DataExchange {
                 service_uuid: registered.service_uuid,
                 characteristic_uuid: registered.uuid,
@@ -814,7 +826,7 @@ fn resolve_action(
                 }
             })?;
 
-            let operation = literal_operation(*operation, payload)?;
+            let operation = literal_operation(*operation, payload, step_timeout_ms)?;
 
             Ok(Action::DataExchange { service_uuid, characteristic_uuid, operation })
         }
@@ -843,7 +855,7 @@ fn resolve_action(
                 });
             }
 
-            let operation = literal_operation(*operation, payload)?;
+            let operation = literal_operation(*operation, payload, step_timeout_ms)?;
 
             Ok(Action::DataExchange {
                 service_uuid: vendor_service.uuid,
@@ -881,6 +893,7 @@ fn declares(properties: u8, operation: RegisteredOperation) -> bool {
 fn literal_operation(
     operation: RegisteredOperation,
     payload: &[u8],
+    wait_ms: u32,
 ) -> Result<GattOperation, BuildStudyError> {
     Ok(match operation {
         RegisteredOperation::Write => {
@@ -896,16 +909,18 @@ fn literal_operation(
         _ if !payload.is_empty() => return Err(BuildStudyError::PayloadOnNonWrite),
         RegisteredOperation::Read => GattOperation::Read,
         RegisteredOperation::Subscribe => GattOperation::Subscribe,
-        // Same defaulting as a registered Notify/Indicate: the step's own
-        // `timeout_ms` is the wait budget.
-        RegisteredOperation::Notify => GattOperation::Notify { timeout_ms: 0 },
-        RegisteredOperation::Indicate => GattOperation::Indicate { timeout_ms: 0 },
+        // The operation's own wait budget is the row's `timeout_ms`, copied:
+        // dev-bench reads the operation's value as a deadline of its own, and
+        // 0 there means "do not wait" (decision 83).
+        RegisteredOperation::Notify => GattOperation::Notify { timeout_ms: wait_ms },
+        RegisteredOperation::Indicate => GattOperation::Indicate { timeout_ms: wait_ms },
     })
 }
 
 fn resolve_operation(
     registered: &RegisteredAction,
     field_choices: &HashMap<String, String>,
+    wait_ms: u32,
 ) -> Result<GattOperation, BuildStudyError> {
     match registered.operation {
         RegisteredOperation::Read => not_writable_if_choices_given(registered, field_choices, GattOperation::Read),
@@ -913,15 +928,16 @@ fn resolve_operation(
             not_writable_if_choices_given(registered, field_choices, GattOperation::Subscribe)
         }
         // Notify/Indicate's own wait timeout is a separate field from the
-        // step's own `timeout_ms` (interfaces/types.md) -- defaulted to match
-        // the step's timeout rather than asking the UI for a second value,
-        // a UI simplification (adjustable later), not a guess about any
-        // particular DUT's protocol.
+        // step's own `timeout_ms` (interfaces/types.md) -- set to the row's
+        // timeout rather than asking the UI for a second value, a UI
+        // simplification (adjustable later), not a guess about any
+        // particular DUT's protocol. Never 0: dev-bench reads that as
+        // "do not wait" (decision 83).
         RegisteredOperation::Notify => {
-            not_writable_if_choices_given(registered, field_choices, GattOperation::Notify { timeout_ms: 0 })
+            not_writable_if_choices_given(registered, field_choices, GattOperation::Notify { timeout_ms: wait_ms })
         }
         RegisteredOperation::Indicate => {
-            not_writable_if_choices_given(registered, field_choices, GattOperation::Indicate { timeout_ms: 0 })
+            not_writable_if_choices_given(registered, field_choices, GattOperation::Indicate { timeout_ms: wait_ms })
         }
         RegisteredOperation::Write => {
             let payload = resolve_write_payload(registered, field_choices)?;
@@ -1759,6 +1775,122 @@ mod tests {
         let json = serde_json::to_string(&study).unwrap();
         let parsed: Study = serde_json::from_str(&json).unwrap();
         assert_eq!(study, parsed);
+    }
+
+    // --- decision 83: a Notify/Indicate row's wait budget ----------------
+
+    fn wait_row(action: RowAction, timeout_ms: u32) -> TableRow {
+        TableRow {
+            name: "wait".to_string(),
+            action,
+            timeout_ms,
+            continue_on_fail: false,
+            delay_before_ms: 0,
+        }
+    }
+
+    fn raw_wait(operation: RegisteredOperation) -> RowAction {
+        RowAction::Raw {
+            service_uuid: "6e400001-b5a3-f393-e0a9-e50e24dcca9e".into(),
+            characteristic_uuid: "6e400003-b5a3-f393-e0a9-e50e24dcca9e".into(),
+            operation,
+            payload: vec![],
+        }
+    }
+
+    fn registered_wait(operation: RegisteredOperation) -> (ActionRegistry, RowAction) {
+        let reg = ActionRegistry {
+            actions: vec![RegisteredAction {
+                name: "wait_for".to_string(),
+                service_uuid: uuid(1),
+                uuid: uuid(2),
+                operation,
+                fields: vec![],
+            }],
+        };
+        let row = RowAction::Registered { name: "wait_for".to_string(), field_choices: HashMap::new() };
+        (reg, row)
+    }
+
+    fn wait_budget_of(study: &Study) -> (u32, &'static str) {
+        match &study.steps[0].action {
+            Action::DataExchange { operation: GattOperation::Notify { timeout_ms }, .. } => {
+                (*timeout_ms, "Notify")
+            }
+            Action::DataExchange { operation: GattOperation::Indicate { timeout_ms }, .. } => {
+                (*timeout_ms, "Indicate")
+            }
+            other => panic!("expected a Notify or Indicate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn notify_and_indicate_rows_carry_the_rows_timeout_as_their_wait_budget() {
+        let empty = ActionRegistry::default();
+        let vendor = RowAction::Vendor {
+            service: "nordic-uart".to_string(),
+            characteristic: "tx".to_string(),
+            operation: RegisteredOperation::Notify,
+            payload: vec![],
+        };
+        let mut cases: Vec<(ActionRegistry, RowAction, &str)> = vec![
+            (empty.clone(), raw_wait(RegisteredOperation::Notify), "Notify"),
+            (empty.clone(), raw_wait(RegisteredOperation::Indicate), "Indicate"),
+            (empty, vendor, "Notify"),
+        ];
+        let (reg, row) = registered_wait(RegisteredOperation::Notify);
+        cases.push((reg, row, "Notify"));
+        let (reg, row) = registered_wait(RegisteredOperation::Indicate);
+        cases.push((reg, row, "Indicate"));
+
+        for (reg, action, kind) in cases {
+            let study = build_study("s", &[wait_row(action, 5_000)], &reg).unwrap();
+            let (budget, got_kind) = wait_budget_of(&study);
+            assert_eq!(got_kind, kind);
+            assert!(budget > 0 && budget <= study.steps[0].timeout_ms, "{kind}: {budget}");
+            assert_eq!(budget, 5_000);
+            assert!(study.validate_wait_budgets().is_ok());
+        }
+    }
+
+    #[test]
+    fn a_notify_or_indicate_row_with_timeout_zero_is_refused_by_name() {
+        let empty = ActionRegistry::default();
+        for (op, kind) in
+            [(RegisteredOperation::Notify, "Notify"), (RegisteredOperation::Indicate, "Indicate")]
+        {
+            let err = build_study("s", &[wait_row(raw_wait(op), 0)], &empty).unwrap_err();
+            match err {
+                BuildStudyError::ZeroWaitBudget { step, operation } => {
+                    assert_eq!(step, "wait");
+                    assert_eq!(operation, kind);
+                }
+                other => panic!("expected ZeroWaitBudget, got {other:?}"),
+            }
+        }
+        // A timeout of 0 on a row that is not a wait is untouched.
+        assert!(build_study("s", &[wait_row(raw_wait(RegisteredOperation::Read), 0)], &empty).is_ok());
+    }
+
+    #[test]
+    fn a_hand_written_study_with_a_zero_wait_budget_fails_validate_wait_budgets() {
+        let study = build_study(
+            "s",
+            &[wait_row(raw_wait(RegisteredOperation::Subscribe), 1_000)],
+            &ActionRegistry::default(),
+        )
+        .unwrap();
+        for (op, kind) in [
+            (GattOperation::Notify { timeout_ms: 0 }, "Notify"),
+            (GattOperation::Indicate { timeout_ms: 0 }, "Indicate"),
+        ] {
+            let mut bad = study.clone();
+            if let Action::DataExchange { operation, .. } = &mut bad.steps[0].action {
+                *operation = op;
+            }
+            let err = bad.validate_wait_budgets().unwrap_err();
+            assert_eq!((err.step, err.operation), (0, kind));
+        }
     }
 
     // --- decision 41: vendor-defined services ---------------------------
