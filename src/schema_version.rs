@@ -344,7 +344,16 @@ pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 15;
 ///   to a Core too old to run the pre-flight would otherwise be accepted
 ///   and silently run unchecked, which is exactly the drift the constant
 ///   exists to refuse.
-pub const HOST_TYPE_SCHEMA_VERSION: u32 = 19;
+/// - **v20** — host-only: Core first accepts a [`crate::HostStudy`]
+///   (`POST /host-studies`, `embarch-core` decision 95), so the host-study
+///   types (decisions 80, 86) now cross the `embarch-api` -> `embarch-core`
+///   hop. Decisions 80 and 86 held the bump back until exactly this unit:
+///   a Core advertising it without accepting `HostStudy` would have been
+///   the drift decision 12 refuses. `HostStudy` never reaches dev-bench
+///   (it runs on Core's own executor, JSON only), so
+///   [`DEV_BENCH_WIRE_SCHEMA_VERSION`] stays at 15. Made by the landing
+///   supervisor in the same fold as `tasks/core/102`.
+pub const HOST_TYPE_SCHEMA_VERSION: u32 = 20;
 
 /// [`HOST_TYPE_SCHEMA_VERSION`]'s triggers are a strict superset of
 /// [`DEV_BENCH_WIRE_SCHEMA_VERSION`]'s (decision 12's
