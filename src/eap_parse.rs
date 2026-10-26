@@ -176,7 +176,7 @@ impl fmt::Display for EapError {
                 write!(f, "{what} name longer than {limit} bytes")
             }
             EapErrorKind::NonIntegerField(n) => {
-                write!(f, "field {n:?} is a float width and no guard can compare it")
+                write!(f, "{n:?} is a float width and this position needs an integer")
             }
             EapErrorKind::Crc16Unsupported => write!(
                 f,
@@ -595,6 +595,22 @@ impl P {
             kind: EapErrorKind::BadInteger(v.to_string()),
         })
     }
+    fn u32v(&mut self) -> R<u32> {
+        let line = self.line();
+        let v = self.int()?;
+        u32::try_from(v).map_err(|_| EapError {
+            line,
+            kind: EapErrorKind::BadInteger(v.to_string()),
+        })
+    }
+    fn u8v(&mut self) -> R<u8> {
+        let line = self.line();
+        let v = self.int()?;
+        u8::try_from(v).map_err(|_| EapError {
+            line,
+            kind: EapErrorKind::BadInteger(v.to_string()),
+        })
+    }
     fn string(&mut self) -> R<String> {
         match self.peek().cloned() {
             Some(Tok::Str(s)) => {
@@ -968,10 +984,10 @@ fn parse_state(p: &mut P) -> R<AstState> {
         } else if p.eat_kw("on_event") {
             st.on_event.push(parse_event_arm(p)?);
         } else if p.eat_kw("on_timeout") {
-            let after = p.int()? as u32;
+            let after = p.u32v()?;
             // `1500ms` lexes as `1500` then `ms`; the suffix is documentation.
             let _ = p.eat_kw("ms");
-            let retry = if p.eat_kw("retry") { p.int()? as u8 } else { 0 };
+            let retry = if p.eat_kw("retry") { p.u8v()? } else { 0 };
             p.want_sym(":")?;
             p.want_kw("goto")?;
             let target = p.ident()?;
@@ -1004,6 +1020,11 @@ fn parse_write(p: &mut P) -> R<AstWrite> {
                 },
             });
         };
+        if !ty.is_integer() {
+            // `write_i64` has no float encoding; refuse here rather than
+            // on every bench run (task 073).
+            return Err(EapError { line: wline, kind: EapErrorKind::NonIntegerField(word) });
+        }
         p.want_sym(":")?;
         let value = parse_operand(p)?;
         fields.push((ty, value));
@@ -1332,7 +1353,13 @@ pub fn resolve(a: &AstProtocol) -> R<ResolvedProtocol> {
                         *line,
                     )?;
                 }
-                AstField::Repeat { .. } => {
+                AstField::Repeat { elem, line, .. } => {
+                    if !a.structs.iter().any(|s| &s.name == elem) {
+                        return Err(EapError {
+                            line: *line,
+                            kind: EapErrorKind::Unknown { what: "struct", name: elem.clone() },
+                        });
+                    }
                     static_offset = false;
                     repeats.push(field.clone());
                 }
@@ -1984,6 +2011,46 @@ protocol p {
             e.kind,
             EapErrorKind::Invalid(crate::eap::ProtocolError::NoTerminalState)
         );
+    }
+
+    // --- task 073: authoring errors that used to be accepted in silence.
+
+    #[test]
+    fn on_timeout_and_retry_literals_outside_their_width_are_refused_with_the_line() {
+        for (bad, lit) in [
+            ("on_timeout -5ms: goto bad", "-5"),
+            ("on_timeout 4294967296ms: goto bad", "4294967296"),
+            ("on_timeout 100ms retry -1: goto bad", "-1"),
+            ("on_timeout 100ms retry 300: goto bad", "300"),
+        ] {
+            let src = SHELL.replace("on_timeout 100ms: goto bad", bad);
+            let e = one(&src).unwrap_err();
+            assert_eq!(e.kind, EapErrorKind::BadInteger(lit.into()), "{bad}");
+            assert!(e.line > 1, "{bad}");
+        }
+        one(&SHELL.replace("on_timeout 100ms: goto bad", "on_timeout 4294967295ms retry 255: goto bad"))
+            .unwrap();
+    }
+
+    #[test]
+    fn a_float_width_in_an_on_enter_write_is_refused_at_parse() {
+        let src = SHELL.replace("u8: 0x01", "f32le: 1");
+        let e = one(&src).unwrap_err();
+        assert_eq!(e.kind, EapErrorKind::NonIntegerField("f32le".into()));
+        assert_eq!(e.line, 7);
+    }
+
+    #[test]
+    fn a_repeat_naming_no_struct_is_refused_with_the_line_and_name() {
+        let src = SHELL.replace(
+            "frame f on s { u8 kind @ 0 }",
+            "struct chunk { u8 v }\n\
+             frame f on s { u8 n @ 0\n\
+                            repeat c[2]: chunck }",
+        );
+        let e = one(&src).unwrap_err();
+        assert_eq!(e.kind, EapErrorKind::Unknown { what: "struct", name: "chunck".into() });
+        assert_eq!(e.line, 6);
     }
 
     // --- render_layout: the four parsed-and-pinned primitives refuse
