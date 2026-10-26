@@ -242,6 +242,7 @@ impl HostStep {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::vec;
 
     const PD: &str = include_str!("../tests/fixtures/host_pd_source_sequence.json");
 
