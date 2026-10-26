@@ -138,12 +138,12 @@ pub use registry::{
 // at the root beside every other type that crosses a host's hands. Only
 // `verify_records` itself stays module-scoped — it runs in Core, not in an
 // authoring UI.
-pub use records::{RecordCheck, RecordFraming, RecordReport};
+pub use records::{validate_record_checks, RecordCheck, RecordCheckError, RecordFraming, RecordReport};
 pub use result::{
     Outcome, ProtocolOutcome, Provenance, StepResult, StudyResult, VersionOverride, VersionSource,
     VersionSubject,
 };
-pub use sample::{Sample, Unit};
+pub use sample::{csv_cell_ok, Sample, Unit};
 pub use schema_version::{DEV_BENCH_WIRE_SCHEMA_VERSION, HOST_TYPE_SCHEMA_VERSION};
 pub use streams::{
     dev_bench_log_tap, samples_in, validate_taps, SampleLayout, StreamEncoding, StreamRecord, StreamRef, StreamScope,
@@ -523,6 +523,17 @@ mod tests {
         let row = sample.to_csv_row("advertise").unwrap();
         assert_eq!(row.as_str(), "1753000000123,advertise,3.301,milliamps,2");
         assert_eq!(Sample::csv_header(), "rx_utc_ms,step_name,value,unit,channel_id");
+    }
+
+    #[test]
+    fn a_step_name_cannot_shift_the_sample_csv_columns() {
+        let sample = Sample { rx_utc_ms: 1, value: 2.0, unit: Unit::Raw, channel_id: 0 };
+        let cols = Sample::csv_header().split(',').count();
+        for bad in ["wait, then write", "say \"hi\"", "two\nlines", "cr\rhere"] {
+            let row = sample.to_csv_row(bad).expect("blanked, not dropped");
+            assert_eq!(row.split(',').count(), cols, "{bad:?}");
+            assert_eq!(row.as_str(), "1,,2,raw,0");
+        }
     }
 
     #[test]

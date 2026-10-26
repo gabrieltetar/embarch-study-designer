@@ -321,6 +321,9 @@ pub struct TableRow {
 pub enum BuildStudyError {
     TooManySteps { max: usize, actual: usize },
     NameTooLong { which: &'static str, value: String, max: usize },
+    /// A step name with a comma, quote or line break would shift the columns of
+    /// every CSV row it is written into ([`crate::csv_cell_ok`]).
+    NameBreaksCsv { value: String },
     UnknownRegisteredAction(String),
     RegisteredActionHasNoFields { action: String },
     MissingFieldChoice { action: String, field: String },
@@ -380,6 +383,11 @@ impl std::fmt::Display for BuildStudyError {
             BuildStudyError::NameTooLong { which, value, max } => {
                 write!(f, "{which} '{value}' is longer than the {max}-byte limit")
             }
+            BuildStudyError::NameBreaksCsv { value } => write!(
+                f,
+                "step name '{value}' contains a comma, quote or line break, which would shift \
+                 the columns of the CSV rows it is written into"
+            ),
             BuildStudyError::UnknownRegisteredAction(name) => {
                 write!(f, "no registered action named '{name}'")
             }
@@ -529,6 +537,9 @@ pub fn build_study(
     let mut steps: crate::bounded::StepList = crate::bounded::StepList::new();
     for row in rows {
         let action = resolve_action(&row.action, registry, &carried)?;
+        if !crate::sample::csv_cell_ok(&row.name) {
+            return Err(BuildStudyError::NameBreaksCsv { value: row.name.clone() });
+        }
         let step = Step {
             name: heapless_string::<MAX_NAME_LEN>(&row.name, "step name")?,
             action,
@@ -2014,6 +2025,16 @@ mod tests {
     /// under Zephyr's own `CONFIG_BT_DEVICE_NAME_MAX` -- so an over-long name
     /// has to be refused with a message, not silently truncated into a filter
     /// that matches nothing.
+    #[test]
+    fn a_step_name_that_would_break_the_csv_is_refused() {
+        let mut row = connect_row(None);
+        for bad in ["wait, then write", "a\"b", "a\nb"] {
+            row.name = bad.into();
+            let err = build_study("s", &[row.clone()], &ActionRegistry::default()).unwrap_err();
+            assert!(matches!(err, BuildStudyError::NameBreaksCsv { .. }), "{err:?}");
+        }
+    }
+
     #[test]
     fn over_long_target_name_is_refused() {
         let long = "x".repeat(MAX_LOCAL_NAME_LEN + 1);

@@ -241,9 +241,5 @@ impl GattTranscriptEntry {
 /// where a comma or quote has no reason to appear.
 #[cfg(feature = "std")]
 fn csv_escape_ok(name: &str) -> Option<&str> {
-    if name.contains(',') || name.contains('"') || name.contains('\n') {
-        None
-    } else {
-        Some(name)
-    }
+    crate::sample::csv_cell_ok(name).then_some(name)
 }

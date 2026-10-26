@@ -76,6 +76,16 @@ impl Unit {
     }
 }
 
+/// Whether `name` may sit in a CSV cell unquoted: no comma, quote, CR or LF.
+///
+/// The one rule for a step name in a CSV cell (interfaces/decoders.md, decision 81).
+/// This crate refuses to produce a value that would break the column shape rather
+/// than quoting it. [`Sample::to_csv_row`] blanks a name that fails, so no sample is
+/// lost; the GATT transcript renderer refuses the row; `build_study` refuses the name.
+pub fn csv_cell_ok(name: &str) -> bool {
+    !name.contains([',', '"', '\n', '\r'])
+}
+
 impl Sample {
     /// Header row for `data.csv`/`waveform.csv` (interfaces/decoders.md), written
     /// once per file.
@@ -91,11 +101,15 @@ impl Sample {
     /// `Sample`, and append the result — no column or layout knowledge lives
     /// in Core itself.
     ///
+    /// A `step_name` that fails [`csv_cell_ok`] is written as an empty cell, so the
+    /// row keeps the header's column count and the sample is kept.
+    ///
     /// Returns `None` if `step_name` doesn't fit alongside the rest of the
     /// row within `MAX_CSV_ROW_LEN` — the caller (Core) is expected to log
     /// and skip such a row rather than truncate it silently, since a
     /// truncated CSV row is worse than a dropped one.
     pub fn to_csv_row(&self, step_name: &str) -> Option<String<MAX_CSV_ROW_LEN>> {
+        let step_name = if csv_cell_ok(step_name) { step_name } else { "" };
         let mut row = String::new();
         write!(
             row,

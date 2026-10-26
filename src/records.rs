@@ -96,11 +96,50 @@ pub struct RecordReport {
 }
 
 impl RecordReport {
-    /// Whether every record found verified and nothing was left over. The one
-    /// question a caller usually has.
+    /// Whether at least one record was found, every one verified and nothing
+    /// was left over. The one question a caller usually has.
+    ///
+    /// A report with `total == 0` is **not** verified: an empty capture and a
+    /// capture with no magic in it checked nothing, and "nothing wrong found"
+    /// is not "all verified". Callers that want to say so read `total`.
     pub fn all_verified(&self) -> bool {
-        self.total == self.verified && self.leading_bytes == 0
+        self.total > 0 && self.total == self.verified && self.leading_bytes == 0
     }
+}
+
+/// Why a study's `record_checks` are unusable (refused at validation).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecordCheckError {
+    /// An empty `magic` delimits nothing, so [`verify_records`] would check no
+    /// record and report nothing.
+    EmptyMagic { index: usize },
+}
+
+impl core::fmt::Display for RecordCheckError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            RecordCheckError::EmptyMagic { index } => write!(
+                f,
+                "record_checks[{index}] declares an empty magic, which delimits no record, so \
+                 it would check nothing"
+            ),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for RecordCheckError {}
+
+/// Pre-flight validation for `Study.record_checks`, beside
+/// [`validate_taps`](crate::streams::validate_taps).
+pub fn validate_record_checks(checks: &[RecordCheck]) -> Result<(), RecordCheckError> {
+    for (index, check) in checks.iter().enumerate() {
+        let RecordFraming::MagicPrefixedCrc32Le { magic } = &check.framing;
+        if magic.is_empty() {
+            return Err(RecordCheckError::EmptyMagic { index });
+        }
+    }
+    Ok(())
 }
 
 /// How many later boundaries a failed segment is retried against before it is
@@ -326,12 +365,31 @@ mod tests {
         assert!(!r.all_verified(), "a clean record is not a clean capture");
     }
 
+    #[test]
+    fn an_empty_magic_is_refused_at_validation() {
+        let bad = RecordCheck {
+            stream_id: 0,
+            framing: RecordFraming::MagicPrefixedCrc32Le { magic: Vec::new() },
+        };
+        assert_eq!(
+            validate_record_checks(&[bad]),
+            Err(RecordCheckError::EmptyMagic { index: 0 })
+        );
+        assert_eq!(validate_record_checks(&[]), Ok(()));
+    }
+
     /// An empty capture, and one with no magic at all, are both "no records"
     /// rather than a panic or a false pass.
     #[test]
     fn a_capture_with_no_records_reports_none() {
         let r = verify_records(&[], &framing());
         assert_eq!((r.total, r.verified, r.leading_bytes), (0, 0, 0));
+        assert!(!r.all_verified(), "an empty capture verified nothing");
+
+        let empty_magic = RecordFraming::MagicPrefixedCrc32Le { magic: Vec::new() };
+        let r = verify_records(&[1u8, 2, 3], &empty_magic);
+        assert_eq!(r.total, 0);
+        assert!(!r.all_verified(), "an empty magic verified nothing");
 
         let r = verify_records(&[1u8, 2, 3, 4, 5], &framing());
         assert_eq!((r.total, r.verified), (0, 0));
