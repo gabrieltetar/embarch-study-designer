@@ -485,6 +485,14 @@ mod manifest {
         /// exception — most IRQs dispatch through one `nrfx_isr`.
         #[serde(default)]
         pub isr_args: BTreeMap<String, String>,
+        /// Schema 2: a GPIO port's `struct device *` (`0x%08x`) to its name,
+        /// for [`RecordKind::GpioDispatch`]. Absent in a schema-1 manifest.
+        #[serde(default)]
+        pub devices: BTreeMap<String, String>,
+        /// Schema 2: a callback's code address (`0x%08x`, Thumb bit clear) to
+        /// its symbol, for [`RecordKind::GpioCallbackDone`].
+        #[serde(default)]
+        pub functions: BTreeMap<String, String>,
         /// A content fingerprint for telling two manifests apart. **Not** what
         /// the firmware reports; see [`OutpostHeader`](super::OutpostHeader).
         #[serde(default)]
@@ -582,6 +590,22 @@ mod manifest {
             }
             if kind == RecordKind::Marker {
                 return self.markers.get(&a.to_string()).cloned().unwrap_or_default();
+            }
+            if kind == RecordKind::GpioDispatch {
+                return self
+                    .devices
+                    .get(&format!("0x{a:08x}"))
+                    .cloned()
+                    .unwrap_or_default();
+            }
+            if kind == RecordKind::GpioCallbackDone {
+                // The firmware reports a function pointer, whose bit 0 is the
+                // Thumb marker; the manifest keys the address without it.
+                return self
+                    .functions
+                    .get(&format!("0x{:08x}", a & !1))
+                    .cloned()
+                    .unwrap_or_default();
             }
             String::new()
         }
@@ -819,5 +843,35 @@ mod tests {
             ..Default::default()
         };
         ok.check("abc123", RECORD_LAYOUT_VERSION).expect("agreeing versions decode");
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn gpio_records_are_named_from_devices_and_functions() {
+        let json = r#"{"schema":2,"build_id":"b","record_layout_version":3,
+            "devices":{"0x20001234":"gpio@50000300"},
+            "functions":{"0x00012340":"button_cb"}}"#;
+        let m: OutpostManifest = serde_json::from_str(json).expect("schema 2 parses");
+        assert_eq!(m.label(Some(RecordKind::GpioDispatch), 0x2000_1234), "gpio@50000300");
+        // bit 0 set, as a Thumb function pointer arrives
+        assert_eq!(m.label(Some(RecordKind::GpioCallbackDone), 0x0001_2341), "button_cb");
+        assert_eq!(m.label(Some(RecordKind::GpioCallbackDone), 0x0001_2340), "button_cb");
+        let d = OutpostRecord { cycles: 1, kind: 9, a: 0x2000_1234, b: 0 };
+        assert!(d.to_csv_row(0, 0, None, 1, 0, Some(&m)).ends_with(",gpio_dispatch,536875572,0,gpio@50000300"));
+        let c = OutpostRecord { cycles: 2, kind: 10, a: 0x0001_2341, b: 0 };
+        assert!(c.to_csv_row(1, 0, None, 2, 0, Some(&m)).ends_with(",gpio_callback_done,74561,0,button_cb"));
+        // not named: empty, never guessed
+        assert_eq!(m.label(Some(RecordKind::GpioDispatch), 0x2000_9999), "");
+        assert_eq!(m.label(Some(RecordKind::GpioCallbackDone), 0x0009_9999), "");
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn a_schema_1_manifest_leaves_gpio_records_unnamed() {
+        let json = r#"{"schema":1,"build_id":"b","record_layout_version":3}"#;
+        let m: OutpostManifest = serde_json::from_str(json).expect("schema 1 parses");
+        assert!(m.devices.is_empty() && m.functions.is_empty());
+        assert_eq!(m.label(Some(RecordKind::GpioDispatch), 0x2000_1234), "");
+        assert_eq!(m.label(Some(RecordKind::GpioCallbackDone), 0x0001_2341), "");
     }
 }
