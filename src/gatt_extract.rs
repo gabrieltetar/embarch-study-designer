@@ -561,6 +561,15 @@ fn extract_from_files(
     files: &[SourceFile],
     report: &mut ScanReport,
 ) -> Result<ExtractedGatt, ExtractError> {
+    // Read each file as the compiler does with respect to comments, before
+    // any scanner sees it (decision 84): commented-out definitions are not
+    // definitions.
+    let stripped: Vec<SourceFile> = files
+        .iter()
+        .map(|f| SourceFile { path: f.path.clone(), text: strip_c_comments(&f.text) })
+        .collect();
+    let files = &stripped[..];
+
     // Scalars first, repo-wide: a `#define ES_BASE 0x...` in one header is
     // what a `_UUID_VAL` macro in another resolves against.
     let mut consts: RepoWide<u64> = RepoWide::new();
@@ -1032,6 +1041,63 @@ fn extract_balanced_call(src: &str, open_paren_idx: usize) -> Option<&str> {
     None
 }
 
+/// Replaces every C comment with whitespace, leaving string and character
+/// literals intact and every newline in place (so `#define` line anchoring
+/// and continuation joining behave as on the original). A `//` comment is
+/// dropped up to its newline; a `/* */` comment becomes one space plus the
+/// newlines it contained; an unterminated `/*` runs to end of file, as in C.
+/// A literal that reaches a newline unterminated ends there. Conditional
+/// compilation is not evaluated (decision 57).
+fn strip_c_comments(src: &str) -> String {
+    let mut out = String::with_capacity(src.len());
+    let mut chars = src.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '/' if chars.peek() == Some(&'/') => {
+                while let Some(&n) = chars.peek() {
+                    if n == '\n' {
+                        break;
+                    }
+                    chars.next();
+                }
+            }
+            '/' if chars.peek() == Some(&'*') => {
+                chars.next();
+                out.push(' ');
+                let mut prev = '\0';
+                for n in chars.by_ref() {
+                    if n == '\n' {
+                        out.push('\n');
+                    }
+                    if prev == '*' && n == '/' {
+                        break;
+                    }
+                    prev = n;
+                }
+            }
+            '"' | '\'' => {
+                out.push(c);
+                while let Some(n) = chars.next() {
+                    if n == '\n' {
+                        out.push(n);
+                        break;
+                    }
+                    out.push(n);
+                    if n == '\\' {
+                        if let Some(esc) = chars.next() {
+                            out.push(esc);
+                        }
+                    } else if n == c {
+                        break;
+                    }
+                }
+            }
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
 /// Joins a `#define`'s backslash-newline continuation lines into one
 /// logical line, so the argument-capturing regexes above don't need to
 /// reason about where a multi-line macro invocation happens to wrap.
@@ -1158,6 +1224,89 @@ BT_GATT_SERVICE_DEFINE(sensor_bds,
 
     fn two_file_fixture() -> Result<ExtractedGatt, ExtractError> {
         extract_files(&[("lib/ble/ble_def.h", FIXTURE_DEF_H), ("lib/ble/ble.c", FIXTURE_BLE_C)])
+    }
+
+    // --- decision 84: comments are not definitions ---
+
+    #[test]
+    fn strip_c_comments_keeps_literals_and_lines() {
+        let src = "a // x\nb /* y\nz */ c\n\"//\" '/' \"/*\" \"\\\"//\" d";
+        assert_eq!(
+            strip_c_comments(src),
+            "a \nb  \n c\n\"//\" '/' \"/*\" \"\\\"//\" d"
+        );
+    }
+
+    #[test]
+    fn commented_scalar_define_does_not_make_a_symbol_ambiguous() {
+        let header = format!(
+            "// #define ES_BASE 0x1111111111ULL\n/* #define ES_BASE 0x2222222222ULL */\n{FIXTURE_DEF_H}"
+        );
+        let services =
+            extract_files(&[("lib/ble/ble_def.h", &header), ("lib/ble/ble.c", FIXTURE_BLE_C)])
+                .unwrap()
+                .services;
+        assert_eq!(services.len(), 2);
+        assert_eq!(&services[0].uuid.0[10..], [0xE5, 0x81, 0x00, 0x00, 0x00, 0x00]);
+    }
+
+    #[test]
+    fn commented_uuid_macro_does_not_collide_with_the_live_one() {
+        let header = format!(
+            "// #define SDS_SERVICE_UUID_VAL BT_UUID_128_ENCODE(0x99, 0x853F, 0x4A00, 0x8000, ES_BASE)\n{FIXTURE_DEF_H}"
+        );
+        let services =
+            extract_files(&[("lib/ble/ble_def.h", &header), ("lib/ble/ble.c", FIXTURE_BLE_C)])
+                .unwrap()
+                .services;
+        assert_eq!(services[0].uuid.0[3], 0x01);
+    }
+
+    #[test]
+    fn commented_out_service_block_contributes_no_service() {
+        let ble_c = format!(
+            "{FIXTURE_BLE_C}\n/*\nBT_GATT_SERVICE_DEFINE(old_sds,\n    BT_GATT_PRIMARY_SERVICE(&sds_service_uuid),\n    BT_GATT_CHARACTERISTIC(&sds_hrm_rrm_char_uuid.uuid, BT_GATT_CHRC_READ, BT_GATT_PERM_NONE, NULL, NULL, NULL),\n);\n*/\n// BT_GATT_SERVICE_DEFINE(older, BT_GATT_PRIMARY_SERVICE(&dms_service_uuid),);\n"
+        );
+        let services =
+            extract_files(&[("lib/ble/ble_def.h", FIXTURE_DEF_H), ("lib/ble/ble.c", &ble_c)])
+                .unwrap()
+                .services;
+        assert_eq!(services.len(), 2);
+    }
+
+    #[test]
+    fn commented_uuid_variable_is_not_a_variable() {
+        let ble_c = format!(
+            "// static struct bt_uuid_128 ghost_uuid = BT_UUID_INIT_128(SDS_SERVICE_UUID_VAL);\n{FIXTURE_BLE_C}"
+        );
+        let extracted =
+            extract_files(&[("lib/ble/ble_def.h", FIXTURE_DEF_H), ("lib/ble/ble.c", &ble_c)])
+                .unwrap();
+        assert!(extracted.symbols.iter().all(|s| s.identifier != "ghost_uuid"));
+    }
+
+    #[test]
+    fn prose_comment_naming_the_macro_with_unbalanced_paren_does_not_fail() {
+        let ble_c = format!(
+            "/* see BT_GATT_SERVICE_DEFINE( for the layout */\n// BT_GATT_SERVICE_DEFINE(\n{FIXTURE_BLE_C}"
+        );
+        let services =
+            extract_files(&[("lib/ble/ble_def.h", FIXTURE_DEF_H), ("lib/ble/ble.c", &ble_c)])
+                .unwrap()
+                .services;
+        assert_eq!(services.len(), 2);
+    }
+
+    #[test]
+    fn comment_markers_inside_string_literals_do_not_start_a_comment() {
+        let ble_c = format!(
+            "static const char *u = \"http://x\";\nstatic const char *v = \"/* not a comment\";\n{FIXTURE_BLE_C}"
+        );
+        let services =
+            extract_files(&[("lib/ble/ble_def.h", FIXTURE_DEF_H), ("lib/ble/ble.c", &ble_c)])
+                .unwrap()
+                .services;
+        assert_eq!(services.len(), 2);
     }
 
     #[test]
