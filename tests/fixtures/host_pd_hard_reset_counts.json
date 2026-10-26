@@ -1,0 +1,203 @@
+{
+ "name": "PD hard reset x8",
+ "steps": [
+  {
+   "name": "read source capabilities",
+   "action": {
+    "Exchange": {
+     "signal": "pd-bench",
+     "line": "pd caps",
+     "until": "pd: ",
+     "match_after_echo": true,
+     "refused_on": "pd: error"
+    }
+   },
+   "timeout_ms": 3000,
+   "continue_on_fail": false,
+   "delay_before_ms": 0
+  },
+  {
+   "name": "hard reset x8",
+   "action": {
+    "Repeat": {
+     "count": 8,
+     "values": [],
+     "steps": [
+      {
+       "name": "send hard reset",
+       "action": {
+        "Exchange": {
+         "signal": "pd-bench",
+         "line": "pd hardreset",
+         "until": "pd: ",
+         "match_after_echo": true,
+         "refused_on": "pd: error"
+        }
+       },
+       "timeout_ms": 3000,
+       "continue_on_fail": false,
+       "delay_before_ms": 0
+      },
+      {
+       "name": "settle",
+       "action": {
+        "Wait": {
+         "ms": 6000
+        }
+       },
+       "timeout_ms": 7000,
+       "continue_on_fail": false,
+       "delay_before_ms": 0
+      }
+     ]
+    }
+   },
+   "timeout_ms": 0,
+   "continue_on_fail": false,
+   "delay_before_ms": 0
+  },
+  {
+   "name": "PPS sweep",
+   "action": {
+    "Repeat": {
+     "count": null,
+     "values": [
+      "5",
+      "9",
+      "12",
+      "15",
+      "18",
+      "20",
+      "21"
+     ],
+     "steps": [
+      {
+       "name": "request PPS {value} V",
+       "action": {
+        "Exchange": {
+         "signal": "pd-bench",
+         "line": "pd pps {value}",
+         "until": "pd: ",
+         "match_after_echo": true,
+         "refused_on": "pd: error"
+        }
+       },
+       "timeout_ms": 3000,
+       "continue_on_fail": false,
+       "delay_before_ms": 0
+      },
+      {
+       "name": "status",
+       "action": {
+        "Exchange": {
+         "signal": "pd-bench",
+         "line": "pd status",
+         "until": "pd: ",
+         "match_after_echo": true,
+         "refused_on": "pd: error"
+        }
+       },
+       "timeout_ms": 3000,
+       "continue_on_fail": false,
+       "delay_before_ms": 1500
+      }
+     ]
+    }
+   },
+   "timeout_ms": 0,
+   "continue_on_fail": false,
+   "delay_before_ms": 0
+  }
+ ],
+ "teardown": [
+  {
+   "name": "teardown: partner back to 5 V",
+   "action": {
+    "Exchange": {
+     "signal": "pd-bench",
+     "line": "pd req 1",
+     "until": "pd: ",
+     "match_after_echo": true,
+     "refused_on": "pd: error"
+    }
+   },
+   "timeout_ms": 3000,
+   "continue_on_fail": false,
+   "delay_before_ms": 0
+  }
+ ],
+ "streams": [
+  {
+   "id": 0,
+   "name": "pd-bench console",
+   "source": {
+    "Signal": {
+     "name": "pd-bench"
+    }
+   },
+   "encoding": "Text",
+   "scope": "WholeStudy"
+  },
+  {
+   "id": 1,
+   "name": "dut console",
+   "source": {
+    "Signal": {
+     "name": "dut-console"
+    }
+   },
+   "encoding": "Text",
+   "scope": "WholeStudy"
+  }
+ ],
+ "line_counts": [
+  {
+   "name": "Hard Reset (pd-bench console)",
+   "tap": "pd-bench console",
+   "pattern": "Hard Reset",
+   "kind": "Substring"
+  },
+  {
+   "name": "contract in force (pd-bench console)",
+   "tap": "pd-bench console",
+   "pattern": "contract in force",
+   "kind": "Substring"
+  },
+  {
+   "name": "rx overrun (pd-bench console)",
+   "tap": "pd-bench console",
+   "pattern": "rx overrun",
+   "kind": "Substring"
+  },
+  {
+   "name": "rx message error (pd-bench console)",
+   "tap": "pd-bench console",
+   "pattern": "rx message error",
+   "kind": "Substring"
+  },
+  {
+   "name": "Hard Reset (dut console)",
+   "tap": "dut console",
+   "pattern": "Hard Reset",
+   "kind": "Substring"
+  },
+  {
+   "name": "contract in force (dut console)",
+   "tap": "dut console",
+   "pattern": "contract in force",
+   "kind": "Substring"
+  },
+  {
+   "name": "rx overrun (dut console)",
+   "tap": "dut console",
+   "pattern": "rx overrun",
+   "kind": "Substring"
+  },
+  {
+   "name": "rx message error (dut console)",
+   "tap": "dut console",
+   "pattern": "rx message error",
+   "kind": "Substring"
+  }
+ ]
+}

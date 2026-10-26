@@ -337,3 +337,20 @@ pub const MAX_HOST_PROMPT_LEN: usize = 1024;
 /// The cap Core applies to `HostStepResult.reply`, in bytes; past it the
 /// reply is cut and `reply_truncated` is set. **Assumed.**
 pub const MAX_HOST_REPLY_LEN: usize = 4096;
+
+/// `HostAction::Repeat.count` and the length of `values` (decision 86). The
+/// field repeats ran 2 to 30 times; 100 is ~3x that. **Assumed.**
+pub const MAX_HOST_REPEAT_COUNT: usize = 100;
+/// Inner steps of one `Repeat`. A hard-reset or sweep body was 2-4 steps.
+/// **Assumed.**
+pub const MAX_HOST_REPEAT_STEPS: usize = 16;
+/// Passes times inner steps of one `Repeat`, bounding the run a submit can
+/// ask for. **Assumed.**
+pub const MAX_HOST_EXPANDED_STEPS: usize = 512;
+/// One `values` entry, in bytes. **Assumed.**
+pub const MAX_HOST_VALUE_LEN: usize = 32;
+/// `HostStudy.line_counts`. Eight patterns on two taps was the field case.
+/// **Assumed.**
+pub const MAX_HOST_LINE_COUNTS: usize = 32;
+/// `LineCount.pattern`, in bytes. **Assumed.**
+pub const MAX_HOST_PATTERN_LEN: usize = 256;

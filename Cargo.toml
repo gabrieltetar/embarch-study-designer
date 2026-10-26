@@ -77,7 +77,7 @@ alloc = ["serde/alloc"]
 # `std` implies `alloc`: a build with the standard library has a global
 # allocator by definition, so there is no coherent "std but keep the 64-slot
 # inline array" configuration to preserve (decision 46).
-std = ["alloc", "serde/std"]
+std = ["alloc", "serde/std", "dep:regex"]
 # Exposes the extern "C" surface dev-bench firmware links against
 # (decisions 7, 23). Off by default so embarch-core/embarch-api (plain
 # Cargo dependents) don't carry unused #[no_mangle] symbols.

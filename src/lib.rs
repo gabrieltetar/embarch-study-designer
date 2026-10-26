@@ -119,7 +119,8 @@ pub use gatt_names::{
 };
 #[cfg(feature = "alloc")]
 pub use host_study::{
-    HostAction, HostList, HostStep, HostStepResult, HostStudy, HostStudyError,
+    HostAction, HostList, HostStep, HostStepResult, HostStudy, HostStudyError, HostStudyResult,
+    IterationMarker, IterationRef, LineCount, PatternKind, pass_at, VALUE_PLACEHOLDER,
 };
 pub use ids::{BleAddress, BleAddressKind, Uuid};
 #[cfg(feature = "study-ui")]
