@@ -42,6 +42,9 @@ pub mod eap;
 #[cfg(feature = "ffi")]
 pub mod ffi;
 pub mod gatt;
+/// Host-run studies (decision 80) — JSON only, never on the dev-bench wire.
+#[cfg(feature = "alloc")]
+pub mod host_study;
 /// The `.eap` text parser and host-side reference interpreter (decisions
 /// 58-62) — `std`-only authoring-time tooling, the same posture
 /// as [`gatt_extract`], so dev-bench firmware never carries it.
@@ -113,6 +116,10 @@ pub use gatt_extract::{
 #[cfg(feature = "std")]
 pub use gatt_names::{
     label_from_service_symbol, label_from_symbol, GattName, GattNameBook, GattNameSource,
+};
+#[cfg(feature = "alloc")]
+pub use host_study::{
+    HostAction, HostList, HostStep, HostStepResult, HostStudy, HostStudyError,
 };
 pub use ids::{BleAddress, BleAddressKind, Uuid};
 #[cfg(feature = "study-ui")]

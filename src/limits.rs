@@ -314,3 +314,26 @@ pub const DEV_BENCH_MAX_EVENT_ARMS_PER_STATE: usize = 2;
 ///
 /// **Advisory, never a gate; nothing here branches on it.**
 pub const DEV_BENCH_MAX_PROTOCOLS_WIRE_LEN: usize = 3072;
+
+// ---------------------------------------------------------------------------
+// Host-run studies (decision 80). Host-only: a `HostStudy` never reaches the
+// dev-bench wire, so none of these is a firmware budget. All ASSUMED, sized
+// from one field sequence, not measured across several.
+// ---------------------------------------------------------------------------
+
+/// `HostStudy.steps`. The field PD sequence is 49 steps; 128 is ~2.6x that.
+/// **Assumed**, from one source sequence. Unrelated to
+/// [`MAX_STEPS_PER_STUDY`] (64) and to dev-bench's 16.
+pub const MAX_HOST_STEPS: usize = 128;
+/// `HostStudy.teardown`. The field scripts' exit paths were 2-4 commands.
+/// **Assumed.**
+pub const MAX_HOST_TEARDOWN_STEPS: usize = 16;
+/// `HostStudy.name` and `HostStep.name`, in bytes. **Assumed.**
+pub const MAX_HOST_NAME_LEN: usize = 96;
+/// `HostAction::Exchange.line` and `Instrument.line`, in bytes. **Assumed.**
+pub const MAX_HOST_LINE_LEN: usize = 256;
+/// `HostAction::Prompt.text`, in bytes. **Assumed.**
+pub const MAX_HOST_PROMPT_LEN: usize = 1024;
+/// The cap Core applies to `HostStepResult.reply`, in bytes; past it the
+/// reply is cut and `reply_truncated` is set. **Assumed.**
+pub const MAX_HOST_REPLY_LEN: usize = 4096;
