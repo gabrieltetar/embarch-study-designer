@@ -562,7 +562,7 @@ fn extract_from_files(
     report: &mut ScanReport,
 ) -> Result<ExtractedGatt, ExtractError> {
     // Read each file as the compiler does with respect to comments, before
-    // any scanner sees it (decision 84): commented-out definitions are not
+    // any scanner sees it (decision 85): commented-out definitions are not
     // definitions.
     let stripped: Vec<SourceFile> = files
         .iter()
@@ -1226,7 +1226,7 @@ BT_GATT_SERVICE_DEFINE(sensor_bds,
         extract_files(&[("lib/ble/ble_def.h", FIXTURE_DEF_H), ("lib/ble/ble.c", FIXTURE_BLE_C)])
     }
 
-    // --- decision 84: comments are not definitions ---
+    // --- decision 85: comments are not definitions ---
 
     #[test]
     fn strip_c_comments_keeps_literals_and_lines() {
