@@ -101,8 +101,8 @@ pub use eap_interp::{Event as InterpEvent, Run as ProtocolRun, Step as InterpSte
 pub use eap_parse::{parse as parse_eap, resolve as resolve_eap, EapError, EapErrorKind, EapFile, ResolvedProtocol};
 #[cfg(feature = "eap-parse")]
 pub use eap_repo::{
-    protocol_path, protocols_dir, scan as scan_protocols, BlockOutcome, FileError, ProtocolFile,
-    RepoError, RepoProtocols,
+    divergence as protocol_divergence, protocol_path, protocols_dir, scan as scan_protocols,
+    BlockOutcome, Difference, DifferenceKind, Divergence, FileError, ProtocolFile, RepoError, RepoProtocols,
 };
 pub use gatt::{
     GattCharacteristicInfo, GattDirection, GattEventKind, GattServiceInfo, GattTarget,

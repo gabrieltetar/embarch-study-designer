@@ -355,6 +355,100 @@ pub fn delete(firmware_repo_root: &Path, stem: &str) -> Result<(), RepoError> {
     }
 }
 
+/// What the repo's current manifests say about one protocol a saved study
+/// carries (decision 87).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Divergence {
+    /// The current manifest resolves this name to exactly the definition the
+    /// study carries.
+    Unchanged,
+    /// The name still resolves, to a different definition. Lists what
+    /// differs, one entry per source, frame, session variable or state.
+    Changed(Vec<Difference>),
+    /// The name no longer resolves: the block was renamed or deleted, its
+    /// file no longer parses, or two files now declare it.
+    Gone,
+}
+
+/// One part of a protocol that is not the same on both sides.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Difference {
+    /// `"source"`, `"frame"`, `"session variable"` or `"state"`.
+    pub part: &'static str,
+    pub name: String,
+    pub how: DifferenceKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DifferenceKind {
+    /// In the current manifest, not in the study.
+    Added,
+    /// In the study, not in the current manifest.
+    Removed,
+    /// Under the same name on both sides, with different contents.
+    Modified,
+}
+
+fn diff_named<'a, T: PartialEq + 'a>(
+    part: &'static str,
+    carried: impl Iterator<Item = (&'a str, &'a T)> + Clone,
+    current: impl Iterator<Item = (&'a str, &'a T)> + Clone,
+    out: &mut Vec<Difference>,
+) {
+    for (name, old) in carried.clone() {
+        let how = match current.clone().find(|(n, _)| *n == name) {
+            None => DifferenceKind::Removed,
+            Some((_, new)) if new != old => DifferenceKind::Modified,
+            Some(_) => continue,
+        };
+        out.push(Difference { part, name: name.to_string(), how });
+    }
+    for (name, _) in current {
+        if !carried.clone().any(|(n, _)| n == name) {
+            out.push(Difference { part, name: name.to_string(), how: DifferenceKind::Added });
+        }
+    }
+}
+
+/// Compares one carried definition with the current one, part by part.
+fn compare(carried: &ProtocolDef, current: &ProtocolDef) -> Divergence {
+    if carried == current {
+        return Divergence::Unchanged;
+    }
+    let mut out = Vec::new();
+    diff_named("source", carried.sources.iter().map(|x| (x.name.as_str(), x)), current.sources.iter().map(|x| (x.name.as_str(), x)), &mut out);
+    diff_named("frame", carried.frames.iter().map(|x| (x.name.as_str(), x)), current.frames.iter().map(|x| (x.name.as_str(), x)), &mut out);
+    diff_named("session variable", carried.session.iter().map(|x| (x.name.as_str(), x)), current.session.iter().map(|x| (x.name.as_str(), x)), &mut out);
+    diff_named("state", carried.states.iter().map(|x| (x.name.as_str(), x)), current.states.iter().map(|x| (x.name.as_str(), x)), &mut out);
+    // Equal part by part but unequal overall means only an order changed
+    // (indices are positional, so that is a real difference).
+    if out.is_empty() {
+        out.push(Difference { part: "state", name: String::from("(order)"), how: DifferenceKind::Modified });
+    }
+    Divergence::Changed(out)
+}
+
+/// For each protocol a saved study carries, whether the current manifests
+/// still resolve its name to the same definition (decision 87).
+///
+/// `carried` is `&study.protocols`; `current` is [`RepoProtocols::defs`]. The
+/// comparison is structural, never a digest: nothing is added to the study,
+/// and the study is not changed or refused — a diverged study still runs what
+/// it carries (decision 58). Answers come back in the study's own order; a
+/// study carrying no protocol gets an empty list.
+pub fn divergence(carried: &[ProtocolDef], current: &[ProtocolDef]) -> Vec<(String, Divergence)> {
+    carried
+        .iter()
+        .map(|c| {
+            let d = match current.iter().find(|d| d.name == c.name) {
+                None => Divergence::Gone,
+                Some(d) => compare(c, d),
+            };
+            (c.name.as_str().to_string(), d)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -500,5 +594,44 @@ mod tests {
         repo.write("gone", &named("gone"));
         assert!(delete(&repo.0, "gone").is_ok());
         assert!(scan(&repo.0).unwrap().files.is_empty());
+    }
+
+    fn def_of(repo: &Repo, name: &str) -> ProtocolDef {
+        scan(&repo.0).unwrap().defs().unwrap().into_iter().find(|d| d.name == name).unwrap()
+    }
+
+    #[test]
+    fn divergence_unchanged_changed_gone_and_none() {
+        let repo = Repo::new("div");
+        repo.write("one", &named("one"));
+        repo.write("two", &named("two"));
+        let carried = vec![def_of(&repo, "one"), def_of(&repo, "two")];
+
+        // Edit one (add a state), delete two.
+        repo.write(
+            "one",
+            "protocol one {\n    state go {\n        on_timeout 1000ms: goto done\n    }\n\n    state done outcome: pass\n\n    state extra outcome: fail\n}\n",
+        );
+        delete(&repo.0, "two").unwrap();
+        let current = scan(&repo.0).unwrap().defs().unwrap();
+
+        let got = divergence(&carried, &current);
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0].0, "one");
+        match &got[0].1 {
+            Divergence::Changed(d) => assert_eq!(
+                d,
+                &vec![Difference { part: "state", name: "extra".into(), how: DifferenceKind::Added }]
+            ),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(got[1], ("two".to_string(), Divergence::Gone));
+
+        // Unrelated edit elsewhere: unchanged.
+        let same = divergence(&carried[..1], &[carried[0].clone()]);
+        assert_eq!(same[0].1, Divergence::Unchanged);
+
+        // A study carrying no protocol has nothing to report.
+        assert!(divergence(&[], &current).is_empty());
     }
 }
