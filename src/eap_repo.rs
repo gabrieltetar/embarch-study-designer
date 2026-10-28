@@ -373,7 +373,11 @@ pub enum Divergence {
 /// One part of a protocol that is not the same on both sides.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Difference {
-    /// `"source"`, `"frame"`, `"session variable"` or `"state"`.
+    /// Every value it takes: `"source"`, `"frame"`, `"session variable"` or
+    /// `"state"` (a named entry added, removed or modified, or the name
+    /// `(order)` when only that part's order changed), or `"protocol"` with
+    /// name `(name)` when nothing in those four differs and the protocol's
+    /// own name does.
     pub part: &'static str,
     pub name: String,
     pub how: DifferenceKind,
@@ -410,20 +414,37 @@ fn diff_named<'a, T: PartialEq + 'a>(
     }
 }
 
+/// Like [`diff_named`], and when that finds nothing for the part but the two
+/// lists are still unequal, only their order changed: one `(order)` entry
+/// under this part (indices are positional, so that is a real difference).
+fn diff_part<'a, T: PartialEq + 'a>(
+    part: &'static str,
+    carried: &'a [T],
+    current: &'a [T],
+    name_of: impl Fn(&'a T) -> &'a str + Copy,
+    out: &mut Vec<Difference>,
+) {
+    let before = out.len();
+    diff_named(part, carried.iter().map(|x| (name_of(x), x)), current.iter().map(|x| (name_of(x), x)), out);
+    if out.len() == before && carried != current {
+        out.push(Difference { part, name: String::from("(order)"), how: DifferenceKind::Modified });
+    }
+}
+
 /// Compares one carried definition with the current one, part by part.
 fn compare(carried: &ProtocolDef, current: &ProtocolDef) -> Divergence {
     if carried == current {
         return Divergence::Unchanged;
     }
     let mut out = Vec::new();
-    diff_named("source", carried.sources.iter().map(|x| (x.name.as_str(), x)), current.sources.iter().map(|x| (x.name.as_str(), x)), &mut out);
-    diff_named("frame", carried.frames.iter().map(|x| (x.name.as_str(), x)), current.frames.iter().map(|x| (x.name.as_str(), x)), &mut out);
-    diff_named("session variable", carried.session.iter().map(|x| (x.name.as_str(), x)), current.session.iter().map(|x| (x.name.as_str(), x)), &mut out);
-    diff_named("state", carried.states.iter().map(|x| (x.name.as_str(), x)), current.states.iter().map(|x| (x.name.as_str(), x)), &mut out);
-    // Equal part by part but unequal overall means only an order changed
-    // (indices are positional, so that is a real difference).
+    diff_part("source", &carried.sources, &current.sources, |x| x.name.as_str(), &mut out);
+    diff_part("frame", &carried.frames, &current.frames, |x| x.name.as_str(), &mut out);
+    diff_part("session variable", &carried.session, &current.session, |x| x.name.as_str(), &mut out);
+    diff_part("state", &carried.states, &current.states, |x| x.name.as_str(), &mut out);
+    // Unequal overall with no named part or order differing: the only field
+    // left is the protocol's own name.
     if out.is_empty() {
-        out.push(Difference { part: "state", name: String::from("(order)"), how: DifferenceKind::Modified });
+        out.push(Difference { part: "protocol", name: String::from("(name)"), how: DifferenceKind::Modified });
     }
     Divergence::Changed(out)
 }
@@ -633,5 +654,75 @@ mod tests {
 
         // A study carrying no protocol has nothing to report.
         assert!(divergence(&[], &current).is_empty());
+    }
+
+    const RICH: &str = "protocol rich {
+    source a = characteristic(service: \"0000aaaa-0000-1000-8000-00805f9b34fb\", char: \"0000aaa1-0000-1000-8000-00805f9b34fb\")
+    source b = characteristic(service: \"0000bbbb-0000-1000-8000-00805f9b34fb\", char: \"0000bbb1-0000-1000-8000-00805f9b34fb\")
+    frame fa on a {
+        u8 x
+    }
+    frame fb on b {
+        u8 y
+    }
+    session {
+        var p: u32 = 0
+        var q: u32 = 0
+    }
+    state go {
+        on_timeout 1000ms: goto done
+    }
+    state done outcome: pass
+}
+";
+
+    fn rich() -> ProtocolDef {
+        let repo = Repo::new("rich");
+        repo.write("rich", RICH);
+        def_of(&repo, "rich")
+    }
+
+    fn changed(a: &ProtocolDef, b: &ProtocolDef) -> Vec<(&'static str, String)> {
+        match compare(a, b) {
+            Divergence::Changed(d) => d.into_iter().map(|x| (x.part, x.name)).collect(),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_pure_reordering_names_the_part_that_moved() {
+        let base = rich();
+        let mut d = base.clone();
+        d.sources.reverse();
+        assert_eq!(changed(&base, &d), vec![("source", "(order)".to_string())]);
+        let mut d = base.clone();
+        d.frames.reverse();
+        assert_eq!(changed(&base, &d), vec![("frame", "(order)".to_string())]);
+        let mut d = base.clone();
+        d.session.reverse();
+        assert_eq!(changed(&base, &d), vec![("session variable", "(order)".to_string())]);
+        let mut d = base.clone();
+        d.states.reverse();
+        assert_eq!(changed(&base, &d), vec![("state", "(order)".to_string())]);
+    }
+
+    #[test]
+    fn reordering_two_parts_reports_both() {
+        let base = rich();
+        let mut d = base.clone();
+        d.frames.reverse();
+        d.states.reverse();
+        assert_eq!(
+            changed(&base, &d),
+            vec![("frame", "(order)".to_string()), ("state", "(order)".to_string())]
+        );
+    }
+
+    #[test]
+    fn a_difference_outside_the_four_lists_is_not_filed_under_state() {
+        let base = rich();
+        let mut d = base.clone();
+        d.name = heapless::String::try_from("renamed").unwrap();
+        assert_eq!(changed(&base, &d), vec![("protocol", "(name)".to_string())]);
     }
 }
