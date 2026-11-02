@@ -168,9 +168,10 @@ pub enum HostAction {
         /// whoever shows the prompt**, against the bench live there; Core
         /// forwards it unchanged and resolves nothing, and a name the bench
         /// lacks is not refused here or there; only its shape is checked
-        /// (non-blank, at most `MAX_HOST_NAME_LEN` bytes, no control character
-        /// or edge whitespace). Skipped when `None`, so a study written before
-        /// the field serializes as it always did.
+        /// (non-blank, at most `MAX_HOST_NAME_LEN` bytes, no control character,
+        /// line separator, bidi format character or edge whitespace). Skipped
+        /// when `None`, so a study written before the field serializes as it
+        /// always did.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         bench_config: Option<String>,
     },
@@ -288,9 +289,10 @@ pub enum HostStudyError {
     /// `line` holds a CR, LF or other control character; the terminator is
     /// declared on the signal or instrument, never written by the study.
     ControlInLine { list: HostList, index: usize },
-    /// `Prompt.bench_config` holds a control character or starts or ends in
-    /// whitespace (decision 88): it is printed on one line and later looked up
-    /// by exact name, so neither can be part of a name.
+    /// `Prompt.bench_config` holds a control character, a line or paragraph
+    /// separator or a bidi format character, or starts or ends in whitespace
+    /// (decision 88): it is printed on one line and later looked up by exact
+    /// name, so none of them can be part of a name.
     BadBenchConfig { list: HostList, index: usize },
     ZeroTimeout { list: HostList, index: usize },
     ZeroWait { list: HostList, index: usize },
@@ -400,6 +402,14 @@ impl HostStudy {
     }
 }
 
+/// A character that is not a control character but still breaks a name shown
+/// on one line: U+2028 and U+2029 end the line, and the bidi format characters
+/// (U+200E, U+200F, U+202A to U+202E, U+2066 to U+2069) reorder what follows,
+/// so a name could display as another name it does not equal.
+fn breaks_one_line_text(ch: char) -> bool {
+    matches!(ch, '\u{2028}' | '\u{2029}' | '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+}
+
 impl HostStep {
     fn validate(&self, list: HostList, index: usize, in_repeat: bool) -> Result<(), HostStudyError> {
         use HostStudyError as E;
@@ -449,7 +459,7 @@ impl HostStep {
                     if c.len() > MAX_HOST_NAME_LEN {
                         return Err(E::FieldTooLong { list, index, what: "bench_config" });
                     }
-                    if c.trim() != c || c.chars().any(char::is_control) {
+                    if c.trim() != c || c.chars().any(|ch| ch.is_control() || breaks_one_line_text(ch)) {
                         return Err(E::BadBenchConfig { list, index });
                     }
                 }
@@ -532,6 +542,7 @@ impl HostStep {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::format;
     use alloc::vec;
 
     const PD: &str = include_str!("../tests/fixtures/host_pd_source_sequence.json");
@@ -864,13 +875,23 @@ mod tests {
         );
         assert!(study(vec![prompt("t", Some(&long[1..]))]).validate().is_ok());
         // One line, matched by exact name later: no control character, no edge whitespace.
-        for bad in [" pd", "pd ", "pd\tanalyzer", "pd\nanalyzer", "pd\u{7f}"] {
+        let mut bad: Vec<String> = [" pd", "pd ", "pd\tanalyzer", "pd\nanalyzer", "pd\u{7f}"].map(String::from).to_vec();
+        // Line and paragraph separators, and every bidi format character.
+        let format_chars = ['\u{2028}', '\u{2029}', '\u{200E}', '\u{200F}']
+            .into_iter()
+            .chain('\u{202A}'..='\u{202E}')
+            .chain('\u{2066}'..='\u{2069}');
+        bad.extend(format_chars.map(|ch| format!("pd{ch}analyzer")));
+        assert_eq!(bad.len(), 5 + 13);
+        for bad in &bad {
             assert_eq!(
                 study(vec![prompt("t", Some(bad))]).validate(),
                 Err(HostStudyError::BadBenchConfig { list: HostList::Steps, index: 0 }),
                 "{bad:?}"
             );
         }
+        // Not a format character: a zero-width joiner and a non-ASCII letter stay allowed.
+        assert!(study(vec![prompt("t", Some("pd\u{200D}analyzer \u{e9}"))]).validate().is_ok());
         assert!(study(vec![prompt("t", Some("pd analyzer, in line"))]).validate().is_ok());
         // Checked the same in the teardown and inside a `Repeat`.
         let mut s = study(vec![prompt("t", None)]);
