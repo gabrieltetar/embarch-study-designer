@@ -328,7 +328,8 @@ pub const MAX_HOST_STEPS: usize = 128;
 /// `HostStudy.teardown`. The field scripts' exit paths were 2-4 commands.
 /// **Assumed.**
 pub const MAX_HOST_TEARDOWN_STEPS: usize = 16;
-/// `HostStudy.name` and `HostStep.name`, in bytes. **Assumed.**
+/// `HostStudy.name`, `HostStep.name` and `HostAction::Prompt.bench_config`
+/// (decision 88), in bytes. **Assumed.**
 pub const MAX_HOST_NAME_LEN: usize = 96;
 /// `HostAction::Exchange.line` and `Instrument.line`, in bytes. **Assumed.**
 pub const MAX_HOST_LINE_LEN: usize = 256;

@@ -353,7 +353,17 @@ pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 15;
 ///   (it runs on Core's own executor, JSON only), so
 ///   [`DEV_BENCH_WIRE_SCHEMA_VERSION`] stays at 15. Made by the landing
 ///   supervisor in the same fold as `tasks/core/102`.
-pub const HOST_TYPE_SCHEMA_VERSION: u32 = 20;
+/// - **v21** — host-only: `HostAction::Prompt` gained `bench_config`, the
+///   bench configuration a step asks for by name (decision 88,
+///   `embarch-core` decision 107). `HostStudy` crosses `embarch-api` ->
+///   `embarch-core` as JSON and reaches dev-bench never, so
+///   [`DEV_BENCH_WIRE_SCHEMA_VERSION`] stays at 15. The field is
+///   `#[serde(default)]` and skipped when `None`, so a study written at v20
+///   loads and serializes byte for byte as it did — and the number moves
+///   anyway, on v19's reasoning: `deny_unknown_fields` means a v20 Core
+///   refuses a study that names a config with a `422` naming no version,
+///   and the drift detector exists to say *which* side is behind instead.
+pub const HOST_TYPE_SCHEMA_VERSION: u32 = 21;
 
 /// [`HOST_TYPE_SCHEMA_VERSION`]'s triggers are a strict superset of
 /// [`DEV_BENCH_WIRE_SCHEMA_VERSION`]'s (decision 12's

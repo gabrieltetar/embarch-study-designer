@@ -18,6 +18,10 @@
 //!
 //! Signal, instrument and prompt names are checked against topology when Core
 //! accepts a study, not here.
+//!
+//! **A prompt may name a bench configuration (decision 88).** `Prompt.bench_config`
+//! is a name only: no one refuses it at submission, Core forwards it, and the
+//! surface showing the prompt resolves it against the bench live there.
 
 use alloc::boxed::Box;
 use alloc::string::String;
@@ -157,7 +161,17 @@ pub enum HostAction {
         refused_on: Option<String>,
     },
     /// Block until an operator answers, or the timeout.
-    Prompt { text: String },
+    Prompt {
+        text: String,
+        /// The bench configuration this step asks for, by name (decision 88):
+        /// what the bench must look like, never which cables. **Resolved by
+        /// whoever shows the prompt**, against the bench live there; Core
+        /// forwards it unchanged and resolves nothing, and a name the bench
+        /// lacks is not refused here or there. Skipped when `None`, so a
+        /// study written before the field serializes as it always did.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bench_config: Option<String>,
+    },
     /// One SCPI line; with `query` the reply is recorded.
     Instrument {
         instrument: String,
@@ -418,10 +432,17 @@ impl HostStep {
                     blank(r, "refused_on")?;
                 }
             }
-            HostAction::Prompt { text } => {
+            HostAction::Prompt { text, bench_config } => {
                 blank(text, "text")?;
                 if text.len() > MAX_HOST_PROMPT_LEN {
                     return Err(E::FieldTooLong { list, index, what: "text" });
+                }
+                // A blank name is not an omission: absent is the way to name no config.
+                if let Some(c) = bench_config {
+                    blank(c, "bench_config")?;
+                    if c.len() > MAX_HOST_NAME_LEN {
+                        return Err(E::FieldTooLong { list, index, what: "bench_config" });
+                    }
                 }
             }
             HostAction::Instrument { instrument, line: l, .. } => {
@@ -772,6 +793,78 @@ mod tests {
         let r = HostStudyResult { study_name: "n".into(), steps: vec![], iterations: ms.to_vec() };
         let back: HostStudyResult = serde_json::from_str(&serde_json::to_string(&r).unwrap()).unwrap();
         assert_eq!(r, back);
+    }
+
+    // ---- a prompt naming a bench configuration (decision 88) ----
+
+    /// A study exactly as the crate serialized it before `bench_config`
+    /// existed (`HOST_TYPE_SCHEMA_VERSION` 20): no such key anywhere.
+    const BEFORE_BENCH_CONFIG: &str = r#"{"name":"pd","steps":[{"name":"plug","action":{"Prompt":{"text":"plug in the pack"}},"timeout_ms":60000,"continue_on_fail":false,"delay_before_ms":0}],"teardown":[{"name":"unplug","action":{"Prompt":{"text":"unplug the pack"}},"timeout_ms":60000,"continue_on_fail":false,"delay_before_ms":0}],"streams":[],"line_counts":[]}"#;
+
+    fn prompt(text: &str, bench_config: Option<&str>) -> HostStep {
+        HostStep {
+            name: "p".into(),
+            action: HostAction::Prompt { text: text.into(), bench_config: bench_config.map(Into::into) },
+            timeout_ms: 60_000,
+            continue_on_fail: false,
+            delay_before_ms: 0,
+        }
+    }
+
+    #[test]
+    fn a_study_written_before_bench_config_loads_and_serializes_byte_identical() {
+        let s: HostStudy = serde_json::from_str(BEFORE_BENCH_CONFIG).unwrap();
+        s.validate().unwrap();
+        for step in s.steps.iter().chain(&s.teardown) {
+            assert!(matches!(&step.action, HostAction::Prompt { bench_config: None, .. }));
+        }
+        assert_eq!(serde_json::to_string(&s).unwrap(), BEFORE_BENCH_CONFIG);
+        // The two field fixtures predate it too, and still load and validate.
+        pd().validate().unwrap();
+        hr().validate().unwrap();
+    }
+
+    #[test]
+    fn a_prompt_naming_a_bench_config_round_trips() {
+        let s = study(vec![prompt("move the analyzer in line", Some("pd analyzer in line"))]);
+        s.validate().unwrap();
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(
+            json.contains(r#""Prompt":{"text":"move the analyzer in line","bench_config":"pd analyzer in line"}"#),
+            "{json}"
+        );
+        let back: HostStudy = serde_json::from_str(&json).unwrap();
+        assert_eq!(s, back);
+        // A sibling key the type does not declare is still refused.
+        let mut v = serde_json::to_value(&s).unwrap();
+        v["steps"][0]["action"]["Prompt"]["config"] = serde_json::json!("x");
+        assert!(serde_json::from_value::<HostStudy>(v).is_err());
+    }
+
+    #[test]
+    fn a_bench_config_name_is_checked_for_shape_only() {
+        let what = "bench_config";
+        assert_eq!(
+            study(vec![prompt("t", Some(" "))]).validate(),
+            Err(HostStudyError::BlankField { list: HostList::Steps, index: 0, what })
+        );
+        let long = "c".repeat(MAX_HOST_NAME_LEN + 1);
+        assert_eq!(
+            study(vec![prompt("t", Some(&long))]).validate(),
+            Err(HostStudyError::FieldTooLong { list: HostList::Steps, index: 0, what })
+        );
+        assert!(study(vec![prompt("t", Some(&long[1..]))]).validate().is_ok());
+        // Checked the same in the teardown and inside a `Repeat`.
+        let mut s = study(vec![prompt("t", None)]);
+        s.teardown.push(prompt("t", Some("")));
+        assert_eq!(s.validate(), Err(HostStudyError::BlankField { list: HostList::Teardown, index: 0, what }));
+        assert!(matches!(
+            study(vec![repeat(Some(2), &[], vec![prompt("t", Some("\t"))])]).validate(),
+            Err(HostStudyError::InRepeat { source, .. })
+                if *source == HostStudyError::BlankField { list: HostList::Steps, index: 0, what }
+        ));
+        // A name is never looked up here: there is no bench to look it up in.
+        assert!(study(vec![prompt("t", Some("a config no bench has"))]).validate().is_ok());
     }
 
     #[test]
