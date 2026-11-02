@@ -167,8 +167,10 @@ pub enum HostAction {
         /// what the bench must look like, never which cables. **Resolved by
         /// whoever shows the prompt**, against the bench live there; Core
         /// forwards it unchanged and resolves nothing, and a name the bench
-        /// lacks is not refused here or there. Skipped when `None`, so a
-        /// study written before the field serializes as it always did.
+        /// lacks is not refused here or there; only its shape is checked
+        /// (non-blank, at most `MAX_HOST_NAME_LEN` bytes, no control character
+        /// or edge whitespace). Skipped when `None`, so a study written before
+        /// the field serializes as it always did.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         bench_config: Option<String>,
     },
@@ -286,6 +288,10 @@ pub enum HostStudyError {
     /// `line` holds a CR, LF or other control character; the terminator is
     /// declared on the signal or instrument, never written by the study.
     ControlInLine { list: HostList, index: usize },
+    /// `Prompt.bench_config` holds a control character or starts or ends in
+    /// whitespace (decision 88): it is printed on one line and later looked up
+    /// by exact name, so neither can be part of a name.
+    BadBenchConfig { list: HostList, index: usize },
     ZeroTimeout { list: HostList, index: usize },
     ZeroWait { list: HostList, index: usize },
     TooManyStreams { count: usize },
@@ -442,6 +448,9 @@ impl HostStep {
                     blank(c, "bench_config")?;
                     if c.len() > MAX_HOST_NAME_LEN {
                         return Err(E::FieldTooLong { list, index, what: "bench_config" });
+                    }
+                    if c.trim() != c || c.chars().any(char::is_control) {
+                        return Err(E::BadBenchConfig { list, index });
                     }
                 }
             }
@@ -854,6 +863,15 @@ mod tests {
             Err(HostStudyError::FieldTooLong { list: HostList::Steps, index: 0, what })
         );
         assert!(study(vec![prompt("t", Some(&long[1..]))]).validate().is_ok());
+        // One line, matched by exact name later: no control character, no edge whitespace.
+        for bad in [" pd", "pd ", "pd\tanalyzer", "pd\nanalyzer", "pd\u{7f}"] {
+            assert_eq!(
+                study(vec![prompt("t", Some(bad))]).validate(),
+                Err(HostStudyError::BadBenchConfig { list: HostList::Steps, index: 0 }),
+                "{bad:?}"
+            );
+        }
+        assert!(study(vec![prompt("t", Some("pd analyzer, in line"))]).validate().is_ok());
         // Checked the same in the teardown and inside a `Repeat`.
         let mut s = study(vec![prompt("t", None)]);
         s.teardown.push(prompt("t", Some("")));
