@@ -153,7 +153,7 @@ pub use streams::{
 pub use study::{
     outpost_requirement_is_satisfiable, requirement_satisfied, Action, BleRole, BuildSpec,
     DevBenchLogLevel, GattOperation, OutpostModeRequirement, Requirements, RequirementsError,
-    BleSecurityLevel, Step, Study, WaitBudgetError, NO_SNIPPETS, REQUIREMENT_ANY,
+    BleSecurityLevel, MonitorWindowError, Step, Study, WaitBudgetError, NO_SNIPPETS, REQUIREMENT_ANY,
 };
 #[cfg(feature = "study-ui")]
 pub use study_builder::{build_study, BuildStudyError, BuiltInActionKind, RoleChoice, RowAction, TableRow};

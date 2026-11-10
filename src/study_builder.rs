@@ -335,6 +335,9 @@ pub enum BuildStudyError {
     /// A Notify or Indicate row whose timeout is 0: the operation would wait
     /// for nothing (decision 83).
     ZeroWaitBudget { step: String, operation: &'static str },
+    /// A one-shot monitor row inside a capture window another row opened and
+    /// no `GattMonitorStop` closed (decision 89).
+    OneShotInOpenMonitorWindow { step: String, opened_by: String },
     /// A selective monitor row that names no characteristic.
     NoMonitorTargets,
     /// More characteristics than one step can carry
@@ -424,6 +427,11 @@ impl std::fmt::Display for BuildStudyError {
                 f,
                 "step '{step}' is a {operation} with a timeout of 0 ms, which waits for \
                  nothing; give it the time to wait for the notification"
+            ),
+            BuildStudyError::OneShotInOpenMonitorWindow { step, opened_by } => write!(
+                f,
+                "step '{step}' is a one-shot monitor inside the capture window '{opened_by}' \
+                 opened; add a GattMonitorStop before it, or move it ahead of '{opened_by}'"
             ),
             BuildStudyError::NoMonitorTargets => write!(
                 f,
@@ -562,6 +570,18 @@ pub fn build_study(
         // so this can't actually fail -- .ok() rather than .unwrap() only to
         // avoid a panic if that invariant ever drifts.
         let _ = steps.push(step);
+    }
+
+    // The window bracket is a property of the whole table, so it is checked
+    // once the steps exist (decision 89), through the method a hand-written
+    // study is checked with.
+    {
+        if let Err(e) = crate::study::monitor_window_violation(steps.iter().map(|s| &s.action)) {
+            return Err(BuildStudyError::OneShotInOpenMonitorWindow {
+                step: rows[e.step].name.clone(),
+                opened_by: rows[e.opened_by].name.clone(),
+            });
+        }
     }
 
     let mut study_protocols: Bounded<crate::eap::ProtocolDef, MAX_PROTOCOLS_PER_STUDY> =
@@ -1890,6 +1910,93 @@ mod tests {
             }
             let err = bad.validate_wait_budgets().unwrap_err();
             assert_eq!((err.step, err.operation), (0, kind));
+        }
+    }
+
+    // --- decision 89: a one-shot monitor inside an open window ------------
+
+    fn monitor_row(name: &str, which: BuiltInActionKind) -> TableRow {
+        let selected = matches!(
+            which,
+            BuiltInActionKind::GattMonitorSelected | BuiltInActionKind::GattMonitorSelectedStart
+        );
+        TableRow {
+            name: name.to_string(),
+            action: RowAction::BuiltIn {
+                targets: if selected {
+                    vec![TargetInput {
+                        service_uuid: "6e400001-b5a3-f393-e0a9-e50e24dcca9e".to_string(),
+                        characteristic_uuid: "6e400003-b5a3-f393-e0a9-e50e24dcca9e".to_string(),
+                    }]
+                } else {
+                    Vec::new()
+                },
+                which,
+                role: RoleChoice::Central,
+                target_name: None,
+                security_level: None,
+                protocol: None,
+                entry_state: None,
+            },
+            timeout_ms: 1_000,
+            continue_on_fail: false,
+            delay_before_ms: 0,
+        }
+    }
+
+    fn build_kinds(kinds: &[BuiltInActionKind]) -> Result<Study, BuildStudyError> {
+        let rows: Vec<TableRow> =
+            kinds.iter().enumerate().map(|(i, k)| monitor_row(&format!("s{i}"), *k)).collect();
+        build_study("s", &rows, &ActionRegistry::default())
+    }
+
+    #[test]
+    fn a_one_shot_inside_an_open_window_is_refused_naming_both_steps() {
+        use BuiltInActionKind::*;
+        for open in [GattMonitorStart, GattMonitorSelectedStart] {
+            for one_shot in [GattMonitorAll, GattMonitorSelected] {
+                let err = build_kinds(&[open, one_shot, GattMonitorStop]).unwrap_err();
+                match err {
+                    BuildStudyError::OneShotInOpenMonitorWindow { step, opened_by } => {
+                        assert_eq!((step.as_str(), opened_by.as_str()), ("s1", "s0"));
+                    }
+                    other => panic!("expected OneShotInOpenMonitorWindow, got {other:?}"),
+                }
+            }
+        }
+        // A second Start replaces the first window; the one-shot names the later opener.
+        let err = build_kinds(&[GattMonitorStart, GattMonitorSelectedStart, GattMonitorAll])
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            BuildStudyError::OneShotInOpenMonitorWindow { opened_by, .. } if opened_by == "s1"
+        ));
+    }
+
+    #[test]
+    fn a_hand_written_study_with_a_one_shot_in_a_window_fails_validate_monitor_windows() {
+        use BuiltInActionKind::*;
+        let mut study = build_kinds(&[GattMonitorStart, GattMonitorStop, GattMonitorAll]).unwrap();
+        assert!(study.validate_monitor_windows().is_ok());
+        // Move the Stop behind the one-shot.
+        study.steps.swap(1, 2);
+        let err = study.validate_monitor_windows().unwrap_err();
+        assert_eq!((err.step, err.opened_by), (1, 0));
+    }
+
+    #[test]
+    fn a_one_shot_outside_any_window_still_builds_and_validates() {
+        use BuiltInActionKind::*;
+        let cases: [&[BuiltInActionKind]; 5] = [
+            &[GattMonitorAll],
+            &[GattMonitorAll, GattMonitorStart, GattMonitorStop],
+            &[GattMonitorSelectedStart, GattMonitorStop, GattMonitorSelected],
+            &[GattMonitorStop, GattMonitorAll],
+            &[GattMonitorStop],
+        ];
+        for kinds in cases {
+            let study = build_kinds(kinds).unwrap();
+            assert!(study.validate_monitor_windows().is_ok(), "{kinds:?}");
         }
     }
 

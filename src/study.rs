@@ -700,6 +700,64 @@ impl Study {
     }
 }
 
+/// A `GattMonitorAll`/`GattMonitorSelected` step inside a capture window
+/// that a `GattMonitorStart`/`GattMonitorSelectedStart` opened and no
+/// `GattMonitorStop` has closed yet. dev-bench refuses it at run time
+/// (dev-bench decision 55); this names it at authoring time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MonitorWindowError {
+    /// Index in [`Study::steps`] of the one-shot monitor step.
+    pub step: usize,
+    /// Index of the step that opened the window still open at `step`.
+    pub opened_by: usize,
+}
+
+impl core::fmt::Display for MonitorWindowError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "step {} is a one-shot monitor inside the window step {} opened; \
+             put a GattMonitorStop before it, or move it ahead of that step",
+            self.step, self.opened_by
+        )
+    }
+}
+
+impl Study {
+    /// Refuses a one-shot monitor step inside an open monitor window
+    /// (decision 89). Walks `steps` in order: a window opens at a
+    /// `GattMonitorStart`/`GattMonitorSelectedStart` (a second one while open
+    /// replaces it), closes at the next `GattMonitorStop`; a `Stop` with no
+    /// open window is legal; `continue_on_fail` changes nothing. Additive:
+    /// nothing calls it implicitly.
+    pub fn validate_monitor_windows(&self) -> Result<(), MonitorWindowError> {
+        monitor_window_violation(self.steps.iter().map(|s| &s.action))
+    }
+}
+
+/// The walk behind [`Study::validate_monitor_windows`], over actions alone so
+/// the builder can run it before a `Study` exists.
+pub(crate) fn monitor_window_violation<'a>(
+    actions: impl Iterator<Item = &'a Action>,
+) -> Result<(), MonitorWindowError> {
+    let mut open: Option<usize> = None;
+    for (step, action) in actions.enumerate() {
+        match action {
+            Action::GattMonitorStart {} | Action::GattMonitorSelectedStart { .. } => {
+                open = Some(step)
+            }
+            Action::GattMonitorStop {} => open = None,
+            Action::GattMonitorAll {} | Action::GattMonitorSelected { .. } => {
+                if let Some(opened_by) = open {
+                    return Err(MonitorWindowError { step, opened_by });
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 impl Step {
     /// `Some("Notify" | "Indicate")` when this step waits on a notification
     /// with an operation budget of 0.
