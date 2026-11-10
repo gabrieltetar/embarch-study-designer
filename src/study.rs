@@ -108,7 +108,7 @@ impl DevBenchLogLevel {
     /// from one place — it is small, but it is exactly the sort of hand-mirrored
     /// constant this project has already had go stale twice
     /// (`embarch-dev-bench/app/CMakeLists.txt`'s own comment on
-    /// `STUDY_FFI_STUB_SCHEMA_VERSION`).
+    /// `DEV_BENCH_WIRE_SCHEMA_VERSION`).
     pub const fn zephyr_level(self) -> u8 {
         match self {
             Self::Off => 0,

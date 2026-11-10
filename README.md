@@ -2,10 +2,11 @@
 
 Shared `no_std` Rust data types — and the narrow set of tools to work with them
 identically everywhere — for [EmbArch](https://github.com/gabrieltetar/embarch-doc)
-hardware-in-the-loop studies. Compiled independently by `embarch-api`,
-`embarch-core`, and `embarch-dev-bench` firmware, so a `Study` crossing between
-them can't drift into three independently-maintained, slowly-diverging
-definitions.
+hardware-in-the-loop studies. Compiled by `embarch-api` and `embarch-core`, and
+read by `embarch-dev-bench` firmware's build, which takes the wire schema
+version, the limits and the wire enum values out of this crate's source at
+configure time, so a `Study` crossing between them can't drift into three
+independently-maintained, slowly-diverging definitions.
 
 This crate is a mechanical translation of
 [`embarch-doc`'s `embarch-study-designer/spec.md`](https://github.com/gabrieltetar/embarch-doc/blob/main/embarch-study-designer/spec.md)
@@ -27,7 +28,6 @@ section.
 | `schema_version` | `STUDY_DESIGNER_SCHEMA_VERSION` (decision 12) |
 | `limits` | Fixed-capacity bounds for every `heapless` collection (decision 15) |
 | `ids` | `Uuid`/`BleAddress` newtypes |
-| `ffi` (feature `ffi`) | `extern "C"` surface for dev-bench firmware (decisions 7, 23) |
 | `bounded` | Capacity-bounded sequence storage, one shape per target (decisions 46, 49) |
 | `streams` | Stream taps — source, scope, and rendering encoding for one capture (decision 39, interfaces/taps.md) |
 | `decoder` | Engineer-declared struct decoding for a stream tap's payload bytes (decision 52, interfaces/decoders.md) |
@@ -46,19 +46,16 @@ section.
 
 ## Features
 
-- **default** — `#![no_std]`, no allocator, no floating-point-heavy code. What
-  dev-bench firmware links.
+- **default** — `#![no_std]`, no allocator, no floating-point-heavy code.
+  Nothing links it today: dev-bench firmware stopped linking the crate when
+  the FFI staticlib was retired (decision 7), and the shape stays open for a
+  firmware consumer.
 - **`alloc`** — heap-backed `Study.steps` and result containers instead of a
   fixed-capacity `heapless` collection. Host consumers (`embarch-api`,
   `embarch-core`, `embarch-ui`) enable it.
 - **`std`** — enables `alloc` plus the standard library, for the
   authoring-time tools (`gatt-extract`, `study-ui`). dev-bench firmware never
   enables this.
-- **`ffi`** — enables the `ffi` module's `extern "C"` functions. Only dev-bench
-  firmware's build turns this on; today this is a minimal, representative
-  slice of the eventual surface (see `ffi.rs`'s module docs) — it locks in the
-  calling convention, not the full set of functions real dev-bench firmware
-  will eventually need.
 - **`gatt-extract`** — the repo-walking GATT extractor (needs `regex`,
   `ignore`): the `GattConfigExtractor` trait, `ZephyrBleDefExtractor`, and the
   `extract-gatt-config` CLI binary. An authoring-time binary; `std`-only.
@@ -70,21 +67,18 @@ section.
   match. `std`-only.
 
 Run the full test suite with `cargo test --all-features`; a plain
-`cargo test`/`cargo build` (no features) exercises the actual `#![no_std]`,
-no-allocator path every consumer besides the host crates compiles.
+`cargo build` (no features) exercises the `#![no_std]`, no-allocator path.
 
 ## Status
 
-Types, wire format, and CRC/CSV tooling are implemented and tested against a
-stand-in host target. **The nRF54 cross-compilation toolchain landed** —
-`embarch-dev-bench` decision 20 records decision 8 as closed, and the real
-staticlib is linked on hardware workspaces — so this crate does link into
-dev-bench firmware today. What is still true is narrower and worth being
-exact about: **`cbindgen` header generation was never built.**
-`embarch-dev-bench/app/src/study_ffi.h` is hand-written and kept in step by
-hand. Corrected 2026-09-11 (`tasks/suite/014`); the earlier wording said the
-toolchain remained "blocked on that hardware existing", which stopped being
-true when the bench shipped.
+Types, wire format, and CRC/CSV tooling are implemented and tested.
+**Dev-bench firmware links no Rust.** Its C codec is written by hand and
+pinned to this crate by the cross-side byte tests
+(`tests/firmware_test_vectors.rs`), and its build reads the wire schema
+version, every limit and every wire enum's values out of this crate's source
+at configure time (`embarch-dev-bench` decisions 20 and 56). The `extern "C"`
+staticlib it used to link was retired on 2026-11-10: its only live call was
+the schema version.
 
 ## License
 

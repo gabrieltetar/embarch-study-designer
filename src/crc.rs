@@ -21,7 +21,7 @@ const CRC32: Crc<u32> = Crc::<u32>::new(&CRC_32_ISO_HDLC);
 /// A single `Step`'s postcard encoding didn't fit the internal scratch
 /// buffer. Should be unreachable given `limits` (decision 15),
 /// but this returns an error rather than panicking — this crate avoids
-/// panics as a matter of course, not just at the FFI boundary (decision 23).
+/// panics as a matter of course (decision 23).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StepTooLargeError;
 

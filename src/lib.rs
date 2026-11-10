@@ -39,8 +39,6 @@ pub mod decoder;
 /// 58-62). `no_std` like every other wire type — the *parser* that produces
 /// one is not (see [`eap_parse`]).
 pub mod eap;
-#[cfg(feature = "ffi")]
-pub mod ffi;
 pub mod gatt;
 /// Host-run studies (decision 80) — JSON only, never on the dev-bench wire.
 #[cfg(feature = "alloc")]

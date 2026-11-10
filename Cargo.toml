@@ -3,22 +3,15 @@ name = "embarch-study-designer"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "Shared no_std data types (and the tools to work with them) for EmbArch hardware-in-the-loop studies, spanning embarch-api, embarch-core, and embarch-dev-bench firmware."
+description = "Shared no_std data types (and the tools to work with them) for EmbArch hardware-in-the-loop studies, spanning embarch-api, embarch-core, and the embarch-dev-bench firmware build."
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 # Plain `rlib` for local dev/test and for embarch-core/embarch-api's Cargo
-# dependency use. The staticlib dev-bench firmware links (decision 7) is built
-# on demand instead: embarch-dev-bench's CMake passes `--crate-type staticlib`
-# with the target triple and `--features ffi`. Requesting it unconditionally
-# here would break a plain host `cargo build`, which has no panic_handler to
-# resolve for a final staticlib artifact — that handler is `#[cfg]`-gated to
-# `feature = "ffi", target_os = "none"` in src/ffi.rs.
-#
-# Corrected 2026-09-11 (tasks/suite/014): this comment used to say the target
-# and panic handler "don't exist yet". Both exist — embarch-dev-bench decision
-# 8 is closed and the handler is at src/ffi.rs:37. The conditional build is a
-# deliberate choice, not a gap waiting on a toolchain.
+# dependency use. dev-bench firmware links no Rust: its build reads the wire
+# schema version, the limits and the wire enum values out of this crate's
+# source at configure time (decision 7; embarch-dev-bench decisions 20, 56).
+# The FFI staticlib it used to link was retired on 2026-11-10.
 
 [dependencies]
 serde = { version = "1.0.228", default-features = false, features = ["derive"] }
@@ -78,10 +71,6 @@ alloc = ["serde/alloc"]
 # allocator by definition, so there is no coherent "std but keep the 64-slot
 # inline array" configuration to preserve (decision 46).
 std = ["alloc", "serde/std", "dep:regex"]
-# Exposes the extern "C" surface dev-bench firmware links against
-# (decisions 7, 23). Off by default so embarch-core/embarch-api (plain
-# Cargo dependents) don't carry unused #[no_mangle] symbols.
-ffi = []
 # The static GATT-config extraction tool (decision 33): the
 # `GattConfigExtractor` trait, `ZephyrBleDefExtractor`, and the
 # `extract-gatt-config` CLI binary. std-only (filesystem access) — off by
@@ -107,10 +96,10 @@ study-ui = ["std", "dep:toml"]
 # them, and carries no parser at all.
 eap-parse = ["std"]
 
-# decision 23: this crate is the build root when cross-compiled as
-# dev-bench firmware's FFI staticlib, so this profile setting is what actually
-# takes effect for that build (a dependency crate's own [profile.*] is otherwise
-# ignored by Cargo). panic=abort is also the correct default for a no_std target
-# with no unwinding runtime to begin with (decision 5).
+# Decision 23 set this for the FFI staticlib, the one build this crate was the
+# root of (a dependency crate's own [profile.*] is ignored by Cargo). The
+# staticlib is retired; the setting stays because panic=abort is still the
+# correct default for a no_std target with no unwinding runtime (decision 5),
+# and today it reaches only this crate's own release binaries.
 [profile.release]
 panic = "abort"

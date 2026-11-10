@@ -10,9 +10,8 @@ on:
 # unlike embarch-topology this crate has no probe-rs/serialport, and every
 # optional dependency (regex, serde_json, ignore, toml) is pure Rust.
 #
-# `--locked` is honest here: Cargo.lock is committed (this crate is the FFI
-# build root for dev-bench firmware, decision 23), so a fresh runner resolves
-# exactly what a developer does.
+# `--locked` is honest here: Cargo.lock is committed, so a fresh runner
+# resolves exactly what a developer does.
 #
 # WHY `cargo build` APPEARS AS ITS OWN STEP FOR THE TWO NARROW CELLS
 # ------------------------------------------------------------------
@@ -83,10 +82,10 @@ jobs:
         with:
           components: clippy
 
-      # --- Cell: default (no features). dev-bench firmware's real shape ---
+      # --- Cell: default (no features). The crate's no_std shape ---
       # no_std, no allocator (decisions 5, 15, 46). The one that must never
       # break. `default = []`, so this is identical to --no-default-features.
-      - name: "build (default, no features) — dev-bench's no_std, allocator-free lib"
+      - name: "build (default, no features) — the no_std, allocator-free lib"
         run: cargo build --locked
       - name: "cargo test (default, no features)"
         run: cargo test --locked
@@ -117,24 +116,6 @@ jobs:
       - name: "cargo test (eap-parse) — the .eap parser and host-side reference interpreter"
         run: cargo test --locked --no-default-features --features eap-parse
 
-      # --- Cell: ffi. Stated limit, deliberately ---
-      # This step type-checks src/ffi.rs's extern "C" surface (decisions 7, 23)
-      # against the rest of the crate on the host, in dev-bench's real no_std,
-      # no-alloc configuration. It catches a signature or type break in that
-      # module, which is a real regression class and the reason the step is here.
-      #
-      # It does NOT prove what dev-bench actually needs: that the crate links as
-      # a `--crate-type staticlib` on a cross target with a panic handler and
-      # panic=abort. That build root does not exist yet (see the comment above
-      # [dependencies] in Cargo.toml, and open.md). Adding a cross-compile step
-      # before that toolchain exists would be a step that cannot fail for the
-      # reason it was added, so this is a `build` with a stated ceiling instead.
-      # `cargo test` is not used: this cell is narrow (no_std, no alloc) and
-      # would be contaminated by dev-dependency feature unification exactly as
-      # `default` and `alloc` are.
-      - name: "build (ffi) — type-checks the extern \"C\" surface; does NOT prove the staticlib cross-link"
-        run: cargo build --locked --no-default-features --features ffi
-
       # --- Clippy ---
       # Widest set first (every feature on at once, which is also the only
       # configuration asserting the tool features do not collide), then the
@@ -142,7 +123,7 @@ jobs:
       # build's.
       - name: "clippy (--all-features, the widest set)"
         run: cargo clippy --locked --all-features --all-targets -- -D warnings
-      - name: "clippy (default, no features — dev-bench's shape)"
+      - name: "clippy (default, no features — the no_std shape)"
         run: cargo clippy --locked --no-default-features --all-targets -- -D warnings
       - name: "clippy (alloc only)"
         run: cargo clippy --locked --no-default-features --features alloc --all-targets -- -D warnings
