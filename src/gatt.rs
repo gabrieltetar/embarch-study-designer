@@ -163,8 +163,11 @@ pub struct GattTranscriptEntry {
     /// disconnect, discovery starting).
     pub service_uuid: Option<crate::ids::Uuid>,
     pub characteristic_uuid: Option<crate::ids::Uuid>,
-    /// Raw ATT error code, `0` when there was none — passed through
-    /// unchanged, not re-encoded, matching this module's stance on
+    /// One raw byte whose meaning depends on `kind`: the ATT error code
+    /// (`0` when there was none) for most kinds, the raw properties byte
+    /// for a characteristic-discovered entry, the HCI disconnect reason
+    /// for a disconnected entry (see `interfaces/gatt-types.md`). Passed
+    /// through unchanged, not re-encoded, matching this module's stance on
     /// `GattCharacteristicInfo.properties`.
     pub att_status: u8,
     pub payload: Vec<u8, { crate::limits::MAX_PAYLOAD_LEN }>,
