@@ -1,0 +1,117 @@
+{
+ "reducer": "interval",
+ "cases": [
+  {
+   "name": "rss of both stamps and the clock",
+   "input": {
+    "unit": "1",
+    "clock_u_ms": 0.4,
+    "markers": [
+     {
+      "name": "a",
+      "t_ms": 1000,
+      "u_ms": 0.3
+     },
+     {
+      "name": "b",
+      "t_ms": 1250,
+      "u_ms": 0.0
+     }
+    ],
+    "window": {
+     "from_marker": "a",
+     "to_marker": "b"
+    }
+   },
+   "expect": {
+    "value": 250.0,
+    "u_source": "derived",
+    "incomplete": [],
+    "U": 1.0
+   }
+  },
+  {
+   "name": "undeclared stamp u",
+   "input": {
+    "unit": "1",
+    "clock_u_ms": 0.4,
+    "markers": [
+     {
+      "name": "a",
+      "t_ms": 1000,
+      "u_ms": null
+     },
+     {
+      "name": "b",
+      "t_ms": 1250,
+      "u_ms": 0.1
+     }
+    ],
+    "window": {
+     "from_marker": "a",
+     "to_marker": "b"
+    }
+   },
+   "expect": {
+    "value": 250.0,
+    "u_source": "undeclared",
+    "incomplete": []
+   }
+  },
+  {
+   "name": "missing marker fails",
+   "input": {
+    "unit": "1",
+    "clock_u_ms": 0.4,
+    "markers": [
+     {
+      "name": "a",
+      "t_ms": 1000,
+      "u_ms": 0.1
+     }
+    ],
+    "window": {
+     "from_marker": "a",
+     "to_marker": "b"
+    }
+   },
+   "expect": {
+    "value": null,
+    "u_source": "derived",
+    "incomplete": [
+     "parse_failed"
+    ]
+   }
+  },
+  {
+   "name": "end before start fails",
+   "input": {
+    "unit": "1",
+    "clock_u_ms": 0.4,
+    "markers": [
+     {
+      "name": "a",
+      "t_ms": 2000,
+      "u_ms": 0.1
+     },
+     {
+      "name": "b",
+      "t_ms": 1250,
+      "u_ms": 0.1
+     }
+    ],
+    "window": {
+     "from_marker": "a",
+     "to_marker": "b"
+    }
+   },
+   "expect": {
+    "value": null,
+    "u_source": "derived",
+    "incomplete": [
+     "parse_failed"
+    ]
+   }
+  }
+ ]
+}

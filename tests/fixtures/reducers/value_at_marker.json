@@ -1,0 +1,105 @@
+{
+ "reducer": "value_at_marker",
+ "cases": [
+  {
+   "name": "latest sample at or before",
+   "input": {
+    "unit": "V",
+    "u": 0.01,
+    "points": [
+     {
+      "t_ms": 100,
+      "value": 1.0
+     },
+     {
+      "t_ms": 200,
+      "value": 2.0
+     },
+     {
+      "t_ms": 300,
+      "value": 3.0
+     }
+    ],
+    "markers": [
+     {
+      "name": "m",
+      "t_ms": 250,
+      "u_ms": null
+     }
+    ],
+    "window": {
+     "from_marker": "m"
+    }
+   },
+   "expect": {
+    "value": 2.0,
+    "u_source": "derived",
+    "incomplete": [],
+    "U": 0.02
+   }
+  },
+  {
+   "name": "sample on the stamp counts",
+   "input": {
+    "unit": "V",
+    "u": 0.01,
+    "points": [
+     {
+      "t_ms": 100,
+      "value": 1.0
+     },
+     {
+      "t_ms": 300,
+      "value": 3.0
+     }
+    ],
+    "markers": [
+     {
+      "name": "m",
+      "t_ms": 300,
+      "u_ms": null
+     }
+    ],
+    "window": {
+     "from_marker": "m"
+    }
+   },
+   "expect": {
+    "value": 3.0,
+    "u_source": "derived",
+    "incomplete": [],
+    "U": 0.02
+   }
+  },
+  {
+   "name": "nothing before the marker fails",
+   "input": {
+    "unit": "V",
+    "u": 0.01,
+    "points": [
+     {
+      "t_ms": 300,
+      "value": 3.0
+     }
+    ],
+    "markers": [
+     {
+      "name": "m",
+      "t_ms": 250,
+      "u_ms": null
+     }
+    ],
+    "window": {
+     "from_marker": "m"
+    }
+   },
+   "expect": {
+    "value": null,
+    "u_source": "derived",
+    "incomplete": [
+     "parse_failed"
+    ]
+   }
+  }
+ ]
+}

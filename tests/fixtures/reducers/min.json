@@ -1,0 +1,50 @@
+{
+ "reducer": "min",
+ "cases": [
+  {
+   "name": "declared u undivided",
+   "input": {
+    "unit": "V",
+    "u": 0.05,
+    "points": [
+     {
+      "t_ms": 0,
+      "value": 3.0
+     },
+     {
+      "t_ms": 1,
+      "value": -1.5
+     },
+     {
+      "t_ms": 2,
+      "value": 7.25
+     },
+     {
+      "t_ms": 3,
+      "value": 2.0
+     }
+    ]
+   },
+   "expect": {
+    "value": -1.5,
+    "u_source": "derived",
+    "incomplete": [],
+    "U": 0.1
+   }
+  },
+  {
+   "name": "empty fails",
+   "input": {
+    "unit": "V",
+    "u": 0.05
+   },
+   "expect": {
+    "value": null,
+    "u_source": "derived",
+    "incomplete": [
+     "parse_failed"
+    ]
+   }
+  }
+ ]
+}

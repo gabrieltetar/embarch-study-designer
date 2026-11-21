@@ -1,0 +1,145 @@
+{
+ "reducer": "percentile",
+ "cases": [
+  {
+   "name": "median of five",
+   "input": {
+    "unit": "mV",
+    "u": 1.0,
+    "points": [
+     {
+      "t_ms": 0,
+      "value": 50
+     },
+     {
+      "t_ms": 1,
+      "value": 10
+     },
+     {
+      "t_ms": 2,
+      "value": 40
+     },
+     {
+      "t_ms": 3,
+      "value": 20
+     },
+     {
+      "t_ms": 4,
+      "value": 30
+     }
+    ],
+    "window": {
+     "percentile": 50.0
+    }
+   },
+   "expect": {
+    "value": 30.0,
+    "u_source": "derived",
+    "incomplete": [],
+    "U": 22.449944320643645,
+    "type_a": 11.180339887498947
+   }
+  },
+  {
+   "name": "p90 interpolates",
+   "input": {
+    "unit": "mV",
+    "u": 1.0,
+    "points": [
+     {
+      "t_ms": 0,
+      "value": 50
+     },
+     {
+      "t_ms": 1,
+      "value": 10
+     },
+     {
+      "t_ms": 2,
+      "value": 40
+     },
+     {
+      "t_ms": 3,
+      "value": 20
+     },
+     {
+      "t_ms": 4,
+      "value": 30
+     }
+    ],
+    "window": {
+     "percentile": 90.0
+    }
+   },
+   "expect": {
+    "value": 46.0,
+    "u_source": "derived",
+    "incomplete": [],
+    "U": 10.893375576927248,
+    "type_a": 5.3541019662496865
+   }
+  },
+  {
+   "name": "p0 is the minimum",
+   "input": {
+    "unit": "mV",
+    "u": 1.0,
+    "points": [
+     {
+      "t_ms": 0,
+      "value": 50
+     },
+     {
+      "t_ms": 1,
+      "value": 10
+     },
+     {
+      "t_ms": 2,
+      "value": 40
+     },
+     {
+      "t_ms": 3,
+      "value": 20
+     },
+     {
+      "t_ms": 4,
+      "value": 30
+     }
+    ],
+    "window": {
+     "percentile": 0.0
+    }
+   },
+   "expect": {
+    "value": 10.0,
+    "u_source": "derived",
+    "incomplete": [],
+    "U": 2.0,
+    "type_a": 0.0
+   }
+  },
+  {
+   "name": "p outside range fails",
+   "input": {
+    "unit": "mV",
+    "u": 1.0,
+    "points": [
+     {
+      "t_ms": 0,
+      "value": 1.0
+     }
+    ],
+    "window": {
+     "percentile": 101.0
+    }
+   },
+   "expect": {
+    "value": null,
+    "u_source": "derived",
+    "incomplete": [
+     "parse_failed"
+    ]
+   }
+  }
+ ]
+}

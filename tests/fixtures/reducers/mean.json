@@ -1,0 +1,86 @@
+{
+ "reducer": "mean",
+ "cases": [
+  {
+   "name": "four values",
+   "input": {
+    "unit": "V",
+    "u": 0.1,
+    "points": [
+     {
+      "t_ms": 0,
+      "value": 1
+     },
+     {
+      "t_ms": 1,
+      "value": 2
+     },
+     {
+      "t_ms": 2,
+      "value": 3
+     },
+     {
+      "t_ms": 3,
+      "value": 4
+     }
+    ]
+   },
+   "expect": {
+    "value": 2.5,
+    "u_source": "derived",
+    "incomplete": [],
+    "U": 1.3063945294843615,
+    "type_a": 0.6454972243679028
+   }
+  },
+  {
+   "name": "one value has type_a zero",
+   "input": {
+    "unit": "V",
+    "u": 0.1,
+    "points": [
+     {
+      "t_ms": 0,
+      "value": 5.0
+     }
+    ]
+   },
+   "expect": {
+    "value": 5.0,
+    "u_source": "derived",
+    "incomplete": [],
+    "U": 0.2,
+    "type_a": 0.0
+   }
+  },
+  {
+   "name": "truncated capture still averages",
+   "input": {
+    "unit": "V",
+    "u": 0.1,
+    "incomplete": [
+     "truncated_capture"
+    ],
+    "points": [
+     {
+      "t_ms": 0,
+      "value": 1.0
+     },
+     {
+      "t_ms": 1,
+      "value": 3.0
+     }
+    ]
+   },
+   "expect": {
+    "value": 2.0,
+    "u_source": "derived",
+    "incomplete": [
+     "truncated_capture"
+    ],
+    "U": 2.009975124224178,
+    "type_a": 1.0
+   }
+  }
+ ]
+}

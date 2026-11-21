@@ -1,0 +1,125 @@
+{
+ "reducer": "rate",
+ "cases": [
+  {
+   "name": "five in a two second window, clock declared",
+   "input": {
+    "unit": "1",
+    "clock_u_ms": 1.0,
+    "points": [
+     {
+      "t_ms": 0,
+      "value": 0
+     },
+     {
+      "t_ms": 400,
+      "value": 0
+     },
+     {
+      "t_ms": 800,
+      "value": 0
+     },
+     {
+      "t_ms": 1200,
+      "value": 0
+     },
+     {
+      "t_ms": 2000,
+      "value": 0
+     },
+     {
+      "t_ms": 2500,
+      "value": 0
+     }
+    ],
+    "window": {
+     "from_utc_ms": 0,
+     "to_utc_ms": 2000
+    }
+   },
+   "expect": {
+    "value": 2.5,
+    "u_source": "derived",
+    "incomplete": [],
+    "U": 2.236070772583015,
+    "type_a": 1.118033988749895
+   }
+  },
+  {
+   "name": "clock undeclared",
+   "input": {
+    "unit": "1",
+    "points": [
+     {
+      "t_ms": 0,
+      "value": 0
+     },
+     {
+      "t_ms": 500,
+      "value": 0
+     }
+    ],
+    "window": {
+     "from_utc_ms": 0,
+     "to_utc_ms": 1000
+    }
+   },
+   "expect": {
+    "value": 2.0,
+    "u_source": "undeclared",
+    "incomplete": []
+   }
+  },
+  {
+   "name": "no window end fails",
+   "input": {
+    "unit": "1",
+    "points": [
+     {
+      "t_ms": 0,
+      "value": 0
+     }
+    ],
+    "window": {
+     "from_utc_ms": 0
+    }
+   },
+   "expect": {
+    "value": null,
+    "u_source": "derived",
+    "incomplete": [
+     "parse_failed"
+    ]
+   }
+  },
+  {
+   "name": "record gap carried",
+   "input": {
+    "unit": "1",
+    "clock_u_ms": 0.0,
+    "incomplete": [
+     "record_gap"
+    ],
+    "points": [
+     {
+      "t_ms": 0,
+      "value": 0
+     }
+    ],
+    "window": {
+     "from_utc_ms": 0,
+     "to_utc_ms": 1000
+    }
+   },
+   "expect": {
+    "value": 1.0,
+    "u_source": "derived",
+    "incomplete": [
+     "record_gap"
+    ],
+    "U": 2.0,
+    "type_a": 1.0
+   }
+  }
+ ]
+}

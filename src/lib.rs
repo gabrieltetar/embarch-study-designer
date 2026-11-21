@@ -67,6 +67,8 @@ pub mod outpost;
 pub mod merged_actions;
 pub mod protocol;
 pub mod records;
+#[cfg(feature = "reducers")]
+pub mod reducers;
 #[cfg(feature = "study-ui")]
 pub mod registry;
 pub mod result;

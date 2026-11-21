@@ -1,0 +1,54 @@
+{
+ "reducer": "max",
+ "cases": [
+  {
+   "name": "declared u undivided",
+   "input": {
+    "unit": "mA",
+    "u": 0.5,
+    "k": 3.0,
+    "points": [
+     {
+      "t_ms": 0,
+      "value": 3.0
+     },
+     {
+      "t_ms": 1,
+      "value": -1.5
+     },
+     {
+      "t_ms": 2,
+      "value": 7.25
+     },
+     {
+      "t_ms": 3,
+      "value": 2.0
+     }
+    ]
+   },
+   "expect": {
+    "value": 7.25,
+    "u_source": "derived",
+    "incomplete": [],
+    "U": 1.5
+   }
+  },
+  {
+   "name": "u undeclared",
+   "input": {
+    "unit": "mA",
+    "points": [
+     {
+      "t_ms": 0,
+      "value": 1.0
+     }
+    ]
+   },
+   "expect": {
+    "value": 1.0,
+    "u_source": "undeclared",
+    "incomplete": []
+   }
+  }
+ ]
+}

@@ -115,6 +115,8 @@ jobs:
         run: cargo test --locked --no-default-features --features study-ui
       - name: "cargo test (eap-parse) — the .eap parser and host-side reference interpreter"
         run: cargo test --locked --no-default-features --features eap-parse
+      - name: "cargo test (reducers) — the built-in HIL reducers and their fixtures; needs only alloc"
+        run: cargo test --locked --no-default-features --features reducers
 
       # --- Clippy ---
       # Widest set first (every feature on at once, which is also the only

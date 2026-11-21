@@ -95,6 +95,12 @@ study-ui = ["std", "dep:toml"]
 # and are NOT behind this feature -- dev-bench carries those and executes
 # them, and carries no parser at all.
 eap-parse = ["std"]
+# The built-in HIL reducers (decisions 92 to 94): count, rate, min, max, mean,
+# percentile, interval, value-at-marker, with every behaviour version kept.
+# Needs only `alloc` (`String`/`Vec` in its output; its square root is its own,
+# so no `std` and no `libm`). embarch-core and embarch-api turn it on; nothing
+# else does, so every existing consumer builds unchanged.
+reducers = ["alloc"]
 
 # Decision 23 set this for the FFI staticlib, the one build this crate was the
 # root of (a dependency crate's own [profile.*] is ignored by Cargo). The
