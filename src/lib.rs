@@ -71,6 +71,8 @@ pub mod records;
 pub mod reducers;
 #[cfg(feature = "study-ui")]
 pub mod registry;
+#[cfg(feature = "verdicts")]
+pub mod verdicts;
 pub mod result;
 pub mod sample;
 pub mod bounded;

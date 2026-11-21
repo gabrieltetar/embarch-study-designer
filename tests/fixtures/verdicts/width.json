@@ -1,0 +1,277 @@
+{
+ "rule": "acceptance_width",
+ "cases": [
+  {
+   "name": "band wide enough",
+   "limit": {
+    "kind": "band",
+    "lo": 1.0,
+    "hi": 2.0
+   },
+   "w": 0.1,
+   "source": {
+    "range_min": 0.0,
+    "range_max": 10.0,
+    "resolution": 0.01,
+    "u": 0.1
+   },
+   "expect": {
+    "result": "accepted"
+   }
+  },
+  {
+   "name": "band exactly 2 x max(w,U) is refused",
+   "limit": {
+    "kind": "band",
+    "lo": 1.0,
+    "hi": 1.4
+   },
+   "w": 0.2,
+   "source": {
+    "range_min": 0.0,
+    "range_max": 10.0,
+    "resolution": 0.01,
+    "u": 0.1
+   },
+   "expect": {
+    "result": "band_too_narrow",
+    "basis": "uncertainty"
+   }
+  },
+  {
+   "name": "band just over 2 x max(w,U) is accepted",
+   "limit": {
+    "kind": "band",
+    "lo": 1.0,
+    "hi": 1.41
+   },
+   "w": 0.2,
+   "source": {
+    "range_min": 0.0,
+    "range_max": 10.0,
+    "resolution": 0.01,
+    "u": 0.1
+   },
+   "expect": {
+    "result": "accepted"
+   }
+  },
+  {
+   "name": "w = U = 0.1, band 0.2 refused",
+   "limit": {
+    "kind": "band",
+    "lo": 1.0,
+    "hi": 1.2
+   },
+   "w": 0.1,
+   "source": {
+    "range_min": 0.0,
+    "range_max": 10.0,
+    "resolution": 0.01,
+    "u": 0.1
+   },
+   "expect": {
+    "result": "band_too_narrow",
+    "basis": "uncertainty"
+   }
+  },
+  {
+   "name": "U dominates w",
+   "limit": {
+    "kind": "band",
+    "lo": 1.0,
+    "hi": 1.15
+   },
+   "w": 0.0,
+   "source": {
+    "range_min": 0.0,
+    "range_max": 10.0,
+    "resolution": 0.01,
+    "u": 0.1
+   },
+   "expect": {
+    "result": "band_too_narrow",
+    "basis": "uncertainty"
+   }
+  },
+  {
+   "name": "resolution coarser than U refuses",
+   "limit": {
+    "kind": "band",
+    "lo": 1.0,
+    "hi": 1.5
+   },
+   "w": 0.0,
+   "source": {
+    "range_min": 0.0,
+    "range_max": 10.0,
+    "resolution": 0.5,
+    "u": 0.1
+   },
+   "expect": {
+    "result": "band_too_narrow",
+    "basis": "resolution"
+   }
+  },
+  {
+   "name": "simple acceptance, w = 0, band over 2U",
+   "limit": {
+    "kind": "band",
+    "lo": 1.0,
+    "hi": 1.3
+   },
+   "w": 0.0,
+   "source": {
+    "range_min": 0.0,
+    "range_max": 10.0,
+    "resolution": 0.01,
+    "u": 0.1
+   },
+   "expect": {
+    "result": "accepted"
+   }
+  },
+  {
+   "name": "at_most well inside range",
+   "limit": {
+    "kind": "at_most",
+    "max": 5.0
+   },
+   "w": 0.1,
+   "source": {
+    "range_min": 0.0,
+    "range_max": 10.0,
+    "resolution": 0.01,
+    "u": 0.1
+   },
+   "expect": {
+    "result": "accepted"
+   }
+  },
+  {
+   "name": "at_most exactly max(w,U) from the top is refused",
+   "limit": {
+    "kind": "at_most",
+    "max": 9.9
+   },
+   "w": 0.0,
+   "source": {
+    "range_min": 0.0,
+    "range_max": 10.0,
+    "resolution": 0.01,
+    "u": 0.1
+   },
+   "expect": {
+    "result": "limit_too_close_to_range",
+    "basis": "uncertainty"
+   }
+  },
+  {
+   "name": "at_most just more than max(w,U) from the top is accepted",
+   "limit": {
+    "kind": "at_most",
+    "max": 9.89
+   },
+   "w": 0.0,
+   "source": {
+    "range_min": 0.0,
+    "range_max": 10.0,
+    "resolution": 0.01,
+    "u": 0.1
+   },
+   "expect": {
+    "result": "accepted"
+   }
+  },
+  {
+   "name": "at_least near the bottom is refused",
+   "limit": {
+    "kind": "at_least",
+    "min": 0.05
+   },
+   "w": 0.0,
+   "source": {
+    "range_min": 0.0,
+    "range_max": 10.0,
+    "resolution": 0.01,
+    "u": 0.1
+   },
+   "expect": {
+    "result": "limit_too_close_to_range",
+    "basis": "uncertainty"
+   }
+  },
+  {
+   "name": "at_least close to the bottom by w",
+   "limit": {
+    "kind": "at_least",
+    "min": 0.5
+   },
+   "w": 0.6,
+   "source": {
+    "range_min": 0.0,
+    "range_max": 10.0,
+    "resolution": 0.01,
+    "u": 0.1
+   },
+   "expect": {
+    "result": "limit_too_close_to_range",
+    "basis": "uncertainty"
+   }
+  },
+  {
+   "name": "one-sided resolution check",
+   "limit": {
+    "kind": "at_most",
+    "max": 9.0
+   },
+   "w": 0.0,
+   "source": {
+    "range_min": 0.0,
+    "range_max": 10.0,
+    "resolution": 2.0,
+    "u": 0.1
+   },
+   "expect": {
+    "result": "limit_too_close_to_range",
+    "basis": "resolution"
+   }
+  },
+  {
+   "name": "lo above hi is malformed",
+   "limit": {
+    "kind": "band",
+    "lo": 2.0,
+    "hi": 1.0
+   },
+   "w": 0.0,
+   "source": {
+    "range_min": 0.0,
+    "range_max": 10.0,
+    "resolution": 0.01,
+    "u": 0.1
+   },
+   "expect": {
+    "result": "malformed"
+   }
+  },
+  {
+   "name": "negative U is malformed",
+   "limit": {
+    "kind": "band",
+    "lo": 1.0,
+    "hi": 2.0
+   },
+   "w": 0.0,
+   "source": {
+    "range_min": 0.0,
+    "range_max": 10.0,
+    "resolution": 0.01,
+    "u": -1.0
+   },
+   "expect": {
+    "result": "malformed"
+   }
+  }
+ ]
+}

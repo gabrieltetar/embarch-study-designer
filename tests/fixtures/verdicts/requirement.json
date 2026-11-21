@@ -1,0 +1,564 @@
+{
+ "rule": "requirement",
+ "cases": [
+  {
+   "name": "all ran and passed",
+   "tests": [
+    {
+     "verdict": "pass"
+    },
+    {
+     "verdict": "pass"
+    }
+   ],
+   "expect": {
+    "verdict": "pass",
+    "counts": {
+     "pass": 2,
+     "fail": 0,
+     "error": 0,
+     "inconclusive": 0,
+     "skipped": 0,
+     "cancelled": 0
+    },
+    "qualifiers": [],
+    "n_of_m": null,
+    "skipped": [],
+    "relayed_listed_apart": 0
+   }
+  },
+  {
+   "name": "pass with a not-applicable skip stays a pass, listed",
+   "tests": [
+    {
+     "verdict": "pass"
+    },
+    {
+     "verdict": "skipped",
+     "reason": "not_applicable"
+    }
+   ],
+   "expect": {
+    "verdict": "pass",
+    "counts": {
+     "pass": 1,
+     "fail": 0,
+     "error": 0,
+     "inconclusive": 0,
+     "skipped": 1,
+     "cancelled": 0
+    },
+    "qualifiers": [],
+    "n_of_m": null,
+    "skipped": [
+     "not_applicable"
+    ],
+    "relayed_listed_apart": 0
+   }
+  },
+  {
+   "name": "pass with tests not selected reads N of M",
+   "tests": [
+    {
+     "verdict": "pass"
+    },
+    {
+     "verdict": "pass"
+    },
+    {
+     "verdict": "skipped",
+     "reason": "not_selected"
+    },
+    {
+     "verdict": "skipped",
+     "reason": "not_applicable"
+    }
+   ],
+   "expect": {
+    "verdict": "pass",
+    "counts": {
+     "pass": 2,
+     "fail": 0,
+     "error": 0,
+     "inconclusive": 0,
+     "skipped": 2,
+     "cancelled": 0
+    },
+    "qualifiers": [
+     "n_of_m_run"
+    ],
+    "n_of_m": {
+     "n": 2,
+     "m": 3
+    },
+    "skipped": [
+     "not_selected",
+     "not_applicable"
+    ],
+    "relayed_listed_apart": 0
+   }
+  },
+  {
+   "name": "n_of_m_run sorts last among the qualifiers",
+   "tests": [
+    {
+     "verdict": "pass",
+     "qualifiers": [
+      "rests_on_dut_report",
+      "unvalidated"
+     ]
+    },
+    {
+     "verdict": "skipped",
+     "reason": "not_selected"
+    }
+   ],
+   "expect": {
+    "verdict": "pass",
+    "counts": {
+     "pass": 1,
+     "fail": 0,
+     "error": 0,
+     "inconclusive": 0,
+     "skipped": 1,
+     "cancelled": 0
+    },
+    "qualifiers": [
+     "unvalidated",
+     "rests_on_dut_report",
+     "n_of_m_run"
+    ],
+    "n_of_m": {
+     "n": 1,
+     "m": 2
+    },
+    "skipped": [
+     "not_selected"
+    ],
+    "relayed_listed_apart": 0
+   }
+  },
+  {
+   "name": "a hook_unmapped skip is a gap: not verified",
+   "tests": [
+    {
+     "verdict": "pass"
+    },
+    {
+     "verdict": "skipped",
+     "reason": "hook_unmapped"
+    }
+   ],
+   "expect": {
+    "verdict": "not_verified",
+    "counts": {
+     "pass": 1,
+     "fail": 0,
+     "error": 0,
+     "inconclusive": 0,
+     "skipped": 1,
+     "cancelled": 0
+    },
+    "qualifiers": [],
+    "n_of_m": null,
+    "skipped": [
+     "hook_unmapped"
+    ],
+    "relayed_listed_apart": 0
+   }
+  },
+  {
+   "name": "a bench_missing skip is a gap: not verified",
+   "tests": [
+    {
+     "verdict": "pass"
+    },
+    {
+     "verdict": "skipped",
+     "reason": "bench_missing"
+    }
+   ],
+   "expect": {
+    "verdict": "not_verified",
+    "counts": {
+     "pass": 1,
+     "fail": 0,
+     "error": 0,
+     "inconclusive": 0,
+     "skipped": 1,
+     "cancelled": 0
+    },
+    "qualifiers": [],
+    "n_of_m": null,
+    "skipped": [
+     "bench_missing"
+    ],
+    "relayed_listed_apart": 0
+   }
+  },
+  {
+   "name": "a requires_not_met skip is a gap: not verified",
+   "tests": [
+    {
+     "verdict": "pass"
+    },
+    {
+     "verdict": "skipped",
+     "reason": "requires_not_met"
+    }
+   ],
+   "expect": {
+    "verdict": "not_verified",
+    "counts": {
+     "pass": 1,
+     "fail": 0,
+     "error": 0,
+     "inconclusive": 0,
+     "skipped": 1,
+     "cancelled": 0
+    },
+    "qualifiers": [],
+    "n_of_m": null,
+    "skipped": [
+     "requires_not_met"
+    ],
+    "relayed_listed_apart": 0
+   }
+  },
+  {
+   "name": "a stopped_by_error skip is a gap: not verified",
+   "tests": [
+    {
+     "verdict": "pass"
+    },
+    {
+     "verdict": "skipped",
+     "reason": "stopped_by_error"
+    }
+   ],
+   "expect": {
+    "verdict": "not_verified",
+    "counts": {
+     "pass": 1,
+     "fail": 0,
+     "error": 0,
+     "inconclusive": 0,
+     "skipped": 1,
+     "cancelled": 0
+    },
+    "qualifiers": [],
+    "n_of_m": null,
+    "skipped": [
+     "stopped_by_error"
+    ],
+    "relayed_listed_apart": 0
+   }
+  },
+  {
+   "name": "a stopped_after_fail skip is a gap: not verified",
+   "tests": [
+    {
+     "verdict": "pass"
+    },
+    {
+     "verdict": "skipped",
+     "reason": "stopped_after_fail"
+    }
+   ],
+   "expect": {
+    "verdict": "not_verified",
+    "counts": {
+     "pass": 1,
+     "fail": 0,
+     "error": 0,
+     "inconclusive": 0,
+     "skipped": 1,
+     "cancelled": 0
+    },
+    "qualifiers": [],
+    "n_of_m": null,
+    "skipped": [
+     "stopped_after_fail"
+    ],
+    "relayed_listed_apart": 0
+   }
+  },
+  {
+   "name": "no test ran: not verified",
+   "tests": [],
+   "expect": {
+    "verdict": "not_verified",
+    "counts": {
+     "pass": 0,
+     "fail": 0,
+     "error": 0,
+     "inconclusive": 0,
+     "skipped": 0,
+     "cancelled": 0
+    },
+    "qualifiers": [],
+    "n_of_m": null,
+    "skipped": [],
+    "relayed_listed_apart": 0
+   }
+  },
+  {
+   "name": "only not-applicable skips ran nothing: not verified, never a pass",
+   "tests": [
+    {
+     "verdict": "skipped",
+     "reason": "not_applicable"
+    }
+   ],
+   "expect": {
+    "verdict": "not_verified",
+    "counts": {
+     "pass": 0,
+     "fail": 0,
+     "error": 0,
+     "inconclusive": 0,
+     "skipped": 1,
+     "cancelled": 0
+    },
+    "qualifiers": [],
+    "n_of_m": null,
+    "skipped": [
+     "not_applicable"
+    ],
+    "relayed_listed_apart": 0
+   }
+  },
+  {
+   "name": "a skip with no reason is not known to be harmless",
+   "tests": [
+    {
+     "verdict": "pass"
+    },
+    {
+     "verdict": "skipped"
+    }
+   ],
+   "expect": {
+    "verdict": "not_verified",
+    "counts": {
+     "pass": 1,
+     "fail": 0,
+     "error": 0,
+     "inconclusive": 0,
+     "skipped": 1,
+     "cancelled": 0
+    },
+    "qualifiers": [],
+    "n_of_m": null,
+    "skipped": [],
+    "relayed_listed_apart": 0
+   }
+  },
+  {
+   "name": "a fail outranks not verified",
+   "tests": [
+    {
+     "verdict": "fail",
+     "reason": "limit"
+    },
+    {
+     "verdict": "skipped",
+     "reason": "bench_missing"
+    }
+   ],
+   "expect": {
+    "verdict": "fail",
+    "counts": {
+     "pass": 0,
+     "fail": 1,
+     "error": 0,
+     "inconclusive": 0,
+     "skipped": 1,
+     "cancelled": 0
+    },
+    "qualifiers": [],
+    "n_of_m": null,
+    "skipped": [
+     "bench_missing"
+    ],
+    "relayed_listed_apart": 0
+   }
+  },
+  {
+   "name": "an error outranks a fail",
+   "tests": [
+    {
+     "verdict": "fail",
+     "reason": "limit"
+    },
+    {
+     "verdict": "error",
+     "reason": "port_lost"
+    },
+    {
+     "verdict": "pass"
+    }
+   ],
+   "expect": {
+    "verdict": "error",
+    "counts": {
+     "pass": 1,
+     "fail": 1,
+     "error": 1,
+     "inconclusive": 0,
+     "skipped": 0,
+     "cancelled": 0
+    },
+    "qualifiers": [],
+    "n_of_m": null,
+    "skipped": [],
+    "relayed_listed_apart": 0
+   }
+  },
+  {
+   "name": "inconclusive outranks pass",
+   "tests": [
+    {
+     "verdict": "pass"
+    },
+    {
+     "verdict": "inconclusive",
+     "reason": "guard_band"
+    }
+   ],
+   "expect": {
+    "verdict": "inconclusive",
+    "counts": {
+     "pass": 1,
+     "fail": 0,
+     "error": 0,
+     "inconclusive": 1,
+     "skipped": 0,
+     "cancelled": 0
+    },
+    "qualifiers": [],
+    "n_of_m": null,
+    "skipped": [],
+    "relayed_listed_apart": 0
+   }
+  },
+  {
+   "name": "cancelled outranks pass and is no pass",
+   "tests": [
+    {
+     "verdict": "pass"
+    },
+    {
+     "verdict": "cancelled"
+    }
+   ],
+   "expect": {
+    "verdict": "cancelled",
+    "counts": {
+     "pass": 1,
+     "fail": 0,
+     "error": 0,
+     "inconclusive": 0,
+     "skipped": 0,
+     "cancelled": 1
+    },
+    "qualifiers": [],
+    "n_of_m": null,
+    "skipped": [],
+    "relayed_listed_apart": 0
+   }
+  },
+  {
+   "name": "qualifiers of the tests that ran roll up",
+   "tests": [
+    {
+     "verdict": "pass",
+     "qualifiers": [
+      "calibration_undeclared"
+     ]
+    },
+    {
+     "verdict": "pass",
+     "qualifiers": [
+      "declared_by_agent",
+      "calibration_undeclared"
+     ]
+    }
+   ],
+   "expect": {
+    "verdict": "pass",
+    "counts": {
+     "pass": 2,
+     "fail": 0,
+     "error": 0,
+     "inconclusive": 0,
+     "skipped": 0,
+     "cancelled": 0
+    },
+    "qualifiers": [
+     "calibration_undeclared",
+     "declared_by_agent"
+    ],
+    "n_of_m": null,
+    "skipped": [],
+    "relayed_listed_apart": 0
+   }
+  },
+  {
+   "name": "a relayed manual verdict is listed apart and counts in nothing",
+   "tests": [
+    {
+     "verdict": "pass"
+    },
+    {
+     "verdict": "fail",
+     "reason": "limit",
+     "qualifiers": [
+      "relayed"
+     ]
+    }
+   ],
+   "expect": {
+    "verdict": "pass",
+    "counts": {
+     "pass": 1,
+     "fail": 0,
+     "error": 0,
+     "inconclusive": 0,
+     "skipped": 0,
+     "cancelled": 0
+    },
+    "qualifiers": [],
+    "n_of_m": null,
+    "skipped": [],
+    "relayed_listed_apart": 1
+   }
+  },
+  {
+   "name": "a relayed pass cannot make a requirement pass",
+   "tests": [
+    {
+     "verdict": "pass",
+     "qualifiers": [
+      "relayed"
+     ]
+    }
+   ],
+   "expect": {
+    "verdict": "not_verified",
+    "counts": {
+     "pass": 0,
+     "fail": 0,
+     "error": 0,
+     "inconclusive": 0,
+     "skipped": 0,
+     "cancelled": 0
+    },
+    "qualifiers": [],
+    "n_of_m": null,
+    "skipped": [],
+    "relayed_listed_apart": 1
+   }
+  }
+ ]
+}

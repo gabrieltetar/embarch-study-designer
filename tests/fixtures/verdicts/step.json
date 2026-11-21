@@ -1,0 +1,233 @@
+{
+ "rule": "step_verdict",
+ "cases": [
+  {
+   "name": "dut pass ",
+   "target": "dut",
+   "input": {
+    "outcome": "pass"
+   },
+   "expect": {
+    "verdict": "pass",
+    "reason": null
+   }
+  },
+  {
+   "name": "bench pass ",
+   "target": "bench",
+   "input": {
+    "outcome": "pass"
+   },
+   "expect": {
+    "verdict": "pass",
+    "reason": null
+   }
+  },
+  {
+   "name": "dut refused_on ",
+   "target": "dut",
+   "input": {
+    "outcome": "refused_on"
+   },
+   "expect": {
+    "verdict": "fail",
+    "reason": "step_failed"
+   }
+  },
+  {
+   "name": "dut timed_out ",
+   "target": "dut",
+   "input": {
+    "outcome": "timed_out"
+   },
+   "expect": {
+    "verdict": "fail",
+    "reason": "step_timed_out"
+   }
+  },
+  {
+   "name": "dut until_not_seen ",
+   "target": "dut",
+   "input": {
+    "outcome": "until_not_seen"
+   },
+   "expect": {
+    "verdict": "fail",
+    "reason": "step_timed_out"
+   }
+  },
+  {
+   "name": "dut empty_reply ",
+   "target": "dut",
+   "input": {
+    "outcome": "empty_reply"
+   },
+   "expect": {
+    "verdict": "error",
+    "reason": "empty_reply"
+   }
+  },
+  {
+   "name": "dut port_lost ",
+   "target": "dut",
+   "input": {
+    "outcome": "port_lost"
+   },
+   "expect": {
+    "verdict": "error",
+    "reason": "port_lost"
+   }
+  },
+  {
+   "name": "bench refused_on ",
+   "target": "bench",
+   "input": {
+    "outcome": "refused_on"
+   },
+   "expect": {
+    "verdict": "error",
+    "reason": "bench_step_failed"
+   }
+  },
+  {
+   "name": "bench timed_out ",
+   "target": "bench",
+   "input": {
+    "outcome": "timed_out"
+   },
+   "expect": {
+    "verdict": "error",
+    "reason": "bench_step_failed"
+   }
+  },
+  {
+   "name": "bench until_not_seen ",
+   "target": "bench",
+   "input": {
+    "outcome": "until_not_seen"
+   },
+   "expect": {
+    "verdict": "error",
+    "reason": "bench_step_failed"
+   }
+  },
+  {
+   "name": "bench empty_reply ",
+   "target": "bench",
+   "input": {
+    "outcome": "empty_reply"
+   },
+   "expect": {
+    "verdict": "error",
+    "reason": "empty_reply"
+   }
+  },
+  {
+   "name": "bench port_lost ",
+   "target": "bench",
+   "input": {
+    "outcome": "port_lost"
+   },
+   "expect": {
+    "verdict": "error",
+    "reason": "port_lost"
+   }
+  },
+  {
+   "name": "dut prompt_timed_out True",
+   "target": "dut",
+   "input": {
+    "outcome": "prompt_timed_out",
+    "observation": true
+   },
+   "expect": {
+    "verdict": "inconclusive",
+    "reason": "observation_unanswered"
+   }
+  },
+  {
+   "name": "dut prompt_timed_out False",
+   "target": "dut",
+   "input": {
+    "outcome": "prompt_timed_out",
+    "observation": false
+   },
+   "expect": {
+    "verdict": "error",
+    "reason": "prompt_not_confirmed"
+   }
+  },
+  {
+   "name": "bench prompt_timed_out True",
+   "target": "bench",
+   "input": {
+    "outcome": "prompt_timed_out",
+    "observation": true
+   },
+   "expect": {
+    "verdict": "inconclusive",
+    "reason": "observation_unanswered"
+   }
+  },
+  {
+   "name": "bench prompt_timed_out False",
+   "target": "bench",
+   "input": {
+    "outcome": "prompt_timed_out",
+    "observation": false
+   },
+   "expect": {
+    "verdict": "error",
+    "reason": "prompt_not_confirmed"
+   }
+  },
+  {
+   "name": "dut prompt_cancelled True",
+   "target": "dut",
+   "input": {
+    "outcome": "prompt_cancelled",
+    "observation": true
+   },
+   "expect": {
+    "verdict": "inconclusive",
+    "reason": "observation_unanswered"
+   }
+  },
+  {
+   "name": "dut prompt_cancelled False",
+   "target": "dut",
+   "input": {
+    "outcome": "prompt_cancelled",
+    "observation": false
+   },
+   "expect": {
+    "verdict": "error",
+    "reason": "prompt_not_confirmed"
+   }
+  },
+  {
+   "name": "bench prompt_cancelled True",
+   "target": "bench",
+   "input": {
+    "outcome": "prompt_cancelled",
+    "observation": true
+   },
+   "expect": {
+    "verdict": "inconclusive",
+    "reason": "observation_unanswered"
+   }
+  },
+  {
+   "name": "bench prompt_cancelled False",
+   "target": "bench",
+   "input": {
+    "outcome": "prompt_cancelled",
+    "observation": false
+   },
+   "expect": {
+    "verdict": "error",
+    "reason": "prompt_not_confirmed"
+   }
+  }
+ ]
+}

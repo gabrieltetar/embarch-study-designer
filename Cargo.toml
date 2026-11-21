@@ -101,6 +101,11 @@ eap-parse = ["std"]
 # so no `std` and no `libm`). embarch-core and embarch-api turn it on; nothing
 # else does, so every existing consumer builds unchanged.
 reducers = ["alloc"]
+# The HIL verdict rules (decisions 95 to 98): the six verdicts, a step outcome's
+# mapping, the guard band, the acceptance width and the requirement roll-up,
+# each versioned by behaviour. Needs only `alloc`; embarch-core and embarch-api
+# turn it on, nothing else does.
+verdicts = ["alloc"]
 
 # Decision 23 set this for the FFI staticlib, the one build this crate was the
 # root of (a dependency crate's own [profile.*] is ignored by Cargo). The

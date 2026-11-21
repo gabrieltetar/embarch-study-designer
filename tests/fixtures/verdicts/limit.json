@@ -1,0 +1,467 @@
+{
+ "rule": "limit_verdict",
+ "cases": [
+  {
+   "name": "band simple: inside",
+   "value": 1.5,
+   "limit": {
+    "kind": "band",
+    "lo": 1.0,
+    "hi": 2.0
+   },
+   "w": 0,
+   "expect": {
+    "verdict": "pass",
+    "reason": null
+   }
+  },
+  {
+   "name": "band simple: at lo",
+   "value": 1.0,
+   "limit": {
+    "kind": "band",
+    "lo": 1.0,
+    "hi": 2.0
+   },
+   "w": 0,
+   "expect": {
+    "verdict": "pass",
+    "reason": null
+   }
+  },
+  {
+   "name": "band simple: at hi",
+   "value": 2.0,
+   "limit": {
+    "kind": "band",
+    "lo": 1.0,
+    "hi": 2.0
+   },
+   "w": 0,
+   "expect": {
+    "verdict": "pass",
+    "reason": null
+   }
+  },
+  {
+   "name": "band simple: just below lo",
+   "value": 0.99,
+   "limit": {
+    "kind": "band",
+    "lo": 1.0,
+    "hi": 2.0
+   },
+   "w": 0,
+   "expect": {
+    "verdict": "fail",
+    "reason": "limit"
+   }
+  },
+  {
+   "name": "band simple: just above hi",
+   "value": 2.01,
+   "limit": {
+    "kind": "band",
+    "lo": 1.0,
+    "hi": 2.0
+   },
+   "w": 0,
+   "expect": {
+    "verdict": "fail",
+    "reason": "limit"
+   }
+  },
+  {
+   "name": "band guard: inside acceptance",
+   "value": 1.5,
+   "limit": {
+    "kind": "band",
+    "lo": 1.0,
+    "hi": 2.0
+   },
+   "w": 0.1,
+   "expect": {
+    "verdict": "pass",
+    "reason": null
+   }
+  },
+  {
+   "name": "band guard: at acceptance lo",
+   "value": 1.1,
+   "limit": {
+    "kind": "band",
+    "lo": 1.0,
+    "hi": 2.0
+   },
+   "w": 0.1,
+   "expect": {
+    "verdict": "pass",
+    "reason": null
+   }
+  },
+  {
+   "name": "band guard: at acceptance hi",
+   "value": 1.9,
+   "limit": {
+    "kind": "band",
+    "lo": 1.0,
+    "hi": 2.0
+   },
+   "w": 0.1,
+   "expect": {
+    "verdict": "pass",
+    "reason": null
+   }
+  },
+  {
+   "name": "band guard: between acceptance and tolerance, low side",
+   "value": 1.05,
+   "limit": {
+    "kind": "band",
+    "lo": 1.0,
+    "hi": 2.0
+   },
+   "w": 0.1,
+   "expect": {
+    "verdict": "inconclusive",
+    "reason": "guard_band"
+   }
+  },
+  {
+   "name": "band guard: at tolerance lo",
+   "value": 1.0,
+   "limit": {
+    "kind": "band",
+    "lo": 1.0,
+    "hi": 2.0
+   },
+   "w": 0.1,
+   "expect": {
+    "verdict": "inconclusive",
+    "reason": "guard_band"
+   }
+  },
+  {
+   "name": "band guard: just outside lo, inside w",
+   "value": 0.95,
+   "limit": {
+    "kind": "band",
+    "lo": 1.0,
+    "hi": 2.0
+   },
+   "w": 0.1,
+   "expect": {
+    "verdict": "inconclusive",
+    "reason": "guard_band"
+   }
+  },
+  {
+   "name": "band guard: at lo - w",
+   "value": 0.9,
+   "limit": {
+    "kind": "band",
+    "lo": 1.0,
+    "hi": 2.0
+   },
+   "w": 0.1,
+   "expect": {
+    "verdict": "inconclusive",
+    "reason": "guard_band"
+   }
+  },
+  {
+   "name": "band guard: beyond lo - w",
+   "value": 0.89,
+   "limit": {
+    "kind": "band",
+    "lo": 1.0,
+    "hi": 2.0
+   },
+   "w": 0.1,
+   "expect": {
+    "verdict": "fail",
+    "reason": "limit"
+   }
+  },
+  {
+   "name": "band guard: between acceptance and tolerance, high side",
+   "value": 1.95,
+   "limit": {
+    "kind": "band",
+    "lo": 1.0,
+    "hi": 2.0
+   },
+   "w": 0.1,
+   "expect": {
+    "verdict": "inconclusive",
+    "reason": "guard_band"
+   }
+  },
+  {
+   "name": "band guard: just outside hi, inside w",
+   "value": 2.05,
+   "limit": {
+    "kind": "band",
+    "lo": 1.0,
+    "hi": 2.0
+   },
+   "w": 0.1,
+   "expect": {
+    "verdict": "inconclusive",
+    "reason": "guard_band"
+   }
+  },
+  {
+   "name": "band guard: at hi + w",
+   "value": 2.1,
+   "limit": {
+    "kind": "band",
+    "lo": 1.0,
+    "hi": 2.0
+   },
+   "w": 0.1,
+   "expect": {
+    "verdict": "inconclusive",
+    "reason": "guard_band"
+   }
+  },
+  {
+   "name": "band guard: beyond hi + w",
+   "value": 2.11,
+   "limit": {
+    "kind": "band",
+    "lo": 1.0,
+    "hi": 2.0
+   },
+   "w": 0.1,
+   "expect": {
+    "verdict": "fail",
+    "reason": "limit"
+   }
+  },
+  {
+   "name": "at_most guard: inside",
+   "value": 3.0,
+   "limit": {
+    "kind": "at_most",
+    "max": 5.0
+   },
+   "w": 0.5,
+   "expect": {
+    "verdict": "pass",
+    "reason": null
+   }
+  },
+  {
+   "name": "at_most guard: in the band",
+   "value": 5.2,
+   "limit": {
+    "kind": "at_most",
+    "max": 5.0
+   },
+   "w": 0.5,
+   "expect": {
+    "verdict": "inconclusive",
+    "reason": "guard_band"
+   }
+  },
+  {
+   "name": "at_most guard: far below is a pass",
+   "value": -1000000000.0,
+   "limit": {
+    "kind": "at_most",
+    "max": 5.0
+   },
+   "w": 0.5,
+   "expect": {
+    "verdict": "pass",
+    "reason": null
+   }
+  },
+  {
+   "name": "at_most guard: beyond",
+   "value": 5.6,
+   "limit": {
+    "kind": "at_most",
+    "max": 5.0
+   },
+   "w": 0.5,
+   "expect": {
+    "verdict": "fail",
+    "reason": "limit"
+   }
+  },
+  {
+   "name": "at_least guard: inside",
+   "value": 9.0,
+   "limit": {
+    "kind": "at_least",
+    "min": 5.0
+   },
+   "w": 0.5,
+   "expect": {
+    "verdict": "pass",
+    "reason": null
+   }
+  },
+  {
+   "name": "at_least guard: in the band",
+   "value": 4.8,
+   "limit": {
+    "kind": "at_least",
+    "min": 5.0
+   },
+   "w": 0.5,
+   "expect": {
+    "verdict": "inconclusive",
+    "reason": "guard_band"
+   }
+  },
+  {
+   "name": "at_least guard: beyond",
+   "value": 4.4,
+   "limit": {
+    "kind": "at_least",
+    "min": 5.0
+   },
+   "w": 0.5,
+   "expect": {
+    "verdict": "fail",
+    "reason": "limit"
+   }
+  },
+  {
+   "name": "evidence: truncated_capture beats a clear fail",
+   "value": 9.0,
+   "limit": {
+    "kind": "band",
+    "lo": 1.0,
+    "hi": 2.0
+   },
+   "w": 0,
+   "expect": {
+    "verdict": "inconclusive",
+    "reason": "truncated_capture"
+   },
+   "evidence": {
+    "incomplete": [
+     "truncated_capture"
+    ]
+   }
+  },
+  {
+   "name": "evidence: truncated_reply",
+   "value": 1.5,
+   "limit": {
+    "kind": "band",
+    "lo": 1.0,
+    "hi": 2.0
+   },
+   "w": 0,
+   "expect": {
+    "verdict": "inconclusive",
+    "reason": "truncated_reply"
+   },
+   "evidence": {
+    "incomplete": [
+     "truncated_reply"
+    ]
+   }
+  },
+  {
+   "name": "evidence: record_gap",
+   "value": 1.5,
+   "limit": {
+    "kind": "band",
+    "lo": 1.0,
+    "hi": 2.0
+   },
+   "w": 0,
+   "expect": {
+    "verdict": "inconclusive",
+    "reason": "record_gap"
+   },
+   "evidence": {
+    "incomplete": [
+     "record_gap"
+    ]
+   }
+  },
+  {
+   "name": "evidence: parse_failed",
+   "value": 1.5,
+   "limit": {
+    "kind": "band",
+    "lo": 1.0,
+    "hi": 2.0
+   },
+   "w": 0,
+   "expect": {
+    "verdict": "inconclusive",
+    "reason": "parse_failed"
+   },
+   "evidence": {
+    "incomplete": [
+     "parse_failed"
+    ]
+   }
+  },
+  {
+   "name": "evidence: first of two applies",
+   "value": 1.5,
+   "limit": {
+    "kind": "band",
+    "lo": 1.0,
+    "hi": 2.0
+   },
+   "w": 0,
+   "expect": {
+    "verdict": "inconclusive",
+    "reason": "truncated_capture"
+   },
+   "evidence": {
+    "incomplete": [
+     "record_gap",
+     "truncated_capture"
+    ]
+   }
+  },
+  {
+   "name": "calibration expired beats a pass",
+   "value": 1.5,
+   "limit": {
+    "kind": "band",
+    "lo": 1.0,
+    "hi": 2.0
+   },
+   "w": 0,
+   "expect": {
+    "verdict": "inconclusive",
+    "reason": "calibration_expired"
+   },
+   "evidence": {
+    "calibration_expired": true
+   }
+  },
+  {
+   "name": "evidence beats expiry",
+   "value": 1.5,
+   "limit": {
+    "kind": "band",
+    "lo": 1.0,
+    "hi": 2.0
+   },
+   "w": 0,
+   "expect": {
+    "verdict": "inconclusive",
+    "reason": "record_gap"
+   },
+   "evidence": {
+    "incomplete": [
+     "record_gap"
+    ],
+    "calibration_expired": true
+   }
+  }
+ ]
+}

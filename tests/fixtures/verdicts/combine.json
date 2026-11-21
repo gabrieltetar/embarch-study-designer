@@ -1,0 +1,236 @@
+{
+ "rule": "combine",
+ "cases": [
+  {
+   "name": "all pass",
+   "items": [
+    {
+     "verdict": "pass"
+    },
+    {
+     "verdict": "pass"
+    }
+   ],
+   "expect": {
+    "verdict": "pass",
+    "counts": {
+     "pass": 2,
+     "fail": 0,
+     "error": 0,
+     "inconclusive": 0,
+     "skipped": 0,
+     "cancelled": 0
+    },
+    "qualifiers": []
+   }
+  },
+  {
+   "name": "error outranks fail, counts keep the fail",
+   "items": [
+    {
+     "verdict": "fail",
+     "reason": "limit"
+    },
+    {
+     "verdict": "error",
+     "reason": "port_lost"
+    },
+    {
+     "verdict": "pass"
+    },
+    {
+     "verdict": "fail",
+     "reason": "limit"
+    }
+   ],
+   "expect": {
+    "verdict": "error",
+    "counts": {
+     "pass": 1,
+     "fail": 2,
+     "error": 1,
+     "inconclusive": 0,
+     "skipped": 0,
+     "cancelled": 0
+    },
+    "qualifiers": []
+   }
+  },
+  {
+   "name": "fail outranks inconclusive",
+   "items": [
+    {
+     "verdict": "inconclusive",
+     "reason": "guard_band"
+    },
+    {
+     "verdict": "fail",
+     "reason": "limit"
+    }
+   ],
+   "expect": {
+    "verdict": "fail",
+    "counts": {
+     "pass": 0,
+     "fail": 1,
+     "error": 0,
+     "inconclusive": 1,
+     "skipped": 0,
+     "cancelled": 0
+    },
+    "qualifiers": []
+   }
+  },
+  {
+   "name": "inconclusive outranks cancelled",
+   "items": [
+    {
+     "verdict": "cancelled"
+    },
+    {
+     "verdict": "inconclusive",
+     "reason": "record_gap"
+    }
+   ],
+   "expect": {
+    "verdict": "inconclusive",
+    "counts": {
+     "pass": 0,
+     "fail": 0,
+     "error": 0,
+     "inconclusive": 1,
+     "skipped": 0,
+     "cancelled": 1
+    },
+    "qualifiers": []
+   }
+  },
+  {
+   "name": "cancelled never hides a fail",
+   "items": [
+    {
+     "verdict": "cancelled"
+    },
+    {
+     "verdict": "fail",
+     "reason": "limit"
+    },
+    {
+     "verdict": "skipped",
+     "reason": "not_selected"
+    }
+   ],
+   "expect": {
+    "verdict": "fail",
+    "counts": {
+     "pass": 0,
+     "fail": 1,
+     "error": 0,
+     "inconclusive": 0,
+     "skipped": 1,
+     "cancelled": 1
+    },
+    "qualifiers": []
+   }
+  },
+  {
+   "name": "cancelled outranks skipped",
+   "items": [
+    {
+     "verdict": "skipped",
+     "reason": "not_selected"
+    },
+    {
+     "verdict": "cancelled"
+    }
+   ],
+   "expect": {
+    "verdict": "cancelled",
+    "counts": {
+     "pass": 0,
+     "fail": 0,
+     "error": 0,
+     "inconclusive": 0,
+     "skipped": 1,
+     "cancelled": 1
+    },
+    "qualifiers": []
+   }
+  },
+  {
+   "name": "skipped outranks pass in a summary",
+   "items": [
+    {
+     "verdict": "pass"
+    },
+    {
+     "verdict": "skipped",
+     "reason": "hook_unmapped"
+    }
+   ],
+   "expect": {
+    "verdict": "skipped",
+    "counts": {
+     "pass": 1,
+     "fail": 0,
+     "error": 0,
+     "inconclusive": 0,
+     "skipped": 1,
+     "cancelled": 0
+    },
+    "qualifiers": []
+   }
+  },
+  {
+   "name": "qualifiers union in the closed list's order, once",
+   "items": [
+    {
+     "verdict": "pass",
+     "qualifiers": [
+      "declared_by_study",
+      "bench_firmware_unverified"
+     ]
+    },
+    {
+     "verdict": "pass",
+     "qualifiers": [
+      "bench_firmware_unverified",
+      "rests_on_dut_report"
+     ]
+    }
+   ],
+   "expect": {
+    "verdict": "pass",
+    "counts": {
+     "pass": 2,
+     "fail": 0,
+     "error": 0,
+     "inconclusive": 0,
+     "skipped": 0,
+     "cancelled": 0
+    },
+    "qualifiers": [
+     "bench_firmware_unverified",
+     "declared_by_study",
+     "rests_on_dut_report"
+    ]
+   }
+  },
+  {
+   "name": "nothing to combine is skipped, never pass",
+   "items": [],
+   "expect": {
+    "verdict": "skipped",
+    "counts": {
+     "pass": 0,
+     "fail": 0,
+     "error": 0,
+     "inconclusive": 0,
+     "skipped": 0,
+     "cancelled": 0
+    },
+    "qualifiers": []
+   }
+  }
+ ]
+}
