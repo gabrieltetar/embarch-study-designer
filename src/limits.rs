@@ -108,6 +108,21 @@ pub const MAX_RECORD_MAGIC_LEN: usize = 8;
 /// what an offset list is actually for; past that the count is the finding.
 pub const MAX_BAD_RECORDS_REPORTED: usize = 32;
 
+/// `Study.measurements` (decision 99, interfaces/hil-declarations.md) —
+/// derived measurements one study declares. Host-only, never on the
+/// dev-bench wire. Four taps' worth of a handful each, placeholder-but-concrete
+/// like every other constant here.
+pub const MAX_MEASUREMENTS_PER_STUDY: usize = 32;
+/// `MeasurementDecl.name`, the name prose cites (`#m("rate")`).
+pub const MAX_MEASUREMENT_NAME_LEN: usize = 32;
+/// `MeasurementDecl.reducer`: the longest built-in name, `value_at_marker`,
+/// is 15 bytes.
+pub const MAX_REDUCER_NAME_LEN: usize = 16;
+/// A marker name in a declaration's window.
+pub const MAX_MARKER_NAME_LEN: usize = 32;
+/// `MeasurementDecl.unit`: the reducers' unit strings are at most two bytes.
+pub const MAX_UNIT_LEN: usize = 4;
+
 /// `Study.decoders` (decision 52) — named payload layouts one
 /// study resolves out of the firmware repo's `study-structs.toml`. Bounded
 /// by what a study can actually reference: a decoder is only reachable

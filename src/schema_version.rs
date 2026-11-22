@@ -363,7 +363,15 @@ pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 15;
 ///   anyway, on v19's reasoning: `deny_unknown_fields` means a v20 Core
 ///   refuses a study that names a config with a `422` naming no version,
 ///   and the drift detector exists to say *which* side is behind instead.
-pub const HOST_TYPE_SCHEMA_VERSION: u32 = 21;
+/// - **v22** — host-only: `Study` gained `measurements`, the derived
+///   measurements Core computes over the study's captures when it ends
+///   (decisions 99 and 100, `tasks/suite/057`). Never on the dev-bench wire,
+///   so [`DEV_BENCH_WIRE_SCHEMA_VERSION`] stays at 15. `#[serde(default)]`
+///   and skipped when empty, so a v21 study loads and serializes byte for
+///   byte as it did — and the number moves anyway, on v19's reasoning: a v21
+///   Core would accept a study declaring measurements and compute none of
+///   them, silently.
+pub const HOST_TYPE_SCHEMA_VERSION: u32 = 22;
 
 /// [`HOST_TYPE_SCHEMA_VERSION`]'s triggers are a strict superset of
 /// [`DEV_BENCH_WIRE_SCHEMA_VERSION`]'s (decision 12's

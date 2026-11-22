@@ -276,6 +276,24 @@ pub struct Study {
     #[serde(default)]
     pub record_checks:
         crate::bounded::Bounded<crate::records::RecordCheck, MAX_STREAMS_PER_STUDY>,
+    /// The derived measurements Core computes over this study's captures
+    /// when it ends — see [`crate::measures`] (decisions 99 and 100).
+    ///
+    /// **Host-only, exactly like `record_checks`**: never transmitted to
+    /// dev-bench and sealed by neither CRC, because what Core computes
+    /// afterwards changes neither what dev-bench executes nor what it
+    /// captures. Each declaration names its tap by `id`, for the reason
+    /// `record_checks` does.
+    ///
+    /// `#[serde(default)]` so a study authored before this existed still
+    /// loads, as one that declares nothing. **Never skipped when empty**:
+    /// `Study` also travels as postcard, which has no field names, so a
+    /// skipped field shifts every byte after it.
+    #[serde(default)]
+    pub measurements: crate::bounded::Bounded<
+        crate::measures::MeasurementDecl,
+        { crate::limits::MAX_MEASUREMENTS_PER_STUDY },
+    >,
 }
 
 /// The explicit "I don't care which build" value for either

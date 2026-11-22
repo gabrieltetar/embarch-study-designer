@@ -62,6 +62,7 @@ pub mod gatt_extract;
 pub mod gatt_names;
 pub mod ids;
 pub mod limits;
+pub mod measures;
 pub mod outpost;
 #[cfg(feature = "study-ui")]
 pub mod merged_actions;
@@ -142,6 +143,9 @@ pub use registry::{
 // `verify_records` itself stays module-scoped — it runs in Core, not in an
 // authoring UI.
 pub use records::{validate_record_checks, RecordCheck, RecordCheckError, RecordFraming, RecordReport};
+pub use measures::{
+    validate_measurements, DeclaredWindow, MeasurementDecl, MeasurementDeclError, StudyDeclared,
+};
 pub use result::{
     Outcome, ProtocolOutcome, Provenance, StepResult, StudyResult, VersionOverride, VersionSource,
     VersionSubject,
@@ -201,6 +205,7 @@ mod tests {
 
             decoders: Default::default(),
             record_checks: Default::default(),
+            measurements: Default::default(),
             name: heapless::String::try_from("smoke-test").unwrap(),
             requires: Requirements::any(),
             steps,

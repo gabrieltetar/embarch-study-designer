@@ -631,6 +631,7 @@ pub fn build_study(
         // repo path to resolve a layout name against.
         decoders: crate::bounded::Bounded::new(),
         record_checks: crate::bounded::Bounded::new(),
+        measurements: crate::bounded::Bounded::new(),
     })
 }
 
