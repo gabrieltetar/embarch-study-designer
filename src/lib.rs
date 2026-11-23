@@ -74,6 +74,11 @@ pub mod reducers;
 pub mod registry;
 #[cfg(feature = "verdicts")]
 pub mod verdicts;
+
+#[cfg(feature = "pdf-text")]
+pub mod number_grammar;
+#[cfg(feature = "pdf-text")]
+pub mod pdf_text;
 pub mod result;
 pub mod sample;
 pub mod bounded;

@@ -34,6 +34,12 @@ ignore = { version = "0.4", optional = true }
 # Cargo-dependency use, same posture as `gatt-extract`'s own dependencies.
 toml = { version = "0.8", optional = true }
 
+# Only pulled in by the `pdf-text` feature (decision 101): the PDF object
+# model and content-stream parser for the text extractor, and NFKC. Never
+# linked by dev-bench firmware or any consumer that does not turn the feature on.
+lopdf = { version = "0.47", default-features = false, optional = true }
+unicode-normalization = { version = "0.1", optional = true }
+
 [dev-dependencies]
 # Used by this crate's own round-trip tests to confirm every wire type also
 # serializes/deserializes through the embarch-api/events.json JSON path
@@ -106,6 +112,10 @@ reducers = ["alloc"]
 # each versioned by behaviour. Needs only `alloc`; embarch-core and embarch-api
 # turn it on, nothing else does.
 verdicts = ["alloc"]
+# The PDF text extractor and the number grammar for `verify`'s check 4
+# (decisions 101 to 103). `std` because the PDF reader is; off by default and
+# nothing else turns it on, so no other feature set gains a dependency.
+pdf-text = ["std", "dep:lopdf", "dep:unicode-normalization"]
 
 # Decision 23 set this for the FFI staticlib, the one build this crate was the
 # root of (a dependency crate's own [profile.*] is ignored by Cargo). The
