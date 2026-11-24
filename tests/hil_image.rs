@@ -75,3 +75,47 @@ fn bench_list_round_trips() {
     assert_eq!(back, list);
     assert!(back.images[0].identity_consistent());
 }
+
+/// An ELF64 header with one program header, built by hand, so a field can be
+/// pushed past `u64::MAX`.
+fn elf64(phoff: u64, phentsize: u16, phnum: u16, off: u64, filesz: u64) -> Vec<u8> {
+    let mut b = vec![0u8; 64 + 56];
+    b[..4].copy_from_slice(b"\x7fELF");
+    b[4] = 2;
+    b[5] = 1;
+    b[32..40].copy_from_slice(&phoff.to_le_bytes());
+    b[54..56].copy_from_slice(&phentsize.to_le_bytes());
+    b[56..58].copy_from_slice(&phnum.to_le_bytes());
+    b[64..68].copy_from_slice(&1u32.to_le_bytes());
+    b[72..80].copy_from_slice(&off.to_le_bytes());
+    b[88..96].copy_from_slice(&0x1000u64.to_le_bytes());
+    b[96..104].copy_from_slice(&filesz.to_le_bytes());
+    b
+}
+
+#[test]
+fn elf_segment_offset_plus_size_overflow_is_an_error() {
+    let ok = elf64(64, 56, 1, 0, 8);
+    assert!(image_segments(&ok, ImageFormat::Elf, None).is_ok());
+    let bad = elf64(64, 56, 1, 8, u64::MAX);
+    assert!(matches!(image_segments(&bad, ImageFormat::Elf, None), Err(ImageError::Elf(_))));
+}
+
+#[test]
+fn elf_program_header_position_overflow_is_an_error() {
+    let bad = elf64(u64::MAX, 56, 1, 0, 8);
+    assert!(matches!(image_segments(&bad, ImageFormat::Elf, None), Err(ImageError::Elf(_))));
+    let bad = elf64(u64::MAX - 10, 56, 2, 0, 8);
+    assert!(matches!(image_segments(&bad, ImageFormat::Elf, None), Err(ImageError::Elf(_))));
+}
+
+#[test]
+fn the_hil_json_types_refuse_an_unknown_key() {
+    let seg = r#"{"address":0,"length":1,"sha256":"00","extra":1}"#;
+    assert!(serde_json::from_str::<Segment>(seg).is_err());
+    let img = r#"{"app":"a","board":"b","version":"1","commit":"c","identity":"i","segments":[],"extra":1}"#;
+    assert!(serde_json::from_str::<BenchImage>(img).is_err());
+    let list = r#"{"schema":1,"release":"r","images":[],"extra":1}"#;
+    assert!(serde_json::from_str::<BenchFirmwareList>(list).is_err());
+    assert!(serde_json::from_str::<BenchFirmwareList>(r#"{"schema":1,"release":"r","images":[]}"#).is_ok());
+}

@@ -29,6 +29,7 @@ pub enum ImageFormat {
 
 /// One maximal contiguous address range an image writes.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Segment {
     /// First address written.
     pub address: u64,
@@ -67,6 +68,7 @@ impl std::error::Error for ImageError {}
 
 /// One entry of `bench-firmware.json`'s `images`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BenchImage {
     /// The firmware app (for example `dev-bench`).
     pub app: String,
@@ -84,6 +86,7 @@ pub struct BenchImage {
 
 /// `bench-firmware.json`: the bench firmware an installed release ships.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BenchFirmwareList {
     /// Schema version of this file ([`BENCH_FIRMWARE_SCHEMA`]).
     pub schema: u32,
@@ -259,13 +262,17 @@ fn elf_chunks(b: &[u8]) -> Result<Vec<(u64, Vec<u8>)>, ImageError> {
         _ => return Err(ImageError::Elf("unknown byte order")),
     };
     let rd = |off: usize, len: usize| -> Result<u64, ImageError> {
-        let s = b.get(off..off + len).ok_or(ImageError::Elf("truncated"))?;
+        let end = off.checked_add(len).ok_or(ImageError::Elf("truncated"))?;
+        let s = b.get(off..end).ok_or(ImageError::Elf("truncated"))?;
         let mut v = 0u64;
         for i in 0..len {
             let byte = if big { s[i] } else { s[len - 1 - i] };
             v = v << 8 | byte as u64;
         }
         Ok(v)
+    };
+    let rd_at = |p: usize, d: usize, len: usize| -> Result<u64, ImageError> {
+        rd(p.checked_add(d).ok_or(ImageError::Elf("truncated"))?, len)
     };
     let (phoff, phentsize, phnum) = if is64 {
         (rd(32, 8)?, rd(54, 2)?, rd(56, 2)?)
@@ -274,17 +281,24 @@ fn elf_chunks(b: &[u8]) -> Result<Vec<(u64, Vec<u8>)>, ImageError> {
     };
     let mut chunks = Vec::new();
     for i in 0..phnum {
-        let p = (phoff + i * phentsize) as usize;
+        let p = i
+            .checked_mul(phentsize)
+            .and_then(|d| d.checked_add(phoff))
+            .and_then(|p| usize::try_from(p).ok())
+            .ok_or(ImageError::Elf("truncated"))?;
         let (ty, off, paddr, filesz) = if is64 {
-            (rd(p, 4)?, rd(p + 8, 8)?, rd(p + 24, 8)?, rd(p + 32, 8)?)
+            (rd_at(p, 0, 4)?, rd_at(p, 8, 8)?, rd_at(p, 24, 8)?, rd_at(p, 32, 8)?)
         } else {
-            (rd(p, 4)?, rd(p + 4, 4)?, rd(p + 12, 4)?, rd(p + 16, 4)?)
+            (rd_at(p, 0, 4)?, rd_at(p, 4, 4)?, rd_at(p, 12, 4)?, rd_at(p, 16, 4)?)
         };
         if ty as u32 != PT_LOAD || filesz == 0 {
             continue;
         }
-        let data = b
-            .get(off as usize..(off + filesz) as usize)
+        let range = off.checked_add(filesz).and_then(|end| {
+            Some(usize::try_from(off).ok()?..usize::try_from(end).ok()?)
+        });
+        let data = range
+            .and_then(|r| b.get(r))
             .ok_or(ImageError::Elf("segment outside the file"))?;
         chunks.push((paddr, data.to_vec()));
     }
