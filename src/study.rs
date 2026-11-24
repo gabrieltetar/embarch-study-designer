@@ -17,7 +17,7 @@ use crate::limits::{
     MAX_NAME_LEN, MAX_PAYLOAD_LEN, MAX_PROTOCOLS_PER_STUDY, MAX_SERVICE_UUIDS,
     MAX_SNIPPETS_PER_BUILD, MAX_SNIPPET_NAME_LEN, MAX_STREAMS_PER_STUDY, MAX_STUDY_NAME_LEN,
 };
-use crate::streams::StreamTap;
+use crate::streams::{StreamSource, StreamTap};
 
 /// How loud dev-bench's own firmware should be **for the duration of one
 /// study** (embarch-dev-bench decision 39).
@@ -750,6 +750,66 @@ impl Study {
     /// nothing calls it implicitly.
     pub fn validate_monitor_windows(&self) -> Result<(), MonitorWindowError> {
         monitor_window_violation(self.steps.iter().map(|s| &s.action))
+    }
+}
+
+/// A `StreamSource::GattNotify` tap whose characteristic no step subscribes
+/// to (decision 55): dev-bench subscribes only for a monitor step, so the tap
+/// would capture nothing and the study would still pass.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UnsubscribedTapError {
+    /// Index of the tap in [`Study::streams`].
+    pub tap: usize,
+    /// The tap's service UUID.
+    pub service_uuid: Uuid,
+    /// The characteristic the tap captures and no step subscribes to.
+    pub characteristic_uuid: Uuid,
+}
+
+impl core::fmt::Display for UnsubscribedTapError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "streams[{}] captures {}, but no step in this study subscribes to it; add a \
+             GattMonitorAll/GattMonitorStart step, or name it in a selective monitor step's targets",
+            self.tap,
+            self.characteristic_uuid.to_hyphenated()
+        )
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for UnsubscribedTapError {}
+
+impl Study {
+    /// Refuses the first `GattNotify` tap in `streams` that no step
+    /// subscribes to (decision 55): an unfiltered
+    /// `GattMonitorAll`/`GattMonitorStart` subscribes to every characteristic;
+    /// a `GattMonitorSelected`/`GattMonitorSelectedStart` only to the targets
+    /// it names (service and characteristic both). Taps of any other source
+    /// pass. Additive: nothing calls it implicitly.
+    pub fn validate_stream_subscriptions(&self) -> Result<(), UnsubscribedTapError> {
+        for (tap, t) in self.streams.iter().enumerate() {
+            if let StreamSource::GattNotify { service_uuid, characteristic_uuid } = &t.source {
+                let subscribed = self.steps.iter().any(|s| match &s.action {
+                    Action::GattMonitorAll {} | Action::GattMonitorStart {} => true,
+                    Action::GattMonitorSelected { targets }
+                    | Action::GattMonitorSelectedStart { targets } => targets.iter().any(|g| {
+                        g.service_uuid == *service_uuid
+                            && g.characteristic_uuid == *characteristic_uuid
+                    }),
+                    _ => false,
+                });
+                if !subscribed {
+                    return Err(UnsubscribedTapError {
+                        tap,
+                        service_uuid: *service_uuid,
+                        characteristic_uuid: *characteristic_uuid,
+                    });
+                }
+            }
+        }
+        Ok(())
     }
 }
 

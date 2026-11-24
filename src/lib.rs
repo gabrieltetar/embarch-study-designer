@@ -166,7 +166,8 @@ pub use streams::{
 pub use study::{
     outpost_requirement_is_satisfiable, requirement_satisfied, Action, BleRole, BuildSpec,
     DevBenchLogLevel, GattOperation, OutpostModeRequirement, Requirements, RequirementsError,
-    BleSecurityLevel, MonitorWindowError, Step, Study, WaitBudgetError, NO_SNIPPETS, REQUIREMENT_ANY,
+    BleSecurityLevel, MonitorWindowError, Step, Study, UnsubscribedTapError, WaitBudgetError, NO_SNIPPETS,
+    REQUIREMENT_ANY,
 };
 #[cfg(feature = "study-ui")]
 pub use study_builder::{build_study, BuildStudyError, BuiltInActionKind, RoleChoice, RowAction, TableRow};
@@ -221,6 +222,87 @@ mod tests {
             streams_crc,
             dev_bench_log_level: DevBenchLogLevel::default(),
         }
+    }
+
+    fn notify_tap(id: u8, service: u8, characteristic: u8) -> StreamTap {
+        StreamTap {
+            id,
+            name: heapless::String::try_from("t").unwrap(),
+            source: StreamSource::GattNotify {
+                service_uuid: Uuid([service; 16]),
+                characteristic_uuid: Uuid([characteristic; 16]),
+            },
+            encoding: StreamEncoding::Raw,
+            scope: StreamScope::WholeStudy,
+        }
+    }
+
+    fn with_tap_and_action(tap: StreamTap, action: Option<Action>) -> Study {
+        let mut study = sample_study();
+        study.streams.push(tap).unwrap();
+        if let Some(action) = action {
+            study
+                .steps
+                .push(Step {
+                    name: heapless::String::try_from("m").unwrap(),
+                    action,
+                    timeout_ms: 1_000,
+                    continue_on_fail: false,
+                    delay_before_ms: 0,
+                })
+                .unwrap();
+        }
+        study
+    }
+
+    #[test]
+    fn a_gatt_notify_tap_no_step_subscribes_to_fails_validate_stream_subscriptions() {
+        let err = with_tap_and_action(notify_tap(0, 1, 2), None)
+            .validate_stream_subscriptions()
+            .unwrap_err();
+        assert_eq!(err.tap, 0);
+        assert_eq!(err.characteristic_uuid, Uuid([2; 16]));
+        let mut text = heapless::String::<256>::new();
+        core::fmt::write(&mut text, format_args!("{err}")).unwrap();
+        assert!(text.contains("streams[0]"));
+    }
+
+    #[test]
+    fn a_tap_subscribed_by_an_unfiltered_monitor_passes() {
+        for action in [Action::GattMonitorAll {}, Action::GattMonitorStart {}] {
+            let s = with_tap_and_action(notify_tap(0, 1, 2), Some(action));
+            assert!(s.validate_stream_subscriptions().is_ok());
+        }
+    }
+
+    #[test]
+    fn a_selective_monitor_must_name_both_service_and_characteristic() {
+        let targets = |service: u8, characteristic: u8| {
+            let mut t = bounded::Bounded::<GattTarget, { limits::MAX_MONITOR_TARGETS }>::default();
+            t.push(GattTarget {
+                service_uuid: Uuid([service; 16]),
+                characteristic_uuid: Uuid([characteristic; 16]),
+            })
+            .unwrap();
+            t
+        };
+        for (service, characteristic, ok) in [(1, 2, true), (9, 2, false), (1, 9, false)] {
+            let selective = [
+                Action::GattMonitorSelected { targets: targets(service, characteristic) },
+                Action::GattMonitorSelectedStart { targets: targets(service, characteristic) },
+            ];
+            for action in selective {
+                let s = with_tap_and_action(notify_tap(0, 1, 2), Some(action));
+                assert_eq!(s.validate_stream_subscriptions().is_ok(), ok);
+            }
+        }
+    }
+
+    #[test]
+    fn a_non_gatt_tap_passes_validate_stream_subscriptions() {
+        let mut tap = notify_tap(0, 1, 2);
+        tap.source = StreamSource::GattTranscript;
+        assert!(with_tap_and_action(tap, None).validate_stream_subscriptions().is_ok());
     }
 
     #[test]
