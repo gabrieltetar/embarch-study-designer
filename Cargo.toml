@@ -39,6 +39,10 @@ toml = { version = "0.8", optional = true }
 # linked by dev-bench firmware or any consumer that does not turn the feature on.
 lopdf = { version = "0.47", default-features = false, optional = true }
 unicode-normalization = { version = "0.1", optional = true }
+# Only pulled in by the `hil-image` feature (EMB-357): the SHA-256 of an
+# image's load segments. Never linked by dev-bench firmware or any consumer
+# that does not turn the feature on.
+sha2 = { version = "0.11", default-features = false, optional = true }
 
 [dev-dependencies]
 # Used by this crate's own round-trip tests to confirm every wire type also
@@ -116,6 +120,14 @@ verdicts = ["alloc"]
 # (decisions 101 to 103). `std` because the PDF reader is; off by default and
 # nothing else turns it on, so no other feature set gains a dependency.
 pdf-text = ["std", "dep:lopdf", "dep:unicode-normalization"]
+# An image's load segments, identity and the bench-firmware list's shape
+# (`interfaces/hil-image.md`). Host-only; needs `alloc` and `sha2`. Nothing
+# turns it on yet, so every existing consumer builds unchanged.
+hil-image = ["alloc", "dep:sha2"]
+
+[[example]]
+name = "image_segments"
+required-features = ["hil-image"]
 
 # Decision 23 set this for the FFI staticlib, the one build this crate was the
 # root of (a dependency crate's own [profile.*] is ignored by Cargo). The

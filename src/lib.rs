@@ -68,6 +68,8 @@ pub mod outpost;
 pub mod merged_actions;
 pub mod protocol;
 pub mod records;
+#[cfg(feature = "hil-image")]
+pub mod hil_image;
 #[cfg(feature = "reducers")]
 pub mod reducers;
 #[cfg(feature = "study-ui")]
