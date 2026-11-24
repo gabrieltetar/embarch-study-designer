@@ -48,7 +48,8 @@ pub enum ImageError {
     Elf(&'static str),
     /// A bin needs a base address and none was given.
     NoBase,
-    /// Two ranges the image writes overlap at this address.
+    /// Two ranges the image writes overlap at this address, or the range
+    /// starting here runs past the top of the 64-bit address space.
     Overlap(u64),
 }
 
@@ -166,10 +167,17 @@ pub fn image_segments(
 fn merge(mut chunks: Vec<(u64, Vec<u8>)>) -> Result<Vec<Segment>, ImageError> {
     chunks.retain(|(_, d)| !d.is_empty());
     chunks.sort_by_key(|(a, _)| *a);
+    // A range that runs past the top of the address space has no end address.
+    if let Some((a, _)) = chunks
+        .iter()
+        .find(|(a, d)| a.checked_add(d.len() as u64).is_none())
+    {
+        return Err(ImageError::Overlap(*a));
+    }
     let mut merged: Vec<(u64, Vec<u8>)> = Vec::new();
     for (addr, data) in chunks {
         if let Some((a, d)) = merged.last_mut() {
-            let end = *a + d.len() as u64;
+            let end = *a + d.len() as u64; // checked above: every chunk's end fits
             if addr < end {
                 return Err(ImageError::Overlap(addr));
             }

@@ -119,3 +119,42 @@ fn the_hil_json_types_refuse_an_unknown_key() {
     assert!(serde_json::from_str::<BenchFirmwareList>(list).is_err());
     assert!(serde_json::from_str::<BenchFirmwareList>(r#"{"schema":1,"release":"r","images":[]}"#).is_ok());
 }
+
+/// An ELF64 with two `PT_LOAD` segments of 8 bytes each at the given physical
+/// addresses.
+fn elf64_two(paddr_a: u64, paddr_b: u64) -> Vec<u8> {
+    let mut b = vec![0u8; 64 + 2 * 56];
+    b[..4].copy_from_slice(b"\x7fELF");
+    b[4] = 2;
+    b[5] = 1;
+    b[32..40].copy_from_slice(&64u64.to_le_bytes());
+    b[54..56].copy_from_slice(&56u16.to_le_bytes());
+    b[56..58].copy_from_slice(&2u16.to_le_bytes());
+    for (i, paddr) in [paddr_a, paddr_b].into_iter().enumerate() {
+        let p = 64 + i * 56;
+        b[p..p + 4].copy_from_slice(&1u32.to_le_bytes());
+        b[p + 24..p + 32].copy_from_slice(&paddr.to_le_bytes());
+        b[p + 32..p + 40].copy_from_slice(&8u64.to_le_bytes());
+    }
+    b
+}
+
+#[test]
+fn elf_load_address_near_u64_max_is_an_error() {
+    let ok = elf64_two(0x1000, 0x2000);
+    assert_eq!(image_segments(&ok, ImageFormat::Elf, None).unwrap().len(), 2);
+    let bad = elf64_two(u64::MAX - 4, 0x1000);
+    assert!(matches!(image_segments(&bad, ImageFormat::Elf, None), Err(ImageError::Overlap(_))));
+    let bad = elf64_two(0x1000, u64::MAX - 4);
+    assert!(matches!(image_segments(&bad, ImageFormat::Elf, None), Err(ImageError::Overlap(_))));
+}
+
+#[test]
+fn bin_base_near_u64_max_is_an_error() {
+    let bytes = [0u8; 16];
+    assert!(matches!(
+        image_segments(&bytes, ImageFormat::Bin, Some(u64::MAX - 4)),
+        Err(ImageError::Overlap(_))
+    ));
+    assert!(image_segments(&bytes, ImageFormat::Bin, Some(u64::MAX - 16)).is_ok());
+}
