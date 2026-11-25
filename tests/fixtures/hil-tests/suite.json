@@ -9,7 +9,7 @@
   "benches": [
     {
       "name": "pd-sink-bench",
-      "description": { "slug": "pd-sink-bench", "parts": [ { "id": "partner", "template": "nucleo-g0b1re" } ], "configs": [ { "name": "default", "cables": [] } ] },
+      "description": { "slug": "pd-sink-bench", "parts": [ { "id": "partner", "template": "nucleo-g0b1re" }, { "id": "unit", "template": "generic-board", "role": "dut" } ], "configs": [ { "name": "default", "cables": [] } ] },
       "boards": [
         { "part": "partner", "idle": "idle", "hello": "hello", "read_only": ["status", "vbus"], "preconditions": ["reset", "detach"] }
       ]
