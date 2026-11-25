@@ -401,5 +401,8 @@ pub const MAX_HOST_VALUE_LEN: usize = 32;
 /// `HostStudy.line_counts`. Eight patterns on two taps was the field case.
 /// **Assumed.**
 pub const MAX_HOST_LINE_COUNTS: usize = 32;
-/// `LineCount.pattern`, in bytes. **Assumed.**
+/// `LineCount.pattern` and `StepParse.pattern`, in bytes. **Assumed.**
 pub const MAX_HOST_PATTERN_LEN: usize = 256;
+/// The choices an observation prompt offers (`PromptAnswer.answers`), each at
+/// most [`MAX_HOST_VALUE_LEN`] bytes. **Assumed** (decision 108).
+pub const MAX_HOST_PROMPT_ANSWERS: usize = 16;

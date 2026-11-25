@@ -22,6 +22,15 @@
 //! **A prompt may name a bench configuration (decision 88).** `Prompt.bench_config`
 //! is a name only: no one refuses it at submission, Core forwards it, and the
 //! surface showing the prompt resolves it against the bench live there.
+//!
+//! **A step may read one number out of its reply, and a prompt says its kind
+//! (decision 108).** `Exchange.parse` and `Instrument.parse` name a
+//! measurement and say how to read it ([`StepParse`]); [`parse_step_number`]
+//! is the one function Core and `verify` both call. A parse is still not an
+//! expected value: nothing here compares the number with anything. A prompt's
+//! [`PromptKind`] decides who may answer it (`notes/hil/12-prevention.md`,
+//! "Operator prompts, by kind"); an `action` prompt names the parse that
+//! confirms it, and an `observation` prompt declares its answer.
 
 use alloc::boxed::Box;
 use alloc::string::String;
@@ -30,9 +39,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::limits::{
     MAX_HOST_EXPANDED_STEPS, MAX_HOST_LINE_COUNTS, MAX_HOST_LINE_LEN, MAX_HOST_NAME_LEN,
-    MAX_HOST_PATTERN_LEN, MAX_HOST_PROMPT_LEN, MAX_HOST_REPEAT_COUNT, MAX_HOST_REPEAT_STEPS,
-    MAX_HOST_STEPS, MAX_HOST_TEARDOWN_STEPS, MAX_HOST_VALUE_LEN, MAX_STREAMS_PER_STUDY,
+    MAX_HOST_PATTERN_LEN, MAX_HOST_PROMPT_ANSWERS, MAX_HOST_PROMPT_LEN, MAX_HOST_REPEAT_COUNT,
+    MAX_HOST_REPEAT_STEPS, MAX_HOST_STEPS, MAX_HOST_TEARDOWN_STEPS, MAX_HOST_VALUE_LEN,
+    MAX_MEASUREMENT_NAME_LEN, MAX_STREAMS_PER_STUDY,
 };
+use crate::measures::UNITS;
 use crate::result::Outcome;
 use crate::streams::{StreamSource, StreamTap};
 
@@ -159,6 +170,9 @@ pub enum HostAction {
         /// carried out and the step is `Fail`. Never a value comparison.
         #[serde(default)]
         refused_on: Option<String>,
+        /// The number this step reads out of its reply (decision 108).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parse: Option<StepParse>,
     },
     /// Block until an operator answers, or the timeout.
     Prompt {
@@ -174,6 +188,19 @@ pub enum HostAction {
         /// always did.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         bench_config: Option<String>,
+        /// Who may answer it (decision 108). `None` is a study written before
+        /// the field; it takes neither `confirmed_by` nor `answer`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kind: Option<PromptKind>,
+        /// An `action` prompt's confirming measurement: the `name` of a
+        /// [`StepParse`] in the same study. Required on `action`, refused on
+        /// every other kind.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        confirmed_by: Option<String>,
+        /// What an `observation` prompt's answer is. Required on
+        /// `observation`, refused on every other kind.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        answer: Option<PromptAnswer>,
     },
     /// One SCPI line; with `query` the reply is recorded.
     Instrument {
@@ -181,6 +208,10 @@ pub enum HostAction {
         line: String,
         #[serde(default)]
         query: bool,
+        /// The number this step reads out of its reply (decision 108); only a
+        /// `query` has a reply to read.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parse: Option<StepParse>,
     },
     Wait { ms: u32 },
     /// Run `steps` `count` times, or once per entry of `values` (exactly one
@@ -197,6 +228,113 @@ pub enum HostAction {
         values: Vec<String>,
         steps: Vec<HostStep>,
     },
+}
+
+/// How a step reads one number out of its reply (decision 108): the first
+/// match of `pattern` in the reply, its one capture group read by the crate's
+/// number grammar ([`crate::number_grammar`]). Core records the number beside
+/// the raw reply at step time and `verify` re-parses it from the recorded
+/// reply, both through [`parse_step_number`], so they cannot disagree.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StepParse {
+    /// The measurement's name, unique within the study across every parse and
+    /// every observation prompt's answer.
+    pub name: String,
+    /// A `regex` crate pattern with exactly one capture group.
+    pub pattern: String,
+    /// One of the reducers' units ([`crate::measures::UNITS`]).
+    pub unit: String,
+}
+
+/// Who may answer a prompt, by what its answer means
+/// (`notes/hil/12-prevention.md`, "Operator prompts, by kind").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PromptKind {
+    /// A claim the setup is done; the person, or the agent relaying them.
+    Setup,
+    /// A timing mark (the person acted), confirmed by a measurement.
+    Action,
+    /// The measurement itself; the person's own hand only.
+    Observation,
+    /// A person's safety before energising; the person's own hand only.
+    Clearance,
+}
+
+/// What an `observation` prompt's answer is: a measurement with `by: person`,
+/// either one of `answers` or a `number`, exactly one of the two.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PromptAnswer {
+    /// The measurement's name, in the same namespace as [`StepParse::name`].
+    pub name: String,
+    /// The choices offered, each unique; empty when `number` is given.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub answers: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub number: Option<ObservedNumber>,
+}
+
+/// A number the person reads, with the resolution and uncertainty the prompt
+/// declares for it (`notes/hil/02-study.md`, "a `person` measurement").
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObservedNumber {
+    /// One of [`crate::measures::UNITS`].
+    pub unit: String,
+    /// The smallest step the person reads, in `unit`.
+    pub resolution: f64,
+    /// Expanded uncertainty `U` of one reading, in `unit`.
+    #[serde(rename = "U")]
+    pub u_expanded: f64,
+    /// Coverage factor of `U`; absent is 2, the reducers' default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub k: Option<f64>,
+}
+
+#[cfg(feature = "std")]
+impl StepParse {
+    /// The compiled pattern, or why it is refused: it does not compile, or it
+    /// has other than exactly one capture group.
+    pub fn regex(&self) -> Result<regex::Regex, String> {
+        let re = regex::RegexBuilder::new(&self.pattern)
+            .size_limit(1 << 20)
+            .build()
+            .map_err(|e| alloc::format!("{e}"))?;
+        // `captures_len` counts the whole match as group 0.
+        match re.captures_len() - 1 {
+            1 => Ok(re),
+            n => Err(alloc::format!("{n} capture groups; a parse takes exactly one")),
+        }
+    }
+}
+
+/// The number `parse` reads out of `reply` (decision 108): the first match of
+/// its pattern, whose capture, trimmed, must be exactly one number in the
+/// crate's number grammar. No match, a capture that did not take part, a
+/// capture that is not one number, or a pattern the study should not have
+/// passed validation with, is [`crate::reducers::Incomplete::ParseFailed`].
+#[cfg(all(feature = "std", feature = "reducers"))]
+pub fn parse_step_number(reply: &str, parse: &StepParse) -> Result<f64, crate::reducers::Incomplete> {
+    use crate::reducers::Incomplete;
+    let re = parse.regex().map_err(|_| Incomplete::ParseFailed)?;
+    let text = re
+        .captures(reply)
+        .and_then(|c| c.get(1))
+        .map(|m| m.as_str().trim())
+        .ok_or(Incomplete::ParseFailed)?;
+    match crate::number_grammar::tokens(text).as_slice() {
+        [one] if one.text == text => {
+            let v = one.value.to_f64();
+            if v.is_finite() {
+                Ok(v)
+            } else {
+                Err(Incomplete::ParseFailed)
+            }
+        }
+        _ => Err(Incomplete::ParseFailed),
+    }
 }
 
 /// One step's result. `reply` is raw text, cut at `MAX_HOST_REPLY_LEN` with
@@ -327,6 +465,33 @@ pub enum HostStudyError {
     UnknownLineCountTap { index: usize },
     /// The pattern does not compile (checked with feature `std`).
     BadLineCountPattern { index: usize, reason: String },
+    /// A measurement name (a parse's, or an observation prompt's answer's) is
+    /// blank, longer than `MAX_MEASUREMENT_NAME_LEN` or holds a control
+    /// character (decision 108).
+    BadMeasurementName { list: HostList, index: usize },
+    /// A measurement name already used by an earlier parse or answer.
+    DuplicateMeasurementName { list: HostList, index: usize },
+    /// A parse's pattern does not compile, or has other than exactly one
+    /// capture group (checked with feature `std`).
+    BadParsePattern { list: HostList, index: usize, reason: String },
+    /// A unit outside `measures::UNITS` (`what` names the field).
+    UnknownUnit { list: HostList, index: usize, what: &'static str },
+    /// A `parse` on an `Instrument` step without `query`: there is no reply.
+    ParseWithoutReply { list: HostList, index: usize },
+    /// A prompt field its kind does not take (`what`: `confirmed_by` or
+    /// `answer`), including on a prompt with no kind.
+    PromptFieldNotForKind { list: HostList, index: usize, what: &'static str },
+    /// An `action` prompt with no `confirmed_by`.
+    ActionWithoutConfirmedBy { list: HostList, index: usize },
+    /// `confirmed_by` names no parse in the study.
+    UnknownConfirmedBy { list: HostList, index: usize },
+    /// An `observation` prompt with no `answer`.
+    ObservationWithoutAnswer { list: HostList, index: usize },
+    /// An answer declaring neither or both of `answers` and `number`, or a
+    /// choice that is blank, too long, repeated or holds a control character,
+    /// or too many choices, or a `resolution`, `U` or `k` that is not a finite
+    /// positive number (`what` names the field).
+    BadPromptAnswer { list: HostList, index: usize, what: &'static str },
 }
 
 impl HostStudy {
@@ -354,6 +519,7 @@ impl HostStudy {
         for (i, s) in self.teardown.iter().enumerate() {
             s.validate(HostList::Teardown, i, false)?;
         }
+        self.validate_measurements()?;
         if self.streams.len() > MAX_STREAMS_PER_STUDY {
             return Err(E::TooManyStreams { count: self.streams.len() });
         }
@@ -400,6 +566,44 @@ impl HostStudy {
         }
         Ok(())
     }
+
+    /// Decision 108's study-wide half: every measurement name (a parse's, an
+    /// observation's answer's) is used once, and an action prompt's
+    /// `confirmed_by` names a parse. An inner step of a `Repeat` reports as
+    /// [`HostStudyError::InRepeat`], indexed within it, as its own checks do.
+    fn validate_measurements(&self) -> Result<(), HostStudyError> {
+        use HostStudyError as E;
+        let lists = [(HostList::Steps, flatten(&self.steps)), (HostList::Teardown, flatten(&self.teardown))];
+        let at = |list: HostList, index: usize, inner: Option<usize>, e: fn(HostList, usize) -> E| match inner {
+            None => e(list, index),
+            Some(j) => E::InRepeat { list, index, source: Box::new(e(list, j)) },
+        };
+        let mut names: Vec<&str> = Vec::new();
+        let mut parses: Vec<&str> = Vec::new();
+        for (list, steps) in &lists {
+            for &(index, inner, step) in steps {
+                if let Some(name) = measurement_of(step) {
+                    if names.contains(&name) {
+                        return Err(at(*list, index, inner, |list, index| E::DuplicateMeasurementName { list, index }));
+                    }
+                    names.push(name);
+                    if !matches!(step.action, HostAction::Prompt { .. }) {
+                        parses.push(name);
+                    }
+                }
+            }
+        }
+        for (list, steps) in &lists {
+            for &(index, inner, step) in steps {
+                if let HostAction::Prompt { confirmed_by: Some(c), .. } = &step.action {
+                    if !parses.contains(&c.as_str()) {
+                        return Err(at(*list, index, inner, |list, index| E::UnknownConfirmedBy { list, index }));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 /// A character that is not a control character but still breaks a name shown
@@ -408,6 +612,83 @@ impl HostStudy {
 /// so a name could display as another name it does not equal.
 fn breaks_one_line_text(ch: char) -> bool {
     matches!(ch, '\u{2028}' | '\u{2029}' | '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+}
+
+/// A measurement name is shown on one line and looked up by exact name, as a
+/// `measurements.json` row's `name` is.
+fn measurement_name_ok(name: &str) -> bool {
+    !name.trim().is_empty()
+        && name.trim() == name
+        && name.len() <= MAX_MEASUREMENT_NAME_LEN
+        && !name.chars().any(|ch| ch.is_control() || breaks_one_line_text(ch))
+}
+
+fn finite_positive(v: f64) -> bool {
+    v.is_finite() && v > 0.0
+}
+
+/// An observation prompt's answer, on its own; its name's uniqueness is the
+/// study's check.
+fn validate_answer(a: &PromptAnswer, list: HostList, index: usize) -> Result<(), HostStudyError> {
+    use HostStudyError as E;
+    let bad = |what| Err(E::BadPromptAnswer { list, index, what });
+    if !measurement_name_ok(&a.name) {
+        return Err(E::BadMeasurementName { list, index });
+    }
+    match (a.answers.is_empty(), &a.number) {
+        (false, None) => {
+            if a.answers.len() > MAX_HOST_PROMPT_ANSWERS {
+                return bad("answers");
+            }
+            for (i, c) in a.answers.iter().enumerate() {
+                if c.trim().is_empty()
+                    || c.len() > MAX_HOST_VALUE_LEN
+                    || c.chars().any(char::is_control)
+                    || a.answers[..i].contains(c)
+                {
+                    return bad("answers");
+                }
+            }
+        }
+        (true, Some(n)) => {
+            if !UNITS.contains(&n.unit.as_str()) {
+                return Err(E::UnknownUnit { list, index, what: "answer.number.unit" });
+            }
+            if !finite_positive(n.resolution) {
+                return bad("resolution");
+            }
+            if !finite_positive(n.u_expanded) {
+                return bad("U");
+            }
+            if n.k.is_some_and(|k| !finite_positive(k)) {
+                return bad("k");
+            }
+        }
+        _ => return bad("answers or number"),
+    }
+    Ok(())
+}
+
+/// The measurement a step declares, if any: its parse's name, or an
+/// observation prompt's answer's.
+fn measurement_of(step: &HostStep) -> Option<&str> {
+    match &step.action {
+        HostAction::Exchange { parse: Some(p), .. } | HostAction::Instrument { parse: Some(p), .. } => Some(&p.name),
+        HostAction::Prompt { answer: Some(a), .. } => Some(&a.name),
+        _ => None,
+    }
+}
+
+/// Every step of `list`, an inner step of a `Repeat` with its index within it.
+fn flatten(steps: &[HostStep]) -> Vec<(usize, Option<usize>, &HostStep)> {
+    let mut out = Vec::new();
+    for (i, s) in steps.iter().enumerate() {
+        out.push((i, None, s));
+        if let HostAction::Repeat { steps: inner, .. } = &s.action {
+            out.extend(inner.iter().enumerate().map(|(j, t)| (i, Some(j), t)));
+        }
+    }
+    out
 }
 
 impl HostStep {
@@ -439,16 +720,54 @@ impl HostStep {
             }
             Ok(())
         };
+        let parse_ok = |p: &StepParse| {
+            if !measurement_name_ok(&p.name) {
+                return Err(E::BadMeasurementName { list, index });
+            }
+            blank(&p.pattern, "parse.pattern")?;
+            if p.pattern.len() > MAX_HOST_PATTERN_LEN {
+                return Err(E::FieldTooLong { list, index, what: "parse.pattern" });
+            }
+            #[cfg(feature = "std")]
+            if let Err(reason) = p.regex() {
+                return Err(E::BadParsePattern { list, index, reason });
+            }
+            if !UNITS.contains(&p.unit.as_str()) {
+                return Err(E::UnknownUnit { list, index, what: "parse.unit" });
+            }
+            Ok(())
+        };
         match &self.action {
-            HostAction::Exchange { signal, line: l, until, refused_on, .. } => {
+            HostAction::Exchange { signal, line: l, until, refused_on, parse, .. } => {
                 blank(signal, "signal")?;
                 line(l)?;
                 blank(until, "until")?;
                 if let Some(r) = refused_on {
                     blank(r, "refused_on")?;
                 }
+                if let Some(p) = parse {
+                    parse_ok(p)?;
+                }
             }
-            HostAction::Prompt { text, bench_config } => {
+            HostAction::Prompt { text, bench_config, kind, confirmed_by, answer } => {
+                if confirmed_by.is_some() && *kind != Some(PromptKind::Action) {
+                    return Err(E::PromptFieldNotForKind { list, index, what: "confirmed_by" });
+                }
+                if answer.is_some() && *kind != Some(PromptKind::Observation) {
+                    return Err(E::PromptFieldNotForKind { list, index, what: "answer" });
+                }
+                match kind {
+                    Some(PromptKind::Action) => match confirmed_by {
+                        // Whether it names a parse is the study's check.
+                        Some(c) => blank(c, "confirmed_by")?,
+                        None => return Err(E::ActionWithoutConfirmedBy { list, index }),
+                    },
+                    Some(PromptKind::Observation) => match answer {
+                        Some(a) => validate_answer(a, list, index)?,
+                        None => return Err(E::ObservationWithoutAnswer { list, index }),
+                    },
+                    _ => {}
+                }
                 blank(text, "text")?;
                 if text.len() > MAX_HOST_PROMPT_LEN {
                     return Err(E::FieldTooLong { list, index, what: "text" });
@@ -464,9 +783,15 @@ impl HostStep {
                     }
                 }
             }
-            HostAction::Instrument { instrument, line: l, .. } => {
+            HostAction::Instrument { instrument, line: l, query, parse } => {
                 blank(instrument, "instrument")?;
                 line(l)?;
+                if let Some(p) = parse {
+                    if !query {
+                        return Err(E::ParseWithoutReply { list, index });
+                    }
+                    parse_ok(p)?;
+                }
             }
             HostAction::Wait { ms } => {
                 if *ms == 0 {
@@ -560,6 +885,7 @@ mod tests {
                 until: "ok".into(),
                 match_after_echo: false,
                 refused_on: None,
+                parse: None,
             },
             timeout_ms: 100,
             continue_on_fail: false,
@@ -824,7 +1150,13 @@ mod tests {
     fn prompt(text: &str, bench_config: Option<&str>) -> HostStep {
         HostStep {
             name: "p".into(),
-            action: HostAction::Prompt { text: text.into(), bench_config: bench_config.map(Into::into) },
+            action: HostAction::Prompt {
+                text: text.into(),
+                bench_config: bench_config.map(Into::into),
+                kind: None,
+                confirmed_by: None,
+                answer: None,
+            },
             timeout_ms: 60_000,
             continue_on_fail: false,
             delay_before_ms: 0,
@@ -911,5 +1243,180 @@ mod tests {
         let mut s = pd();
         s.streams[0].source = StreamSource::PowerFrontEnd { sample_hz: 10 };
         assert_eq!(s.validate(), Err(HostStudyError::StreamNotSignal { index: 0 }));
+    }
+
+    // ---- a step-time parse and a prompt's kind (decision 108) ----
+
+    fn vbus() -> StepParse {
+        StepParse { name: "vbus".into(), pattern: r"vbus: (\S+) mV".into(), unit: "mV".into() }
+    }
+
+    fn parsed(parse: StepParse) -> HostStep {
+        let mut s = exchange("pd status");
+        if let HostAction::Exchange { parse: p, .. } = &mut s.action {
+            *p = Some(parse);
+        }
+        s
+    }
+
+    fn kinded(kind: PromptKind, confirmed_by: Option<&str>, answer: Option<PromptAnswer>) -> HostStep {
+        let mut s = prompt("do it", None);
+        s.action = HostAction::Prompt {
+            text: "do it".into(),
+            bench_config: None,
+            kind: Some(kind),
+            confirmed_by: confirmed_by.map(Into::into),
+            answer,
+        };
+        s
+    }
+
+    fn choices(name: &str, answers: &[&str]) -> PromptAnswer {
+        PromptAnswer { name: name.into(), answers: answers.iter().map(|a| (*a).into()).collect(), number: None }
+    }
+
+    #[cfg(all(feature = "std", feature = "reducers"))]
+    #[test]
+    fn a_reply_and_a_pattern_with_one_group_give_the_number() {
+        let reply = "pd status\r\nvbus: 5012 mV\r\nibus: 1.25 A\r\nuart:~$ ";
+        assert_eq!(parse_step_number(reply, &vbus()), Ok(5012.0));
+        let ibus = StepParse { name: "ibus".into(), pattern: r"ibus:\s*([^ ]+) A".into(), unit: "A".into() };
+        assert_eq!(parse_step_number(reply, &ibus), Ok(1.25));
+        let neg = StepParse { name: "t".into(), pattern: r"t=(\S+)".into(), unit: "1".into() };
+        assert_eq!(parse_step_number("t=-2.5e-3", &neg), Ok(-0.0025));
+    }
+
+    #[cfg(all(feature = "std", feature = "reducers"))]
+    #[test]
+    fn no_match_and_a_capture_that_is_not_one_number_are_parse_failed() {
+        use crate::reducers::Incomplete::ParseFailed;
+        assert_eq!(parse_step_number("pd: error no partner", &vbus()), Err(ParseFailed));
+        assert_eq!(parse_step_number("vbus: n/a mV", &vbus()), Err(ParseFailed));
+        assert_eq!(parse_step_number("vbus: 5012V mV", &vbus()), Err(ParseFailed));
+        let two = StepParse { name: "v".into(), pattern: r"v=(.*);".into(), unit: "V".into() };
+        assert_eq!(parse_step_number("v=1 2;", &two), Err(ParseFailed));
+        let optional = StepParse { name: "v".into(), pattern: r"v=(\d+)?;".into(), unit: "V".into() };
+        assert_eq!(parse_step_number("v=;", &optional), Err(ParseFailed));
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn a_parse_is_refused_for_its_pattern_unit_or_name() {
+        let refused = |p: StepParse| study(vec![parsed(p)]).validate();
+        for bad in [r"vbus: \S+ mV", r"(\d+)\.(\d+)", r"vbus: (\S+"] {
+            let r = refused(StepParse { pattern: bad.into(), ..vbus() });
+            assert!(matches!(r, Err(HostStudyError::BadParsePattern { index: 0, .. })), "{bad}: {r:?}");
+        }
+        assert_eq!(
+            refused(StepParse { unit: "volts".into(), ..vbus() }),
+            Err(HostStudyError::UnknownUnit { list: HostList::Steps, index: 0, what: "parse.unit" })
+        );
+        assert_eq!(
+            refused(StepParse { name: " vbus".into(), ..vbus() }),
+            Err(HostStudyError::BadMeasurementName { list: HostList::Steps, index: 0 })
+        );
+        let mut s = exchange("x");
+        s.action = HostAction::Instrument { instrument: "dmm".into(), line: "MEAS?".into(), query: false, parse: Some(vbus()) };
+        assert_eq!(study(vec![s]).validate(), Err(HostStudyError::ParseWithoutReply { list: HostList::Steps, index: 0 }));
+    }
+
+    #[test]
+    fn a_measurement_name_is_used_once_across_parses_and_answers() {
+        let s = study(vec![parsed(vbus()), parsed(vbus())]);
+        assert_eq!(s.validate(), Err(HostStudyError::DuplicateMeasurementName { list: HostList::Steps, index: 1 }));
+        let s = study(vec![parsed(vbus()), kinded(PromptKind::Observation, None, Some(choices("vbus", &["yes", "no"])))]);
+        assert_eq!(s.validate(), Err(HostStudyError::DuplicateMeasurementName { list: HostList::Steps, index: 1 }));
+        let mut s = study(vec![parsed(vbus())]);
+        s.teardown.push(parsed(vbus()));
+        assert_eq!(s.validate(), Err(HostStudyError::DuplicateMeasurementName { list: HostList::Teardown, index: 0 }));
+    }
+
+    #[test]
+    fn an_action_prompt_names_a_parse_of_the_same_study() {
+        let ok = study(vec![kinded(PromptKind::Action, Some("vbus"), None), parsed(vbus())]);
+        ok.validate().unwrap();
+        let s = study(vec![kinded(PromptKind::Action, Some("ibus"), None), parsed(vbus())]);
+        assert_eq!(s.validate(), Err(HostStudyError::UnknownConfirmedBy { list: HostList::Steps, index: 0 }));
+        // An observation's answer is a measurement, but not one that confirms an action.
+        let s = study(vec![
+            kinded(PromptKind::Observation, None, Some(choices("led", &["green", "red"]))),
+            kinded(PromptKind::Action, Some("led"), None),
+        ]);
+        assert_eq!(s.validate(), Err(HostStudyError::UnknownConfirmedBy { list: HostList::Steps, index: 1 }));
+        assert_eq!(
+            study(vec![kinded(PromptKind::Action, None, None)]).validate(),
+            Err(HostStudyError::ActionWithoutConfirmedBy { list: HostList::Steps, index: 0 })
+        );
+        assert_eq!(
+            study(vec![kinded(PromptKind::Setup, Some("vbus"), None), parsed(vbus())]).validate(),
+            Err(HostStudyError::PromptFieldNotForKind { list: HostList::Steps, index: 0, what: "confirmed_by" })
+        );
+    }
+
+    #[test]
+    fn an_action_prompt_inside_a_repeat_reports_within_it() {
+        let mut r = exchange("x");
+        r.action = HostAction::Repeat { count: Some(2), values: Vec::new(), steps: vec![kinded(PromptKind::Action, Some("nope"), None)] };
+        assert_eq!(
+            study(vec![r]).validate(),
+            Err(HostStudyError::InRepeat {
+                list: HostList::Steps,
+                index: 0,
+                source: Box::new(HostStudyError::UnknownConfirmedBy { list: HostList::Steps, index: 0 }),
+            })
+        );
+    }
+
+    #[test]
+    fn an_observation_prompt_declares_choices_or_a_number() {
+        let check = |a: Option<PromptAnswer>| study(vec![kinded(PromptKind::Observation, None, a)]).validate();
+        check(Some(choices("led", &["green", "red"]))).unwrap();
+        let number = |unit: &str, resolution: f64, k: Option<f64>| PromptAnswer {
+            name: "meter".into(),
+            answers: Vec::new(),
+            number: Some(ObservedNumber { unit: unit.into(), resolution, u_expanded: 0.02, k }),
+        };
+        check(Some(number("V", 0.01, None))).unwrap();
+        let bad = |what| Err(HostStudyError::BadPromptAnswer { list: HostList::Steps, index: 0, what });
+        assert_eq!(check(None), Err(HostStudyError::ObservationWithoutAnswer { list: HostList::Steps, index: 0 }));
+        assert_eq!(check(Some(choices("led", &[]))), bad("answers or number"));
+        let mut both = number("V", 0.01, None);
+        both.answers = vec!["green".into()];
+        assert_eq!(check(Some(both)), bad("answers or number"));
+        assert_eq!(check(Some(choices("led", &["green", "green"]))), bad("answers"));
+        assert_eq!(check(Some(number("V", 0.0, None))), bad("resolution"));
+        assert_eq!(check(Some(number("V", 0.01, Some(f64::NAN)))), bad("k"));
+        assert_eq!(
+            check(Some(number("volts", 0.01, None))),
+            Err(HostStudyError::UnknownUnit { list: HostList::Steps, index: 0, what: "answer.number.unit" })
+        );
+        assert_eq!(
+            study(vec![kinded(PromptKind::Clearance, None, Some(choices("led", &["on"])))]).validate(),
+            Err(HostStudyError::PromptFieldNotForKind { list: HostList::Steps, index: 0, what: "answer" })
+        );
+    }
+
+    #[test]
+    fn a_prompt_kind_reads_and_writes_in_lower_case() {
+        let s = kinded(PromptKind::Observation, None, Some(choices("led", &["green"])));
+        let j = serde_json::to_string(&s.action).unwrap();
+        assert!(j.contains(r#""kind":"observation""#), "{j}");
+        assert!(j.contains(r#""answer":{"name":"led","answers":["green"]}"#), "{j}");
+        let n = ObservedNumber { unit: "V".into(), resolution: 0.01, u_expanded: 0.02, k: None };
+        assert_eq!(serde_json::to_string(&n).unwrap(), r#"{"unit":"V","resolution":0.01,"U":0.02}"#);
+    }
+
+    /// A study exactly as the crate serialized it at `HOST_TYPE_SCHEMA_VERSION`
+    /// 24: an exchange, a query and a prompt, none with a decision 108 field.
+    const BEFORE_PARSE: &str = r#"{"name":"pd","steps":[{"name":"req","action":{"Exchange":{"signal":"pd","line":"pd status","until":"uart:~$ ","match_after_echo":true,"refused_on":"pd: error"}},"timeout_ms":3000,"continue_on_fail":false,"delay_before_ms":0},{"name":"read","action":{"Instrument":{"instrument":"dmm","line":"MEAS:VOLT?","query":true}},"timeout_ms":3000,"continue_on_fail":false,"delay_before_ms":0},{"name":"plug","action":{"Prompt":{"text":"plug in the pack","bench_config":"pd-sink"}},"timeout_ms":60000,"continue_on_fail":false,"delay_before_ms":0}],"teardown":[],"streams":[],"line_counts":[]}"#;
+
+    #[test]
+    fn a_study_written_before_the_parse_loads_validates_and_serializes_byte_identical() {
+        let s: HostStudy = serde_json::from_str(BEFORE_PARSE).unwrap();
+        s.validate().unwrap();
+        assert!(s.steps.iter().all(|step| measurement_of(step).is_none()));
+        assert!(matches!(&s.steps[2].action, HostAction::Prompt { kind: None, confirmed_by: None, answer: None, .. }));
+        assert_eq!(serde_json::to_string(&s).unwrap(), BEFORE_PARSE);
+        assert_eq!(crate::HOST_TYPE_SCHEMA_VERSION, 25);
     }
 }

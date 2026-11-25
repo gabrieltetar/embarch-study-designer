@@ -398,7 +398,17 @@ pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 17;
 /// - **v24** (EMB-485) — a wire bump (v17: `DevBenchMessage::StudyStop` and
 ///   `StopReason`), so this follows by the superset rule. `StopReason` is also
 ///   a public type Core and `embarch-api` share.
-pub const HOST_TYPE_SCHEMA_VERSION: u32 = 24;
+/// - **v25** (EMB-352, decision 108, `tasks/suite/062`) — host-only:
+///   `HostAction::Exchange` and `HostAction::Instrument` gained `parse`, the
+///   number a step reads out of its reply, and `HostAction::Prompt` gained
+///   `kind`, `confirmed_by` and `answer`. `HostStudy` crosses `embarch-api` ->
+///   `embarch-core` as JSON and reaches dev-bench never, so
+///   [`DEV_BENCH_WIRE_SCHEMA_VERSION`] stays at 17. Every new field is
+///   `#[serde(default)]` and skipped when `None`, so a v24 study loads and
+///   serializes byte for byte as it did — and the number moves anyway, on
+///   v19's reasoning: `deny_unknown_fields` means a v24 Core refuses a study
+///   that declares a parse with a `422` naming no version.
+pub const HOST_TYPE_SCHEMA_VERSION: u32 = 25;
 
 /// [`HOST_TYPE_SCHEMA_VERSION`]'s triggers are a strict superset of
 /// [`DEV_BENCH_WIRE_SCHEMA_VERSION`]'s (decision 12's

@@ -78,7 +78,9 @@ pub mod registry;
 #[cfg(feature = "verdicts")]
 pub mod verdicts;
 
-#[cfg(feature = "pdf-text")]
+/// `std`, not `pdf-text`, since decision 108: a host study's step-time parse
+/// reads its capture with this grammar too, and Core builds no PDF reader.
+#[cfg(feature = "std")]
 pub mod number_grammar;
 #[cfg(feature = "pdf-text")]
 pub mod pdf_text;
