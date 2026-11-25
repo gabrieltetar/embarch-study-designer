@@ -125,6 +125,13 @@ pdf-text = ["std", "dep:lopdf", "dep:unicode-normalization"]
 # turns it on yet, so every existing consumer builds unchanged.
 hil-image = ["alloc", "dep:sha2"]
 
+# The HIL test, suite manifest and plan types, their definition hash and the
+# derived-test diff (`interfaces/hil-tests.md`, decision 109). Host-only; reuses
+# the verdict rules' `Limit` and `DecisionRule`, and needs `sha2` and
+# `serde_json` (the canonical JSON, RFC 8785). Nothing turns it on yet, so
+# every existing consumer builds unchanged.
+hil-test = ["verdicts", "dep:sha2", "dep:serde_json"]
+
 [[example]]
 name = "image_segments"
 required-features = ["hil-image"]

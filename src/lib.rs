@@ -71,6 +71,8 @@ pub mod protocol;
 pub mod records;
 #[cfg(feature = "hil-image")]
 pub mod hil_image;
+#[cfg(feature = "hil-test")]
+pub mod hil_test;
 #[cfg(feature = "reducers")]
 pub mod reducers;
 #[cfg(feature = "study-ui")]
