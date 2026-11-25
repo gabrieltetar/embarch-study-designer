@@ -13,7 +13,7 @@
 //! spelling in the source file do not change it, and a changed limit does.
 //! These types check shape only; the definition-time checks (a bench with no
 //! DUT, a limit narrower than its `U` allows) are `hil_check`'s; a study that
-//! does not hash to `study.hash` is refused there too, by [`study_hash`].
+//! does not hash to [`study_hash`] is refused there by a later unit.
 
 use alloc::collections::BTreeMap;
 use alloc::format;

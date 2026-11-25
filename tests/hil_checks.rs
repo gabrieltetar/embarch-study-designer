@@ -349,14 +349,3 @@ fn the_study_hash_is_pinned_and_ignores_the_files_layout() {
 }
 
 const PINNED_STUDY_HASH: &str = "985e5888b3c5c8f1b7f57b05cd91a49c7780ee2d0814e92e92641ded9092c22b";
-
-#[test]
-fn a_study_that_does_not_hash_to_study_hash_is_refused_naming_both() {
-    let mut t = test();
-    let stated = "3f1c0f6a0d1b4e0d9d2a8f7e6c5b4a392817060504030201f0e0d0c0b0a09080";
-    t.study.hash = stated.into();
-    let r = only(check_test(&t, StudyKind::Host(&study()), &bench(), &measured()).unwrap_err(), Rule::StudyHashMismatch, "study.hash");
-    assert!(r.reason.contains(stated));
-    assert!(r.reason.contains(&study_hash(&study())));
-    assert!(r.reason.contains(&t.study.file));
-}
