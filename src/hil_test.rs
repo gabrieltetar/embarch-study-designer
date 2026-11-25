@@ -199,6 +199,30 @@ pub struct TestDef {
     pub derived_from: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub template: Option<Template>,
+    /// Applicability: every condition must hold over the DUT's capabilities
+    /// for the test to apply (`hil_expand`, decision 111). Empty applies always.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub applies_when: Vec<Condition>,
+    /// The hooks the test needs mapped; one with no mapping gives `hook_unmapped`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hooks: Vec<String>,
+    /// Set on a measurable capability's check: the capability whose declared
+    /// or decoded value this test compares with the measured one. Every test
+    /// expanded from that capability `requires` it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checks: Option<String>,
+}
+
+/// One applicability condition over a DUT capability (by `name`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Condition {
+    /// The capability is present.
+    Present { capability: String },
+    /// The capability's value equals `value`.
+    Equals { capability: String, value: Value },
+    /// The capability's value is an array holding `value`.
+    Contains { capability: String, value: Value },
 }
 
 /// A refusal of a file's own header.
@@ -391,6 +415,10 @@ pub struct Plan {
     pub select: Selection,
     pub dut: DutInputs,
     pub stop_on_fail: bool,
+    /// The order benches run in, by name; a bench not listed follows, in the
+    /// suite's order. Empty is the suite's order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bench_order: Vec<String>,
 }
 
 impl Plan {
@@ -405,7 +433,7 @@ impl Plan {
 
 // ---- the definition hash ---------------------------------------------------
 
-fn hex_lower(bytes: &[u8]) -> String {
+pub(crate) fn hex_lower(bytes: &[u8]) -> String {
     let mut s = String::with_capacity(bytes.len() * 2);
     for b in bytes {
         s.push_str(&format!("{b:02x}"));
@@ -546,6 +574,9 @@ const DECIDING: &[&str] = &[
     "decision_rule",
     "setup_terms",
     "template",
+    "applies_when",
+    "hooks",
+    "checks",
 ];
 
 fn keyed(v: &Value) -> BTreeMap<String, Value> {

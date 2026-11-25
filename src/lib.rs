@@ -74,6 +74,8 @@ pub mod hil_image;
 #[cfg(feature = "hil-test")]
 pub mod hil_check;
 #[cfg(feature = "hil-test")]
+pub mod hil_expand;
+#[cfg(feature = "hil-test")]
 pub mod hil_test;
 #[cfg(feature = "reducers")]
 pub mod reducers;
