@@ -207,6 +207,15 @@ pub enum DevBenchMessage {
     /// ran to its natural end from one aborted early by a failing step with
     /// `continue_on_fail: false`.
     StudyDone { completed: bool },
+    /// Sent by Core to stop the study dev-bench is running (EMB-485,
+    /// schema v17), appended at discriminant 9. The bench stops the step it
+    /// is in, closes every open tap (each answering with its own
+    /// `StreamClose`, `dropped` still honest) and then sends `StudyDone`
+    /// with `completed: false`. With no study running the bench ignores it
+    /// and sends nothing.
+    ///
+    /// `reason` is for the bench's log and changes nothing it does.
+    StudyStop { reason: StopReason },
     // The old batched `StreamChunkBatch` (decision 25) and
     // `GattTranscriptRecord` (decision 36) were the last two variants here
     // and are both **retired** by decision 39. `StreamChunk` and
@@ -218,4 +227,17 @@ pub enum DevBenchMessage {
     // columns) as `StreamSource::GattTranscript` +
     // `StreamEncoding::GattTranscript`; only its dedicated message class is
     // gone.
+}
+
+/// Why Core is sending [`DevBenchMessage::StudyStop`]. Informational: the
+/// bench stops the same way for every value. A fieldless enum, so each is
+/// one varint byte on the wire; append new values, never reorder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum StopReason {
+    /// The session reached its cap.
+    Cap,
+    /// The operator ended the session early (Core decision 127).
+    Done,
+    /// The run was cancelled.
+    Cancel,
 }

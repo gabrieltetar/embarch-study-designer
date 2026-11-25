@@ -147,7 +147,7 @@ pub use ids::{BleAddress, BleAddressKind, Uuid};
 // one export (`suite/017`). `merged_actions` re-exports it internally so its
 // own signatures read naturally; exporting it twice here is an error.
 pub use merged_actions::{merge_actions, DiscoverySources, MergedAction};
-pub use protocol::DevBenchMessage;
+pub use protocol::{DevBenchMessage, StopReason};
 #[cfg(feature = "study-ui")]
 pub use registry::{
     ActionField, ActionFieldValue, ActionRegistry, RegisteredAction, RegisteredOperation,
@@ -409,6 +409,23 @@ mod tests {
             },
         });
         assert_round_trips(&DevBenchMessage::StudyDone { completed: true });
+        for reason in [StopReason::Cap, StopReason::Done, StopReason::Cancel] {
+            assert_round_trips(&DevBenchMessage::StudyStop { reason });
+        }
+    }
+
+    /// `StudyStop { reason: Done }` (schema v17, EMB-485): tag 9, then the
+    /// reason as one varint (Cap 0, Done 1, Cancel 2).
+    #[test]
+    fn study_stop_matches_dev_bench_firmwares_own_hand_written_encoding() {
+        assert_pinned(&[0x09, 0x01], &DevBenchMessage::StudyStop { reason: StopReason::Done });
+        assert_pinned(&[0x09, 0x00], &DevBenchMessage::StudyStop { reason: StopReason::Cap });
+        assert_pinned(&[0x09, 0x02], &DevBenchMessage::StudyStop { reason: StopReason::Cancel });
+    }
+
+    #[test]
+    fn study_stop_with_an_unknown_reason_is_refused() {
+        assert!(postcard::from_bytes::<DevBenchMessage>(&[0x09, 0x03]).is_err());
     }
 
     #[test]
@@ -1124,7 +1141,7 @@ mod tests {
         // reuses the three slots the retired stream variants held, so which
         // tag means what is now load-bearing in a way it wasn't when the
         // rule was purely append-only -- pin all nine.
-        let cases: [(DevBenchMessage, u8); 4] = [
+        let cases: [(DevBenchMessage, u8); 5] = [
             (
                 DevBenchMessage::Hello { schema_version: 8, host_utc_ms: 0 },
                 0,
@@ -1132,6 +1149,7 @@ mod tests {
             (DevBenchMessage::StreamOpen { id: 0 }, 2),
             (DevBenchMessage::StreamClose { id: 0, dropped: 0 }, 4),
             (DevBenchMessage::StudyDone { completed: true }, 8),
+            (DevBenchMessage::StudyStop { reason: StopReason::Cap }, 9),
         ];
         for (msg, expected) in cases {
             let mut buf = [0u8; 64];

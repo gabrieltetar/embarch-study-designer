@@ -239,9 +239,15 @@
 ///   Everything else in that pass (`RecordFraming::AnalogBlocks`, the
 ///   `analog` and `session` modules, `Study.session`) is host-only and moves
 ///   [`HOST_TYPE_SCHEMA_VERSION`] alone.
+/// - **v17** (EMB-485) — `DevBenchMessage::StudyStop { reason: StopReason }`,
+///   appended at discriminant 9. **Wire**: it is the first message Core can
+///   send after `StudyStart`, and dev-bench has to decode it and answer by
+///   closing its taps and sending `StudyDone`. Without it a session's cap, an
+///   early Done and a cancel stop only Core's side while the bench keeps
+///   sampling. v16 and v17 ship in one reflash, since no bench carried v16.
 ///
 /// [embarch-decision-reversals.md]: https://github.com/gabrieltetar/embarch-doc/blob/main/embarch-decision-reversals.md
-pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 16;
+pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 17;
 
 /// Served by `embarch-core`'s `GET /status` and compared by `embarch-api`
 /// against its own compiled-in copy before submitting a `Study`.
@@ -389,7 +395,10 @@ pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 16;
 ///   study declaring an analog tap and fail on the unknown enum variant with
 ///   a decode error naming no version; the drift detector exists to say which
 ///   side is behind.
-pub const HOST_TYPE_SCHEMA_VERSION: u32 = 23;
+/// - **v24** (EMB-485) — a wire bump (v17: `DevBenchMessage::StudyStop` and
+///   `StopReason`), so this follows by the superset rule. `StopReason` is also
+///   a public type Core and `embarch-api` share.
+pub const HOST_TYPE_SCHEMA_VERSION: u32 = 24;
 
 /// [`HOST_TYPE_SCHEMA_VERSION`]'s triggers are a strict superset of
 /// [`DEV_BENCH_WIRE_SCHEMA_VERSION`]'s (decision 12's
