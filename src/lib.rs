@@ -33,6 +33,7 @@
 #[cfg(feature = "alloc")]
 extern crate alloc;
 
+pub mod analog;
 pub mod crc;
 pub mod decoder;
 /// `.eap` protocol manifests, in the form dev-bench executes (decisions
@@ -85,12 +86,20 @@ pub mod result;
 pub mod sample;
 pub mod bounded;
 pub mod schema_version;
+pub mod session;
 pub mod streams;
 pub mod study;
 #[cfg(feature = "study-ui")]
 pub mod study_builder;
 pub mod vendor;
 
+pub use analog::{
+    decode_block, decode_start_header, verify_blocks, AnalogBlock, AnalogCaptureError, BlockError,
+    BlockReport, EventWord, HeaderError, IndexTracker, StartHeader,
+};
+pub use session::{
+    validate_run_answers, validate_session, RunField, RunFieldValue, SessionError, SessionSpec,
+};
 pub use crc::{
     protocols_crc, protocols_wire_len, steps_crc, streams_crc, ProtocolTooLargeError,
     StepTooLargeError, StreamTapTooLargeError,
@@ -178,7 +187,7 @@ mod tests {
     use super::*;
     use heapless::Vec as HVec;
 
-    fn sample_study() -> Study {
+    pub(crate) fn sample_study() -> Study {
         let mut steps = bounded::StepList::new();
         steps
             .push(Step {
@@ -214,6 +223,7 @@ mod tests {
             decoders: Default::default(),
             record_checks: Default::default(),
             measurements: Default::default(),
+            session: None,
             name: heapless::String::try_from("smoke-test").unwrap(),
             requires: Requirements::any(),
             steps,

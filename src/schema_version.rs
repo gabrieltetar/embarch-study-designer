@@ -231,9 +231,17 @@
 ///   would have spent a version on a state that never existed anywhere but in
 ///   this file, which is the ambiguity this module's own doc comment refuses
 ///   from the opposite direction.
+/// - **v16** (EMB-474, decision 104) — `StreamSource::AnalogInput { sample_hz,
+///   channel }`, appended at discriminant 5. **Wire**, and unavoidably:
+///   `StreamSource` rides `StudyStart` inside every `StreamTap` and is sealed
+///   by `streams_crc`, and dev-bench has to read the rate and the channel to
+///   start the analog input, so its tag 5 arm is a real arm and not a walk-past.
+///   Everything else in that pass (`RecordFraming::AnalogBlocks`, the
+///   `analog` and `session` modules, `Study.session`) is host-only and moves
+///   [`HOST_TYPE_SCHEMA_VERSION`] alone.
 ///
 /// [embarch-decision-reversals.md]: https://github.com/gabrieltetar/embarch-doc/blob/main/embarch-decision-reversals.md
-pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 15;
+pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 16;
 
 /// Served by `embarch-core`'s `GET /status` and compared by `embarch-api`
 /// against its own compiled-in copy before submitting a `Study`.
@@ -371,7 +379,17 @@ pub const DEV_BENCH_WIRE_SCHEMA_VERSION: u32 = 15;
 ///   byte as it did — and the number moves anyway, on v19's reasoning: a v21
 ///   Core would accept a study declaring measurements and compute none of
 ///   them, silently.
-pub const HOST_TYPE_SCHEMA_VERSION: u32 = 22;
+/// - **v23** (EMB-474, decisions 104 to 106) — a wire bump (v16:
+///   `StreamSource::AnalogInput`), so this follows by the superset rule, plus
+///   the host-only half that crosses `embarch-api` -> `embarch-core` as JSON:
+///   `RecordFraming::AnalogBlocks`, the new `RecordCheckError` and
+///   `StreamTapError` variants, and `Study.session` (`SessionSpec`,
+///   `RunField`, `RunFieldValue`), `#[serde(default)]` and never skipped,
+///   because `Study` also travels as postcard. A v22 Core would accept a
+///   study declaring an analog tap and fail on the unknown enum variant with
+///   a decode error naming no version; the drift detector exists to say which
+///   side is behind.
+pub const HOST_TYPE_SCHEMA_VERSION: u32 = 23;
 
 /// [`HOST_TYPE_SCHEMA_VERSION`]'s triggers are a strict superset of
 /// [`DEV_BENCH_WIRE_SCHEMA_VERSION`]'s (decision 12's

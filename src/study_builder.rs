@@ -632,6 +632,7 @@ pub fn build_study(
         decoders: crate::bounded::Bounded::new(),
         record_checks: crate::bounded::Bounded::new(),
         measurements: crate::bounded::Bounded::new(),
+        session: None,
     })
 }
 

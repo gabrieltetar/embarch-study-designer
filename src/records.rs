@@ -43,7 +43,10 @@
 use heapless::Vec;
 use serde::{Deserialize, Serialize};
 
-use crate::limits::{MAX_BAD_RECORDS_REPORTED, MAX_RECORD_MAGIC_LEN};
+use crate::limits::{
+    MAX_ANALOG_CHANNELS, MAX_ANALOG_SAMPLES_PER_BLOCK, MAX_BAD_RECORDS_REPORTED,
+    MAX_RECORD_MAGIC_LEN,
+};
 
 /// One declared tap's record framing.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -75,6 +78,19 @@ pub enum RecordFraming {
     MagicPrefixedCrc32Le {
         magic: Vec<u8, MAX_RECORD_MAGIC_LEN>,
     },
+    /// The capture is the start header and framed blocks of
+    /// [`crate::analog`] (EMB-474, decision 105): a header once, then blocks
+    /// of `samples_per_block` frames of `channels` interleaved `i16` codes,
+    /// each with its index, event word and CRC-32/ISO-HDLC.
+    ///
+    /// **Unlike `MagicPrefixedCrc32Le`, the record length is declared**, so
+    /// a block is cut by length and a damaged one is skipped to the next
+    /// magic. The two numbers are the study's declaration and are
+    /// cross-checked against the header's own channel count at check time. A
+    /// check of this kind is read with
+    /// [`crate::analog::verify_blocks`], which also places missing samples by
+    /// index; [`verify_records`] returns just its [`RecordReport`].
+    AnalogBlocks { channels: u8, samples_per_block: u16 },
 }
 
 /// What checking one capture found.
@@ -113,6 +129,10 @@ pub enum RecordCheckError {
     /// An empty `magic` delimits nothing, so [`verify_records`] would check no
     /// record and report nothing.
     EmptyMagic { index: usize },
+    /// An `AnalogBlocks` layout with no channel, a channel count past
+    /// [`MAX_ANALOG_CHANNELS`], no frames, or more than
+    /// [`MAX_ANALOG_SAMPLES_PER_BLOCK`]. `what` names the field.
+    BadAnalogLayout { index: usize, what: &'static str },
 }
 
 impl core::fmt::Display for RecordCheckError {
@@ -122,6 +142,10 @@ impl core::fmt::Display for RecordCheckError {
                 f,
                 "record_checks[{index}] declares an empty magic, which delimits no record, so \
                  it would check nothing"
+            ),
+            RecordCheckError::BadAnalogLayout { index, what } => write!(
+                f,
+                "record_checks[{index}] declares an analog block layout with an unusable {what}"
             ),
         }
     }
@@ -134,9 +158,20 @@ impl std::error::Error for RecordCheckError {}
 /// [`validate_taps`](crate::streams::validate_taps).
 pub fn validate_record_checks(checks: &[RecordCheck]) -> Result<(), RecordCheckError> {
     for (index, check) in checks.iter().enumerate() {
-        let RecordFraming::MagicPrefixedCrc32Le { magic } = &check.framing;
-        if magic.is_empty() {
-            return Err(RecordCheckError::EmptyMagic { index });
+        match &check.framing {
+            RecordFraming::MagicPrefixedCrc32Le { magic } => {
+                if magic.is_empty() {
+                    return Err(RecordCheckError::EmptyMagic { index });
+                }
+            }
+            RecordFraming::AnalogBlocks { channels, samples_per_block } => {
+                if *channels == 0 || *channels > MAX_ANALOG_CHANNELS {
+                    return Err(RecordCheckError::BadAnalogLayout { index, what: "channels" });
+                }
+                if *samples_per_block == 0 || *samples_per_block > MAX_ANALOG_SAMPLES_PER_BLOCK {
+                    return Err(RecordCheckError::BadAnalogLayout { index, what: "samples_per_block" });
+                }
+            }
         }
     }
     Ok(())
@@ -156,7 +191,12 @@ const MAX_COALESCE: usize = 4;
 /// Pure, so it is testable without a capture on disk, and callable from either
 /// side of the api↔Core hop.
 pub fn verify_records(bytes: &[u8], framing: &RecordFraming) -> RecordReport {
-    let RecordFraming::MagicPrefixedCrc32Le { magic } = framing;
+    let magic = match framing {
+        RecordFraming::MagicPrefixedCrc32Le { magic } => magic,
+        RecordFraming::AnalogBlocks { channels, samples_per_block } => {
+            return crate::analog::verify_blocks(bytes, *channels, *samples_per_block).records;
+        }
+    };
 
     let mut report = RecordReport {
         total: 0,
@@ -410,7 +450,9 @@ mod tests {
         let json = r#"{"stream_id":0,"framing":{"MagicPrefixedCrc32Le":{"magic":[71,87,70,49]}}}"#;
         let check: RecordCheck = serde_json::from_str(json).unwrap();
         assert_eq!(check.stream_id, 0);
-        let RecordFraming::MagicPrefixedCrc32Le { magic } = &check.framing;
+        let RecordFraming::MagicPrefixedCrc32Le { magic } = &check.framing else {
+            panic!("a magic-prefixed framing");
+        };
         assert_eq!(magic.as_slice(), b"GWF1", "71 87 70 49 is 'GWF1'");
     }
 

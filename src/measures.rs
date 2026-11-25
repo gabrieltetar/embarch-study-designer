@@ -397,6 +397,7 @@ mod tests {
             decoders,
             record_checks: Default::default(),
             measurements,
+            session: None,
         }
     }
 

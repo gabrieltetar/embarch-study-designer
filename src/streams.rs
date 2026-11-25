@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::Uuid;
 use crate::limits::{
-    MAX_SIGNAL_NAME_LEN, MAX_STREAMS_PER_STUDY, MAX_STREAM_CHUNK_BYTES, MAX_STREAM_NAME_LEN,
+    MAX_ANALOG_CHANNELS, MAX_ANALOG_SAMPLE_HZ, MAX_SIGNAL_NAME_LEN, MAX_STREAMS_PER_STUDY, MAX_STREAM_CHUNK_BYTES, MAX_STREAM_NAME_LEN,
 };
 use crate::sample::{Sample, Unit};
 
@@ -138,13 +138,27 @@ pub enum StreamSource {
     Signal {
         name: String<MAX_SIGNAL_NAME_LEN>,
     },
+    /// dev-bench's analog input, sampled at `sample_hz` on the board's
+    /// declared `channel` (EMB-474, decision 104). The bytes are the start
+    /// header and framed blocks of [`crate::analog`], so the tap is
+    /// [`StreamEncoding::Raw`] over the whole study and a
+    /// `Study.record_checks` entry with
+    /// [`crate::records::RecordFraming::AnalogBlocks`] declares what they are.
+    ///
+    /// **The channel is an index, not a pin**: which pin it is lives in the
+    /// board's devicetree overlay (the owner's decision 3), so a saved study
+    /// survives a board change. The rate is the study's, set at run time.
+    AnalogInput { sample_hz: u32, channel: u8 },
 }
 
 impl StreamSource {
     /// Whether dev-bench is the node that produces this tap's bytes. Core
     /// opens its own carrier for the one source that isn't
     /// ([`StreamSource::Signal`]), taking neither `hw_lock` nor
-    /// `study_lock` (embarch-core decision 30).
+    /// `study_lock` (embarch-core decision 30). An [`StreamSource::AnalogInput`]
+    /// is dev-bench's own, so it counts as mediated even though its bytes
+    /// reach Core on the dev bench's samples link rather than as
+    /// `StreamChunkBatch` frames.
     pub const fn is_dev_bench_mediated(&self) -> bool {
         !matches!(self, StreamSource::Signal { .. })
     }
@@ -376,6 +390,19 @@ pub enum StreamTapError {
     /// there. Caught here rather than at render time, where it would surface
     /// as a study that ran, captured, and produced no CSV.
     UnknownDecoder { index: usize, decoder: u8, decoder_count: usize },
+    /// An `AnalogInput` rate that is zero or past [`MAX_ANALOG_SAMPLE_HZ`].
+    AnalogRateOutOfRange { index: usize, sample_hz: u32 },
+    /// An `AnalogInput` channel at or past [`MAX_ANALOG_CHANNELS`].
+    AnalogChannelOutOfRange { index: usize, channel: u8 },
+    /// An `AnalogInput` tap whose encoding is not `Raw`: the framed bytes are
+    /// checked and decoded by [`crate::analog`], not rendered as rows.
+    AnalogNotRaw { index: usize },
+    /// An `AnalogInput` tap that is not open for the whole study: the start
+    /// header comes once, at the session's start, and a tap opened later
+    /// would capture blocks with no header to read them against.
+    AnalogNotWholeStudy { index: usize },
+    /// A second `AnalogInput` tap: one samples link, one input per study.
+    SecondAnalogInput { index: usize, first: usize },
 }
 
 impl core::fmt::Display for StreamTapError {
@@ -412,6 +439,31 @@ impl core::fmt::Display for StreamTapError {
                 f,
                 "streams[{index}] decodes with Study.decoders[{decoder}], but this study declares \
                  {decoder_count} decoder(s)"
+            ),
+            StreamTapError::AnalogRateOutOfRange { index, sample_hz } => write!(
+                f,
+                "streams[{index}] declares an analog rate of {sample_hz} Hz; it must be 1 to \
+                 {MAX_ANALOG_SAMPLE_HZ}"
+            ),
+            StreamTapError::AnalogChannelOutOfRange { index, channel } => write!(
+                f,
+                "streams[{index}] declares analog channel {channel}; channels are 0 to {}",
+                MAX_ANALOG_CHANNELS - 1
+            ),
+            StreamTapError::AnalogNotRaw { index } => write!(
+                f,
+                "streams[{index}] is an analog input, whose framed bytes are checked and decoded \
+                 by the crate, so its encoding must be Raw"
+            ),
+            StreamTapError::AnalogNotWholeStudy { index } => write!(
+                f,
+                "streams[{index}] is an analog input open for a step range; the start header is \
+                 sent once at the session's start, so the tap must be open for the whole study"
+            ),
+            StreamTapError::SecondAnalogInput { index, first } => write!(
+                f,
+                "streams[{index}] is a second analog input (streams[{first}] is the first); the \
+                 bench has one samples link"
             ),
         }
     }
@@ -450,6 +502,26 @@ pub fn validate_taps(
             }
             if to >= step_count {
                 return Err(StreamTapError::StepRangeOutOfBounds { index, step_count });
+            }
+        }
+        if let StreamSource::AnalogInput { sample_hz, channel } = tap.source {
+            if sample_hz == 0 || sample_hz > MAX_ANALOG_SAMPLE_HZ {
+                return Err(StreamTapError::AnalogRateOutOfRange { index, sample_hz });
+            }
+            if channel >= MAX_ANALOG_CHANNELS {
+                return Err(StreamTapError::AnalogChannelOutOfRange { index, channel });
+            }
+            if tap.encoding != StreamEncoding::Raw {
+                return Err(StreamTapError::AnalogNotRaw { index });
+            }
+            if tap.scope != StreamScope::WholeStudy {
+                return Err(StreamTapError::AnalogNotWholeStudy { index });
+            }
+            if let Some(first) = taps[..index]
+                .iter()
+                .position(|t| matches!(t.source, StreamSource::AnalogInput { .. }))
+            {
+                return Err(StreamTapError::SecondAnalogInput { index, first });
             }
         }
         if let StreamEncoding::Struct { decoder } = tap.encoding {
@@ -685,6 +757,19 @@ mod tests {
         assert_eq!(validate_taps(&list, 1, 0), Err(StreamTapError::ReservedName { index: 0 }));
         let none: Vec<StreamTap, MAX_STREAMS_PER_STUDY> = Vec::new();
         assert_eq!(dev_bench_log_tap(&none).name.as_str(), RESERVED_DEV_BENCH_STREAM_NAME);
+    }
+
+    /// The bytes dev-bench's C reads for the new source (wire v16): tag 5,
+    /// then `sample_hz` as a varint, then `channel`. Pinned so the firmware
+    /// side has a vector to match.
+    #[test]
+    fn an_analog_input_source_is_pinned_on_the_wire() {
+        let source = StreamSource::AnalogInput { sample_hz: 32_000, channel: 0 };
+        let mut buf = [0u8; 16];
+        let bytes = postcard::to_slice(&source, &mut buf).unwrap();
+        assert_eq!(bytes, &[0x05, 0x80, 0xFA, 0x01, 0x00]);
+        assert_eq!(postcard::from_bytes::<StreamSource>(bytes).unwrap(), source);
+        assert!(source.is_dev_bench_mediated());
     }
 
     #[test]

@@ -294,6 +294,18 @@ pub struct Study {
         crate::measures::MeasurementDecl,
         { crate::limits::MAX_MEASUREMENTS_PER_STUDY },
     >,
+    /// The session around the capture: a Start prompt with run fields, a
+    /// Done prompt, a time cap and an export folder (EMB-474, decision 106,
+    /// [`crate::session`]). A dev-bench `Study` has no prompt step, so this
+    /// is a declaration beside the steps, not one of them.
+    ///
+    /// **Host-only, exactly like `record_checks` and `measurements`**: never
+    /// transmitted to dev-bench and sealed by neither CRC. Appended last,
+    /// **never skipped when `None`**, because `Study` also travels as
+    /// postcard. `#[serde(default)]` so a study authored before it loads as
+    /// one with no session.
+    #[serde(default)]
+    pub session: Option<crate::session::SessionSpec>,
 }
 
 /// The explicit "I don't care which build" value for either

@@ -108,6 +108,39 @@ pub const MAX_RECORD_MAGIC_LEN: usize = 8;
 /// what an offset list is actually for; past that the count is the finding.
 pub const MAX_BAD_RECORDS_REPORTED: usize = 32;
 
+/// How many index gaps a [`crate::analog::BlockReport`] lists. The count and
+/// the missing-sample total are never capped, only this list (the reasoning
+/// of [`MAX_BAD_RECORDS_REPORTED`]).
+pub const MAX_GAPS_REPORTED: usize = 32;
+
+/// Fastest sample rate a study may declare for an analog source, in Hz.
+/// **Assumed**: the fastest backend the owner has in view (an nRF52 SAADC) is
+/// not itself a study-level fact, so a backend that cannot reach a declared
+/// rate still refuses it at run time.
+pub const MAX_ANALOG_SAMPLE_HZ: u32 = 200_000;
+/// Most channels one framed analog tap may declare. v1 ships one (EMB-469,
+/// decision 2); eight leaves the N-channel format room. **Assumed.**
+pub const MAX_ANALOG_CHANNELS: u8 = 8;
+/// Most frames per block a framed tap may declare. The owner fixed 256 for
+/// the first backend (decision 7); the cap only stops a nonsense layout.
+pub const MAX_ANALOG_SAMPLES_PER_BLOCK: u16 = 4096;
+
+/// `SessionSpec`'s Start and Done prompt texts, in bytes. **Assumed.**
+pub const MAX_SESSION_PROMPT_LEN: usize = 192;
+/// Run fields one Start prompt may declare. **Assumed.**
+pub const MAX_RUN_FIELDS: usize = 8;
+/// A run field's name (the key its answer is stored under), in bytes.
+pub const MAX_RUN_FIELD_NAME_LEN: usize = 32;
+/// A run field's label (what the person is asked), in bytes.
+pub const MAX_RUN_FIELD_LABEL_LEN: usize = 64;
+/// A run field's answer, in bytes. **Assumed.**
+pub const MAX_RUN_VALUE_LEN: usize = 128;
+/// `SessionSpec.export_dir`, in bytes. **Assumed.**
+pub const MAX_EXPORT_DIR_LEN: usize = 128;
+/// The longest session a study may declare, in milliseconds: 5 minutes
+/// (EMB-469, decision 10), about 19 MB of raw samples at 32 ksps.
+pub const MAX_SESSION_MS: u32 = 300_000;
+
 /// `Study.measurements` (decision 99, interfaces/hil-declarations.md) —
 /// derived measurements one study declares. Host-only, never on the
 /// dev-bench wire. Four taps' worth of a handful each, placeholder-but-concrete
