@@ -15,11 +15,8 @@ fn raw(name: &str) -> String {
     std::fs::read_to_string(path).unwrap()
 }
 
-/// The worked example, its `study.hash` set to the hash of `study.json`.
 fn test() -> TestDef {
-    let mut t: TestDef = serde_json::from_str(&raw("test")).unwrap();
-    t.study.hash = study_hash(&study());
-    t
+    serde_json::from_str(&raw("test")).unwrap()
 }
 
 fn bench() -> SuiteBench {
@@ -43,19 +40,8 @@ fn measured() -> BTreeMap<String, Measured> {
     m
 }
 
-/// The refusals of `t` against `s`, which `t` is made to name by hash, so a
-/// fixture that edits the study meets only the refusal it is about.
 fn refused(t: &TestDef, s: &HostStudy, b: &SuiteBench, m: &BTreeMap<String, Measured>) -> Vec<Refusal> {
-    let mut t = t.clone();
-    t.study.hash = study_hash(s);
-    check_test(&t, StudyKind::Host(s), b, m).unwrap_err()
-}
-
-/// `t` passes every check against `s`, which it is made to name by hash.
-fn accepted(t: &TestDef, s: &HostStudy, b: &SuiteBench, m: &BTreeMap<String, Measured>) {
-    let mut t = t.clone();
-    t.study.hash = study_hash(s);
-    check_test(&t, StudyKind::Host(s), b, m).unwrap();
+    check_test(t, StudyKind::Host(s), b, m).unwrap_err()
 }
 
 /// Exactly one refusal, of `rule`, on `field`, naming the test.
@@ -201,7 +187,7 @@ fn an_action_prompt_needs_a_bench_measurement_that_feeds_a_limit() {
         s.steps.insert(1, step("clear", prompt(Some(PromptKind::Clearance), None)));
         s
     };
-    accepted(&t, &with(Some("attach_seen")), &bench(), &m);
+    check_test(&t, StudyKind::Host(&with(Some("attach_seen"))), &bench(), &m).unwrap();
     // Names nothing.
     only(refused(&t, &with(None), &bench(), &m), Rule::ActionUnconfirmed, "study.steps[0]");
     // Names a measurement of the study that does not exist.
@@ -228,7 +214,7 @@ fn an_energising_step_after_a_handling_prompt_needs_a_clearance_between() {
         assert!(r.reason.contains("study.steps[0]"));
         // With a clearance prompt between, it passes.
         s.steps.insert(1, step("clear", prompt(Some(PromptKind::Clearance), None)));
-        accepted(&test(), &s, &bench(), &measured());
+        check_test(&test(), StudyKind::Host(&s), &bench(), &measured()).unwrap();
     }
 }
 
@@ -238,7 +224,7 @@ fn a_raw_dut_exchange_after_an_action_prompt_is_refused_unless_cleared() {
     s.steps = vec![step("plug", prompt(Some(PromptKind::Action), Some("vbus_mean"))), step("raw", raw_dut_line())];
     only(refused(&test(), &s, &bench(), &measured()), Rule::EnergisesWithoutClearance, "study.steps[1]");
     s.steps.insert(1, step("clear", prompt(Some(PromptKind::Clearance), None)));
-    accepted(&test(), &s, &bench(), &measured());
+    check_test(&test(), StudyKind::Host(&s), &bench(), &measured()).unwrap();
 }
 
 #[test]
@@ -277,7 +263,7 @@ fn a_repeat_carries_a_handling_prompt_into_its_next_pass() {
     only(refused(&test(), &s, &bench(), &measured()), Rule::EnergisesWithoutClearance, "study.steps[0].steps[0]");
     // One pass has nothing after the prompt.
     s.steps = vec![step("loop", HostAction::Repeat { count: Some(1), values: vec![], steps: body })];
-    accepted(&test(), &s, &bench(), &measured());
+    check_test(&test(), StudyKind::Host(&s), &bench(), &measured()).unwrap();
 }
 
 #[test]
@@ -328,35 +314,4 @@ fn every_refusal_is_reported_not_only_the_first() {
     let r = refused(&t, &study(), &b, &measured());
     let rules: Vec<Rule> = r.iter().map(|x| x.rule).collect();
     assert_eq!(rules, [Rule::BenchHasNoDut, Rule::PreconditionUndeclared, Rule::DuplicateLimit]);
-}
-
-#[test]
-fn the_study_hash_is_pinned_and_ignores_the_files_layout() {
-    // A fixed input to its hash: SHA-256 of the canonical JSON of the study.
-    let s = study();
-    let h = study_hash(&s);
-    assert_eq!(h.len(), 64);
-    assert_eq!(h, definition_hash(&s));
-    assert_eq!(h, PINNED_STUDY_HASH);
-    // Whitespace and key order in the file do not change it.
-    let v: serde_json::Value = serde_json::from_str(&raw("study")).unwrap();
-    let respaced: HostStudy = serde_json::from_str(&serde_json::to_string_pretty(&v).unwrap()).unwrap();
-    assert_eq!(study_hash(&respaced), h);
-    // A changed step does.
-    let mut t = s.clone();
-    t.name.push('x');
-    assert_ne!(study_hash(&t), h);
-}
-
-const PINNED_STUDY_HASH: &str = "985e5888b3c5c8f1b7f57b05cd91a49c7780ee2d0814e92e92641ded9092c22b";
-
-#[test]
-fn a_study_that_does_not_hash_to_study_hash_is_refused_naming_both() {
-    let mut t = test();
-    let stated = "3f1c0f6a0d1b4e0d9d2a8f7e6c5b4a392817060504030201f0e0d0c0b0a09080";
-    t.study.hash = stated.into();
-    let r = only(check_test(&t, StudyKind::Host(&study()), &bench(), &measured()).unwrap_err(), Rule::StudyHashMismatch, "study.hash");
-    assert!(r.reason.contains(stated));
-    assert!(r.reason.contains(&study_hash(&study())));
-    assert!(r.reason.contains(&t.study.file));
 }

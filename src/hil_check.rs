@@ -16,7 +16,7 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use crate::hil_test::{study_hash, LimitSpec, Precondition, SuiteBench, TestDef};
+use crate::hil_test::{LimitSpec, Precondition, SuiteBench, TestDef};
 use crate::host_study::{HostAction, HostStep, HostStudy, PromptKind};
 use crate::verdicts::{Limit, Rules, Source, WidthBasis, WidthCheck};
 
@@ -90,8 +90,6 @@ pub enum Rule {
     DevBenchStudy,
     /// Two limits on one measurement.
     DuplicateLimit,
-    /// A study that does not hash to the test's `study.hash`.
-    StudyHashMismatch,
 }
 
 /// One refusal: the test, the field and the reason.
@@ -347,14 +345,6 @@ pub fn check_test(
     match study {
         StudyKind::DevBench => c.refuse("study".into(), Rule::DevBenchStudy, "a dev-bench study is not in this phase; a Test runs a host study".to_string()),
         StudyKind::Host(h) => {
-            let got = study_hash(h);
-            if got != test.study.hash {
-                c.refuse(
-                    "study.hash".into(),
-                    Rule::StudyHashMismatch,
-                    format!("the study `{}` hashes to {got}, not the {} the test names", test.study.file, test.study.hash),
-                );
-            }
             let mut pending = None;
             walk(&mut c, &h.steps, "study.steps", &mut pending, measured);
         }

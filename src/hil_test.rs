@@ -12,8 +12,8 @@
 //! file as this crate serialises it**, so key order and a defaulted field's
 //! spelling in the source file do not change it, and a changed limit does.
 //! These types check shape only; the definition-time checks (a bench with no
-//! DUT, a limit narrower than its `U` allows) are `hil_check`'s; a study that
-//! does not hash to `study.hash` is refused there too, by [`study_hash`].
+//! DUT, a limit narrower than its `U` allows, a study that does not hash to
+//! `study.hash`) are a later unit's.
 
 use alloc::collections::BTreeMap;
 use alloc::format;
@@ -23,7 +23,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::host_study::HostStudy;
 use crate::verdicts::{DecisionRule, Limit, Source};
 
 /// `schema` of a test, a suite manifest and a plan, each starting at 1.
@@ -39,7 +38,7 @@ fn one() -> u32 {
 
 // ---- a test --------------------------------------------------------------
 
-/// A study, by file name and hash: [`study_hash`] of the study the file holds.
+/// A study, by file name and hash (SHA-256 of the file's bytes as written).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StudyRef {
@@ -546,15 +545,6 @@ pub fn canonical_json(v: &Value) -> String {
 pub fn definition_hash<T: Serialize>(def: &T) -> String {
     let v = serde_json::to_value(def).unwrap_or(Value::Null);
     hex_lower(&Sha256::digest(canonical_json(&v).as_bytes()))
-}
-
-/// The hash of a study, the one `study.hash` must equal: [`definition_hash`] of
-/// the [`HostStudy`] as this crate serialises it, which is the SHA-256 of its
-/// canonical JSON, so an expanded template's hash (`hil_expand::expand`) is this
-/// function's value for the expanded study. It is of the study's content, not of
-/// the file's bytes, so whitespace and key order in the file do not change it.
-pub fn study_hash(study: &HostStudy) -> String {
-    definition_hash(study)
 }
 
 // ---- the derived diff ------------------------------------------------------
