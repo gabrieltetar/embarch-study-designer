@@ -76,6 +76,8 @@ pub mod hil_check;
 #[cfg(feature = "hil-test")]
 pub mod hil_expand;
 #[cfg(feature = "hil-test")]
+pub mod hil_judge;
+#[cfg(feature = "hil-test")]
 pub mod hil_test;
 #[cfg(feature = "reducers")]
 pub mod reducers;

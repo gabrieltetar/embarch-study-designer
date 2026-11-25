@@ -1,0 +1,527 @@
+{
+ "runs": [
+  {
+   "name": "lost port on a bench board",
+   "decision_rule": {
+    "kind": "simple_acceptance",
+    "w_multiple": 0.0
+   },
+   "limits": [],
+   "steps": [
+    {
+     "step": "s",
+     "target": "bench",
+     "outcome": {
+      "outcome": "port_lost"
+     }
+    }
+   ],
+   "measurements": [],
+   "expect": {
+    "verdict": "error",
+    "reason": "port_lost",
+    "qualifiers": []
+   }
+  },
+  {
+   "name": "until_not_seen on a DUT signal",
+   "decision_rule": {
+    "kind": "simple_acceptance",
+    "w_multiple": 0.0
+   },
+   "limits": [],
+   "steps": [
+    {
+     "step": "s",
+     "target": "dut",
+     "outcome": {
+      "outcome": "until_not_seen"
+     }
+    }
+   ],
+   "measurements": [],
+   "expect": {
+    "verdict": "fail",
+    "reason": "step_timed_out",
+    "qualifiers": []
+   }
+  },
+  {
+   "name": "value inside the guard band",
+   "decision_rule": {
+    "kind": "guard_band",
+    "w_multiple": 1.0
+   },
+   "limits": [
+    {
+     "measurement": "v",
+     "unit": "V",
+     "lower": 1.0,
+     "upper": 5.0
+    }
+   ],
+   "steps": [
+    {
+     "step": "s",
+     "target": "dut",
+     "outcome": {
+      "outcome": "pass"
+     }
+    }
+   ],
+   "measurements": [
+    {
+     "measurement": "v",
+     "value": {
+      "kind": "number",
+      "value": 1.2
+     },
+     "u": 0.5,
+     "evidence": {
+      "incomplete": [],
+      "calibration_expired": false
+     },
+     "origin": {
+      "origin": "instrument"
+     },
+     "declared_by": "person",
+     "calibration_undeclared": false
+    }
+   ],
+   "expect": {
+    "verdict": "inconclusive",
+    "reason": "guard_band",
+    "qualifiers": []
+   }
+  },
+  {
+   "name": "parse_failed measurement",
+   "decision_rule": {
+    "kind": "simple_acceptance",
+    "w_multiple": 0.0
+   },
+   "limits": [
+    {
+     "measurement": "v",
+     "unit": "V",
+     "lower": 1.0,
+     "upper": 5.0
+    }
+   ],
+   "steps": [
+    {
+     "step": "s",
+     "target": "dut",
+     "outcome": {
+      "outcome": "pass"
+     }
+    }
+   ],
+   "measurements": [
+    {
+     "measurement": "v",
+     "value": {
+      "kind": "number",
+      "value": 0.0
+     },
+     "u": 0.0,
+     "evidence": {
+      "incomplete": [
+       "parse_failed"
+      ],
+      "calibration_expired": false
+     },
+     "origin": {
+      "origin": "instrument"
+     },
+     "declared_by": "person",
+     "calibration_undeclared": false
+    }
+   ],
+   "expect": {
+    "verdict": "inconclusive",
+    "reason": "parse_failed",
+    "qualifiers": []
+   }
+  },
+  {
+   "name": "value inside limits passes",
+   "decision_rule": {
+    "kind": "simple_acceptance",
+    "w_multiple": 0.0
+   },
+   "limits": [
+    {
+     "measurement": "v",
+     "unit": "V",
+     "lower": 1.0,
+     "upper": 5.0
+    }
+   ],
+   "steps": [
+    {
+     "step": "s",
+     "target": "dut",
+     "outcome": {
+      "outcome": "pass"
+     }
+    }
+   ],
+   "measurements": [
+    {
+     "measurement": "v",
+     "value": {
+      "kind": "number",
+      "value": 3.0
+     },
+     "u": 0.0,
+     "evidence": {
+      "incomplete": [],
+      "calibration_expired": false
+     },
+     "origin": {
+      "origin": "instrument"
+     },
+     "declared_by": "person",
+     "calibration_undeclared": false
+    }
+   ],
+   "expect": {
+    "verdict": "pass",
+    "reason": null,
+    "qualifiers": []
+   }
+  },
+  {
+   "name": "value beyond limit fails",
+   "decision_rule": {
+    "kind": "simple_acceptance",
+    "w_multiple": 0.0
+   },
+   "limits": [
+    {
+     "measurement": "v",
+     "unit": "V",
+     "lower": null,
+     "upper": 5.0
+    }
+   ],
+   "steps": [
+    {
+     "step": "s",
+     "target": "dut",
+     "outcome": {
+      "outcome": "pass"
+     }
+    }
+   ],
+   "measurements": [
+    {
+     "measurement": "v",
+     "value": {
+      "kind": "number",
+      "value": 6.0
+     },
+     "u": 0.0,
+     "evidence": {
+      "incomplete": [],
+      "calibration_expired": false
+     },
+     "origin": {
+      "origin": "instrument"
+     },
+     "declared_by": "person",
+     "calibration_undeclared": false
+    }
+   ],
+   "expect": {
+    "verdict": "fail",
+    "reason": "limit",
+    "qualifiers": []
+   }
+  },
+  {
+   "name": "observation choice matches expect",
+   "decision_rule": {
+    "kind": "simple_acceptance",
+    "w_multiple": 0.0
+   },
+   "limits": [
+    {
+     "measurement": "o",
+     "unit": "V",
+     "lower": null,
+     "upper": null,
+     "expect": "yes"
+    }
+   ],
+   "steps": [
+    {
+     "step": "s",
+     "target": "dut",
+     "outcome": {
+      "outcome": "pass"
+     }
+    }
+   ],
+   "measurements": [
+    {
+     "measurement": "o",
+     "value": {
+      "kind": "choice",
+      "value": "yes"
+     },
+     "u": 0.0,
+     "evidence": {
+      "incomplete": [],
+      "calibration_expired": false
+     },
+     "origin": {
+      "origin": "person_observation"
+     },
+     "declared_by": "person",
+     "calibration_undeclared": false
+    }
+   ],
+   "expect": {
+    "verdict": "pass",
+    "reason": null,
+    "qualifiers": [
+     "rests_on_person_observation"
+    ]
+   }
+  },
+  {
+   "name": "observation choice differs from expect",
+   "decision_rule": {
+    "kind": "simple_acceptance",
+    "w_multiple": 0.0
+   },
+   "limits": [
+    {
+     "measurement": "o",
+     "unit": "V",
+     "lower": null,
+     "upper": null,
+     "expect": "yes"
+    }
+   ],
+   "steps": [
+    {
+     "step": "s",
+     "target": "dut",
+     "outcome": {
+      "outcome": "pass"
+     }
+    }
+   ],
+   "measurements": [
+    {
+     "measurement": "o",
+     "value": {
+      "kind": "choice",
+      "value": "no"
+     },
+     "u": 0.0,
+     "evidence": {
+      "incomplete": [],
+      "calibration_expired": false
+     },
+     "origin": {
+      "origin": "person_observation"
+     },
+     "declared_by": "person",
+     "calibration_undeclared": false
+    }
+   ],
+   "expect": {
+    "verdict": "fail",
+    "reason": "limit",
+    "qualifiers": [
+     "rests_on_person_observation"
+    ]
+   }
+  },
+  {
+   "name": "bench value on an unreleased image",
+   "decision_rule": {
+    "kind": "simple_acceptance",
+    "w_multiple": 0.0
+   },
+   "limits": [
+    {
+     "measurement": "v",
+     "unit": "V",
+     "lower": 1.0,
+     "upper": 5.0
+    }
+   ],
+   "steps": [
+    {
+     "step": "s",
+     "target": "bench",
+     "outcome": {
+      "outcome": "pass"
+     }
+    }
+   ],
+   "measurements": [
+    {
+     "measurement": "v",
+     "value": {
+      "kind": "number",
+      "value": 3.0
+     },
+     "u": 0.0,
+     "evidence": {
+      "incomplete": [],
+      "calibration_expired": false
+     },
+     "origin": {
+      "origin": "bench_board",
+      "firmware": "unreleased"
+     },
+     "declared_by": "person",
+     "calibration_undeclared": false
+    }
+   ],
+   "expect": {
+    "verdict": "pass",
+    "reason": null,
+    "qualifiers": [
+     "bench_firmware_unreleased"
+    ]
+   }
+  },
+  {
+   "name": "every provenance qualifier",
+   "decision_rule": {
+    "kind": "simple_acceptance",
+    "w_multiple": 0.0
+   },
+   "limits": [
+    {
+     "measurement": "v",
+     "unit": "V",
+     "lower": 1.0,
+     "upper": 5.0
+    },
+    {
+     "measurement": "w",
+     "unit": "V",
+     "lower": 1.0,
+     "upper": 5.0
+    }
+   ],
+   "steps": [],
+   "measurements": [
+    {
+     "measurement": "v",
+     "value": {
+      "kind": "number",
+      "value": 3.0
+     },
+     "u": 0.0,
+     "evidence": {
+      "incomplete": [],
+      "calibration_expired": false
+     },
+     "origin": {
+      "origin": "dut_report"
+     },
+     "declared_by": "agent",
+     "calibration_undeclared": true
+    },
+    {
+     "measurement": "w",
+     "value": {
+      "kind": "number",
+      "value": 3.0
+     },
+     "u": 0.0,
+     "evidence": {
+      "incomplete": [],
+      "calibration_expired": false
+     },
+     "origin": {
+      "origin": "bench_board",
+      "firmware": "flashed_by_agent"
+     },
+     "declared_by": "study",
+     "calibration_undeclared": false
+    }
+   ],
+   "expect": {
+    "verdict": "pass",
+    "reason": null,
+    "qualifiers": [
+     "bench_firmware_flashed_by_agent",
+     "calibration_undeclared",
+     "declared_by_agent",
+     "declared_by_study",
+     "rests_on_dut_report"
+    ]
+   }
+  },
+  {
+   "name": "missing measurement is a record gap",
+   "decision_rule": {
+    "kind": "simple_acceptance",
+    "w_multiple": 0.0
+   },
+   "limits": [
+    {
+     "measurement": "v",
+     "unit": "V",
+     "lower": 1.0,
+     "upper": 5.0
+    }
+   ],
+   "steps": [
+    {
+     "step": "s",
+     "target": "dut",
+     "outcome": {
+      "outcome": "pass"
+     }
+    }
+   ],
+   "measurements": [],
+   "expect": {
+    "verdict": "inconclusive",
+    "reason": "record_gap",
+    "qualifiers": []
+   }
+  },
+  {
+   "name": "a failed step outranks a missing measurement",
+   "decision_rule": {
+    "kind": "simple_acceptance",
+    "w_multiple": 0.0
+   },
+   "limits": [
+    {
+     "measurement": "v",
+     "unit": "V",
+     "lower": 1.0,
+     "upper": 5.0
+    }
+   ],
+   "steps": [
+    {
+     "step": "s",
+     "target": "dut",
+     "outcome": {
+      "outcome": "timed_out"
+     }
+    }
+   ],
+   "measurements": [],
+   "expect": {
+    "verdict": "fail",
+    "reason": "step_timed_out",
+    "qualifiers": []
+   }
+  }
+ ]
+}
