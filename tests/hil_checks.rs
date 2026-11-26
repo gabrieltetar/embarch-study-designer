@@ -331,6 +331,19 @@ fn every_refusal_is_reported_not_only_the_first() {
 }
 
 #[test]
+fn a_study_that_does_not_hash_to_study_hash_is_refused() {
+    let t = test();
+    accepted(&t, &study(), &bench(), &measured());
+    let mut other = study();
+    other.name.push('x');
+    let r = check_test(&t, StudyKind::Host(&other), &bench(), &measured()).unwrap_err();
+    let r = only(r, Rule::StudyHashMismatch, "study.hash");
+    assert!(r.reason.contains(&t.study.file), "{r:?}");
+    assert!(r.reason.contains(&t.study.hash), "{r:?}");
+    assert!(r.reason.contains(&study_hash(&other)), "{r:?}");
+}
+
+#[test]
 fn the_study_hash_is_pinned_and_ignores_the_files_layout() {
     // A fixed input to its hash: SHA-256 of the canonical JSON of the study.
     let s = study();
